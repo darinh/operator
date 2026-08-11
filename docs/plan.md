@@ -185,6 +185,55 @@ calibration stored in L2. So the ordering was wrong. Corrected:
 5. **Learning and calibration** — only once trustworthy labels exist.
 6. **Delegated management** — last, on probation, with rollback.
 
+## 3b. What verification changed (R1b, gating — now complete)
+
+Full results in `docs/verification-r1b.md`. The gating round existed because a
+research agent returns hallucinated citations in the same register as real ones,
+and this project's history is instruments believed without being checked.
+
+**Most claims held.** arXiv:2602.11988 exists with the stated authors and dates,
+and its abstract confirms >20% cost increase with no general success improvement
+— so the word budget stays. `wan9yu/cli-agent-runner` is real. The MCP revision
+is real.
+
+**Three corrections.** The GitHub "2500 repositories" post is about Copilot
+*custom agent persona* files, a different feature with a similar filename, and
+must not be cited as AGENTS.md evidence. `rationale.md`'s specific figures
+(1.6×, 2.45–3.92 steps, 641 words) are from the paper body and could not be
+extracted; cite them as from-the-paper, not as independently established. And
+MCP's 2026-07-28 revision removed session ids and the initialize handshake,
+making it *more* stateless — so it is not a candidate coordination bus.
+
+**One decision reversed.** Rev 5 demoted harness-native session resume to "an
+optional adapter capability". Verification found documented, first-class resume
+in **four of six** harnesses — Claude Code, Copilot CLI, Gemini CLI, Codex CLI —
+which is a convergent standard, not an edge case. The demotion was wrong.
+
+But the argument *against* resume survives, and it is the useful half: restoring
+a full conversation that ended **because it was full** puts the next session
+straight back at the wall. So neither mechanism wins outright, and the ending
+reason — which the supervisor already classifies — selects:
+
+| Ending | Mechanism |
+|---|---|
+| crashed or killed, context remaining | harness-native resume — complete, cheap, nothing to compose or trust |
+| context exhausted | composed briefing from the ledger, which must be *smaller* than what filled the last one |
+| finished | neither; new work, new session |
+
+This is better than either alone, and it came out of checking a citation rather
+than out of the design.
+
+**Available immediately:** Copilot CLI supports `--resume` / `--continue` today
+and 1.x does not use it — it relaunches fresh with a preamble every time. That
+is a concrete improvement for the dominant crash case, independent of everything
+else here.
+
+**Build vs adopt stands, with a caveat.** `cli-agent-runner` is POSIX-only and
+Windows is the primary machine, so adopting it wholesale is unavailable. That is
+a reason not to adopt, not a reason not to read it: its catalogue of 13 named
+defenses is a design input, and this kernel should compare its own coverage
+against that list rather than assume parity.
+
 ## 4. Citizenship, corrected
 
 The invariants stand: attributable, recoverable, legible, proven, reversible,
