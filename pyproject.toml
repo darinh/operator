@@ -1,0 +1,22 @@
+[project]
+name = "operator-kernel"
+dynamic = ["version"]
+description = "Supervision kernel for fleets of autonomous coding-agent sessions"
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["operator_kernel"]
+
+[tool.setuptools.dynamic]
+version = { attr = "operator_kernel.copilot_tools_version.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["operator_kernel", "tests"]
