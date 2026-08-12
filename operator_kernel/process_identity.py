@@ -1,33 +1,11 @@
-#!/usr/bin/env python3
-"""Is the agent holding this claim still there? -- and the honest "I cannot tell".
+"""Process identity, because a pid is not one.
 
-Four signals, cheapest first, exactly as the spec's FR-3 orders them:
-
-1. **Boot id differs** -> DEAD. The unplanned-reboot case, and it costs no
-   timeout at all: nothing from the previous boot is running, so there is
-   nothing to wait for.
-2. **Mux session absent** -> DEAD. Direct and exact, because every agent runs
-   inside one.
-3. **Pid absent, or present with a different start time** -> DEAD. The
-   start-time comparison is what makes this safe after pid reuse; without it
-   a recycled pid reads as its dead predecessor still running.
-4. **Heartbeat older than ``stale_after``, with 1-3 having concluded nothing**
-   -> STALE. Reported, never acted on. This combination means something
-   unusual -- a hung process, a clock that moved -- and guessing is how two
-   agents end up in one worktree.
-
-The first three are conclusive; the fourth deliberately is not. So every probe
-here is **tri-state**: ``True``, ``False``, or ``None`` for *could not tell*.
-A probe that answers "absent" when it means "I could not look" is the whole
-failure mode this module exists to avoid -- it does not lose a session, it
-hands a live agent's tree to somebody else while the first is still writing
-to it.
-
-Nothing here mutates anything. :func:`assess` reads; ``operator work reclaim``
-decides, and only for :data:`DEAD`.
+Extracted from a 21-definition liveness module; the kernel uses six. A
+recycled pid reads as a live process, so identity is pid plus a start
+token, and on Linux the token is boot-relative -- hence `same_boot`, which
+answers "cannot tell" across kinds rather than guessing.
 """
 from __future__ import annotations
-
 import ctypes
 import os
 import platform
@@ -36,27 +14,9 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-
-# An editable install freezes the module list into its import finder, so a
-# module added to this directory after the last `pip install -e .` is invisible
-# to the installed entry points even though the file sits right here.
-_HERE = str(Path(__file__).resolve().parent)
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-
 from operator_mux import Mux                                   # noqa: E402
-from work_claims import parse_ts                               # noqa: E402
+from claims import parse_ts                               # noqa: E402
 
-#: The three verdicts. `STALE` is not a weaker `DEAD`: it is the answer that
-#: says the cascade found nothing conclusive and the heartbeat is old, which
-#: is a thing to report to a person, not a licence to reassign.
-LIVE = "live"
-DEAD = "dead"
-STALE = "stale"
-
-#: Spec D4. Configurable, and never the sole signal -- a claim is `STALE` on
-#: heartbeat age alone and `DEAD` only on one of the three conclusive probes.
-DEFAULT_STALE_AFTER = 30 * 60
 
 #: How far apart two *computed* boot instants may be and still be one boot.
 #:
@@ -72,22 +32,28 @@ DEFAULT_STALE_AFTER = 30 * 60
 #: first is a slower answer, the second is two agents in one worktree.
 BOOT_INSTANT_TOLERANCE = 120
 
+
 _LINUX_BOOT_ID = "/proc/sys/kernel/random/boot_id"
+
 
 #: 100-nanosecond intervals between 1601-01-01 (the Windows epoch) and
 #: 1970-01-01 (the Unix one).
 _FILETIME_EPOCH_DELTA = 116_444_736_000_000_000
 
+
 _STILL_ACTIVE = 259
-_ERROR_INVALID_PARAMETER = 87
-_ERROR_ACCESS_DENIED = 5
+
+
 #: The weakest access right that answers "does this pid exist, and when did it
 #: start", so the probe succeeds for processes we may not open fully.
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+
 #: The widest pid either platform can represent: a ``DWORD`` on Windows, an
 #: ``int32`` ``pid_t`` on POSIX. Anything larger is not a big pid, it is a
 #: number that ``ctypes`` will quietly truncate into somebody else's pid.
 _PID_MAX = 0xFFFFFFFF if platform.system() == "Windows" else 0x7FFFFFFF
+
 
 IS_WINDOWS = platform.system() == "Windows"
 
@@ -234,42 +200,6 @@ def _win_open(pid: int):
     return kernel32, handle
 
 
-def _win_process_present(pid: int, *, opener=None, last_error=None) -> "bool | None":
-    # The two seams exist so the failure branches below can be tested: an
-    # access-denied process cannot be conjured on demand, and a probe branch
-    # nothing can reach is a branch nothing checks.
-    opener = opener or _win_open
-    last_error = last_error or ctypes.get_last_error
-    try:
-        kernel32, handle = opener(pid)
-    except Exception:
-        return None
-    if not handle:
-        err = last_error()
-        if err == _ERROR_INVALID_PARAMETER:
-            return False
-        if err == _ERROR_ACCESS_DENIED:
-            # Refused, therefore it is there. "We were not allowed to look" and
-            # "there is nothing there" are opposite answers and this is the one
-            # that must not be rounded down to absent.
-            return True
-        return None
-    try:
-        kernel32.GetExitCodeProcess.restype = ctypes.c_int
-        kernel32.GetExitCodeProcess.argtypes = [ctypes.c_void_p,
-                                                ctypes.POINTER(ctypes.c_ulong)]
-        code = ctypes.c_ulong(0)
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
-            return None
-        # A pid can stay openable after the process exits while somebody holds
-        # a handle to it. The exit code is what separates the two.
-        return code.value == _STILL_ACTIVE
-    except Exception:
-        return None
-    finally:
-        kernel32.CloseHandle(handle)
-
-
 def _win_start_token(pid: int) -> "str | None":
     try:
         kernel32, handle = _win_open(pid)
@@ -311,20 +241,6 @@ def _win_start_token(pid: int) -> "str | None":
         return None
     finally:
         kernel32.CloseHandle(handle)
-
-
-def _posix_process_present(pid: int) -> "bool | None":
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # Someone else's process, but a process. Same reasoning as the Windows
-        # access-denied branch: refused is not absent.
-        return True
-    except (OSError, OverflowError):
-        return None
-    return True
 
 
 def _linux_start_token(pid: int) -> "str | None":
@@ -431,16 +347,6 @@ def _coerce_pid(pid) -> "int | None":
     return value
 
 
-def process_present(pid: "int | None") -> "bool | None":
-    """Is there a process with this pid? ``None`` when it cannot be established."""
-    pid = _coerce_pid(pid)
-    if pid is None:
-        return None
-    if IS_WINDOWS:
-        return _win_process_present(pid)
-    return _posix_process_present(pid)
-
-
 #: The kinds of start token `process_start_token` can return, as the tag
 #: before the first ``:``. Named here rather than at the readers, so a fourth
 #: producer cannot be added without the classifiers above and below seeing it.
@@ -451,6 +357,7 @@ def process_present(pid: "int | None") -> "bool | None":
 #: the process that wrote them -- they simply cannot be compared with a
 #: ``psc`` one, which is what `same_start_token` is for.
 START_TOKEN_KINDS = ("win", "linux", "ps", "psc")
+
 
 #: Kinds whose value is a machine number, so a damaged one is recognisable.
 #: ``ps``/``psc`` carry a date string and cannot be checked this way.
@@ -546,163 +453,3 @@ def process_start_token(pid: "int | None") -> "str | None":
     if token:
         return token
     return _ps_start_token(pid)
-
-
-# ── the cascade ─────────────────────────────────────────────────
-class SystemProbes:
-    """The real probes, gathered so a test can hand over fakes instead.
-
-    Injected rather than monkeypatched because the cascade's logic is the part
-    worth testing exhaustively and it must be testable without a reboot, a
-    multiplexer or a doomed child process. The probes themselves are covered
-    separately, against this machine.
-    """
-
-    def __init__(self, mux=None):
-        self._mux = mux
-
-    @property
-    def mux(self) -> Mux:
-        if self._mux is None:
-            self._mux = Mux()
-        return self._mux
-
-    def boot_identity(self) -> "str | None":
-        return boot_identity()
-
-    def session_present(self, session: str) -> "bool | None":
-        return self.mux.session_present(session)
-
-    def process_present(self, pid) -> "bool | None":
-        return process_present(pid)
-
-    def process_start_token(self, pid) -> "str | None":
-        return process_start_token(pid)
-
-
-class Liveness:
-    """A verdict, the reason for it, and every signal that produced it.
-
-    The signals are carried because the verdict alone is not reportable: a
-    person asked to confirm that an agent is gone needs to see *which* probe
-    said so, and a STALE claim is only actionable if it says what could not be
-    established.
-    """
-
-    __slots__ = ("verdict", "reason", "signals")
-
-    def __init__(self, verdict: str, reason: str, signals: dict):
-        self.verdict = verdict
-        self.reason = reason
-        self.signals = signals
-
-    @property
-    def reclaimable(self) -> bool:
-        """Only DEAD. A STALE claim is reported to a person, never taken."""
-        return self.verdict == DEAD
-
-    def __repr__(self) -> str:  # pragma: no cover - diagnostics only
-        return f"Liveness({self.verdict!r}, {self.reason!r}, {self.signals!r})"
-
-    def __eq__(self, other) -> bool:
-        if not isinstance(other, Liveness):
-            return NotImplemented
-        return (self.verdict == other.verdict and self.reason == other.reason
-                and self.signals == other.signals)
-
-
-def heartbeat_age(claim, now=None) -> "float | None":
-    """Seconds since the claim's heartbeat, or ``None`` if it will not parse."""
-    stamp = parse_ts(getattr(claim, "heartbeat_at", None))
-    if stamp is None:
-        return None
-    moment = now or datetime.now(tz=timezone.utc)
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=timezone.utc)
-    return (moment - stamp).total_seconds()
-
-
-def assess(claim, *, probes=None, now=None,
-           stale_after: float = DEFAULT_STALE_AFTER) -> Liveness:
-    """Judge one claim's owner: :data:`LIVE`, :data:`DEAD` or :data:`STALE`.
-
-    Read-only, always. Returning DEAD is a statement about the world, not an
-    instruction -- the caller still has to preserve the dead owner's
-    uncommitted work before anything is reassigned (FR-4).
-    """
-    probes = probes or SystemProbes()
-    signals: dict = {"boot": None, "mux": None, "pid": None, "start": None,
-                     "heartbeat_age": None}
-
-    same = same_boot(getattr(claim, "boot_id", None), probes.boot_identity())
-    signals["boot"] = same
-    if same is False:
-        return Liveness(DEAD, "boot id differs: the machine has rebooted since "
-                              "this claim was taken", signals)
-
-    # The pid probe is asked before the mux probe because it is cheaper by
-    # three orders of magnitude -- a syscall against a subprocess spawn -- and
-    # cost is the only thing that separates them here. Both can only conclude
-    # DEAD, and neither can conclude LIVE, so asking either one first cannot
-    # change a verdict: a live mux session does not stop the pid question
-    # being asked, and vice versa. What it changes is what a dead agent costs
-    # to establish, which is paid on every sweep of every claim.
-    pid = getattr(claim, "pid", None)
-    if pid:
-        running = probes.process_present(pid)
-        signals["pid"] = running
-        if running is False:
-            return Liveness(DEAD, f"pid {pid} is not running", signals)
-        if running:
-            recorded = getattr(claim, "pid_start", None)
-            token = probes.process_start_token(pid)
-            signals["start"] = token
-            # `same_start_token` and not `!=`, because two tokens of different
-            # kinds are not a different process -- they are the same process
-            # rendered by two versions of the probe, and only `False` here is
-            # evidence. DEAD is reclaimable, so reading "cannot compare" as
-            # "gone" hands a live agent's worktree to somebody else.
-            if same_start_token(recorded, token) is False:
-                return Liveness(
-                    DEAD, f"pid {pid} was reused: it started at {token}, the "
-                          f"claim recorded {recorded}", signals)
-
-    session = getattr(claim, "mux_session", None)
-    if session:
-        present = probes.session_present(session)
-        signals["mux"] = present
-        if present is False:
-            return Liveness(DEAD, f"mux session {session!r} is gone", signals)
-
-    age = heartbeat_age(claim, now=now)
-    signals["heartbeat_age"] = age
-    if age is None:
-        # Unreadable is not fresh and not ancient. It is exactly the "something
-        # unusual, report it" case the fourth step exists for.
-        return Liveness(STALE, "heartbeat cannot be read", signals)
-    if age > stale_after:
-        return Liveness(
-            STALE, f"heartbeat is {int(age)}s old (limit {int(stale_after)}s) "
-                   f"and nothing else could establish the owner is gone",
-            signals)
-    return Liveness(LIVE, "owner appears to be running", signals)
-
-
-__all__ = [
-    "BOOT_INSTANT_TOLERANCE",
-    "DEAD",
-    "DEFAULT_STALE_AFTER",
-    "LIVE",
-    "Liveness",
-    "STALE",
-    "START_TOKEN_KINDS",
-    "SystemProbes",
-    "assess",
-    "boot_identity",
-    "heartbeat_age",
-    "is_start_token",
-    "process_present",
-    "process_start_token",
-    "same_boot",
-    "start_token_is_boot_relative",
-]

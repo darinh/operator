@@ -8,7 +8,7 @@ Bump this when deployed artifacts change in a way another machine needs to pick
 up: ``templates/``, ``skills/``, ``extensions/``, or the layout of anything
 setup writes into ``~/.copilot`` or ``~/.operator``. When a bump requires
 rewriting state that is already on disk, add a matching ``upgrade_vX_Y_Z_to_...``
-function in ``install_manifest.py``.
+function in ``presence.py``.
 """
 
 __version__ = "1.4.0"
