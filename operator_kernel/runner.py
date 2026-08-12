@@ -46,7 +46,6 @@ import sys
 import time
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-# `operator_ingest` is imported lazily below. When this module runs as the
 # installed `operator-runner` console script rather than by path, an editable
 # install's frozen module list is the only thing that can resolve it, so make
 # our own directory importable as a fallback.
@@ -54,7 +53,7 @@ _HERE = str(Path(__file__).resolve().parent)
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-from operator_console import enable_utf8_output               # noqa: E402
+from console import enable_utf8_output               # noqa: E402
 
 SESSION_ID_TIMEOUT = 20
 LOG_PIN_TIMEOUT = 30
@@ -69,7 +68,7 @@ EXIT_BAD_SPEC = 78
 # spec holding a bare string would otherwise pass through `list()` and be
 # spawned one character per argument.
 _REQUIRED_SPEC_KEYS = ("instance", "argv", "cwd",
-                       "state_dir", "copilot_log_dir", "metrics_db")
+                       "state_dir", "copilot_log_dir")
 
 # The spec the operator writes lives at ``{state_dir}/{instance}.launch.json``
 # (see ``Instance.spec_file``), so its own path names both values we need to
@@ -372,7 +371,7 @@ def _load_spec(spec_path: Path) -> dict:
     if missing:
         raise SpecError(f"missing required key(s): {', '.join(missing)}", spec)
 
-    for key in ("instance", "cwd", "state_dir", "copilot_log_dir", "metrics_db"):
+    for key in ("instance", "cwd", "state_dir", "copilot_log_dir"):
         value = spec[key]
         if not isinstance(value, str) or not value.strip():
             raise SpecError(f"key {key!r} must be a non-empty string, "
@@ -458,7 +457,6 @@ def run(spec_path: Path) -> int:
     cwd: str = spec["cwd"]
     state_dir = Path(spec["state_dir"])
     log_dir = Path(spec["copilot_log_dir"])
-    metrics_db = Path(spec["metrics_db"])
     session_num = int(spec.get("session_num", 0))
 
     state_dir.mkdir(parents=True, exist_ok=True)

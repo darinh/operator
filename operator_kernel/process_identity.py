@@ -14,7 +14,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from operator_mux import Mux                                   # noqa: E402
+from mux import Mux                                   # noqa: E402
 from claims import parse_ts                               # noqa: E402
 
 

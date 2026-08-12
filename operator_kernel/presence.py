@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable
-from copilot_tools_version import __version__ as CURRENT_VERSION
+from version import __version__ as CURRENT_VERSION
 
 
 #: Digest algorithm. See the module docstring for why this one.

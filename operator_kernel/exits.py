@@ -17,6 +17,8 @@ import ntpath
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+import instance
+import evidence
 from paths import project_handoff_file
 
 from config import CATALOG_UNREADABLE, MAX_LAUNCH_FAILURES, OPERATOR_HOME
@@ -183,7 +185,7 @@ def _record_session_exit(instance, session_num: int,
             pid = instance.copilot_pid()
         except Exception:
             pid = None
-        trace.record_session_exit(
+        evidence.record_session_exit(
             OPERATOR_HOME,
             instance=instance.display_name,
             session=session_num,

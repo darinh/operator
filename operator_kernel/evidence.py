@@ -1,6 +1,6 @@
 """The evidence log: who ran, how it ended, and what code observed it.
 
-Extracted from a 21-definition trace module; the kernel uses three of
+Extracted from a 21-definition evidence module; the kernel uses three of
 them. `record_session_exit` is the one that matters -- the record whose
 earlier version could not express the event it existed to detect.
 """
@@ -13,6 +13,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from config import TOOLKIT_VERSION
 
 
 IS_WINDOWS = os.name == "nt"
@@ -368,7 +369,7 @@ def record_session_exit(operator_home: Path, *, instance: str, session: int,
                         code: "str | None" = None) -> None:
     """Record that a supervised copilot session ended. Never raises.
 
-    This is the event the trace was built for and the one an invocation log
+    This is the event the evidence was built for and the one an invocation log
     cannot see. When seven loops died together on 2026-08-03 no operator
     command was run at all -- each supervisor was already inside its poll
     loop, so there was nothing to attribute. ``operator.log`` said "copilot
@@ -388,7 +389,7 @@ def record_session_exit(operator_home: Path, *, instance: str, session: int,
 
     Endings that *were* explained are recorded too, and that is not a cosmetic
     addition: for a long time only the unexplained branch called this, so
-    every record carried ``restart=False`` and the trace could be read -- was
+    every record carried ``restart=False`` and the evidence could be read -- was
     read -- as proving no session had ever ended by handoff. A population that
     excludes the cases you are trying to count cannot answer the question, and
     it does not look empty while failing to.

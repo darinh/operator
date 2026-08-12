@@ -17,8 +17,9 @@ import ntpath
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+import instance
 
-from config import (COPILOT_LOG_DIR, METRICS_DB, MUX, RESTART_DIR, SESSION_ARG_RE)
+from config import (COPILOT_LOG_DIR, MUX, RESTART_DIR, SESSION_ARG_RE)
 from presence import path_present
 from instance import Instance
 from probes import die, log, remove_file
@@ -32,7 +33,6 @@ def write_launch_spec(instance: Instance, argv: list[str], cwd: Path,
         "cwd": str(cwd),
         "session_num": session_num,
         "state_dir": str(RESTART_DIR),
-        "metrics_db": str(METRICS_DB),
         "copilot_log_dir": str(COPILOT_LOG_DIR),
     }
     tmp = instance.spec_file.with_suffix(".json.tmp")
@@ -47,7 +47,7 @@ def runner_argv(spec_path: Path) -> list[str]:
     Passed as an explicit argv list (never a shell string) so arguments keep
     their exact spelling regardless of platform quoting rules.
     """
-    runner = Path(__file__).resolve().parent / "operator_runner.py"
+    runner = Path(__file__).resolve().parent / "runner.py"
     return [sys.executable, str(runner), str(spec_path)]
 
 

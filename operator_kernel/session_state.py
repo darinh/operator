@@ -17,11 +17,12 @@ import ntpath
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+import instance
 
 from config import EXIT_GRACE_SECONDS, METRICS_GRACE_SECONDS, MUX
 from presence import path_present
 from instance import Instance
-from operator_mux import MuxError
+from mux import MuxError
 from probes import log
 
 def pane_program_running(instance: Instance) -> bool:

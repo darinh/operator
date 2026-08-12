@@ -19,7 +19,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 import platform
 
-from operator_mux import Mux
+from mux import Mux
+import version
+
+#: The version of the kernel that observed something. Recorded into evidence so
+#: a record can be attributed to the code that wrote it -- `landed`,
+#: `installed` and `running` are three different states.
+TOOLKIT_VERSION = version.__version__
+
+
 
 
 HOME = Path.home()
@@ -297,7 +305,6 @@ RESTART_DIR = OPERATOR_HOME / "restart"
 LOG_FILE = OPERATOR_HOME / "operator.log"
 
 
-METRICS_DB = OPERATOR_HOME / "metrics.db"
 
 
 COPILOT_LOG_DIR = Path(

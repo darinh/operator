@@ -17,14 +17,19 @@ import ntpath
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from paths import primary_repo_root
+from paths import project_dir
+import claims
+import instance
+import evidence
 import atexit
 
 from breakers import (evaluate_progress, evaluate_unaccounted, workspace_fingerprint)
-from config import (EXIT_NO_PROGRESS, EXIT_UNACCOUNTED, HEALTHY_SESSION_SECONDS, HEARTBEAT_INTERVAL, IS_WINDOWS, LAUNCH_BACKOFF_BASE, MAX_LAUNCH_FAILURES, MAX_NOCHANGE_SESSIONS, MAX_SESSIONS, MAX_UNACCOUNTED_SESSIONS, METRICS_DB, MUX, OPERATOR_HOME, POLL_INTERVAL, RESTART_PAUSE_SECONDS, SESSION_ID_WAIT, TAB_LOOPING, UUID_RE)
+from config import (EXIT_NO_PROGRESS, EXIT_UNACCOUNTED, HEALTHY_SESSION_SECONDS, HEARTBEAT_INTERVAL, IS_WINDOWS, LAUNCH_BACKOFF_BASE, MAX_LAUNCH_FAILURES, MAX_NOCHANGE_SESSIONS, MAX_SESSIONS, MAX_UNACCOUNTED_SESSIONS, MUX, OPERATOR_HOME, POLL_INTERVAL, RESTART_PAUSE_SECONDS, SESSION_ID_WAIT, TAB_LOOPING, UUID_RE)
 from exits import (_record_session_exit, crash_recovery_verdict, ending_was_observed)
 from instance import Instance
 from launch import (args_have_explicit_session, extract_agent_from_args, handle_existing_session, has_agent_flag, start_session, with_experimental)
-from operator_mux import MuxError
+from mux import MuxError
 from preamble import build_preamble
 from probes import die, log, marker_set, marker_state, remove_file, utcnow
 from provenance import _launch_code_state, running_code_fingerprint
@@ -126,8 +131,6 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
     if not has_agent_flag(user_args):
         copilot_args += ["--agent", agent]
     copilot_args += user_args
-
-    operator_ingest.init_db(METRICS_DB)
 
     start_session_num = 1
     run_started = utcnow()
@@ -249,7 +252,7 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
     adopting = adopt
     _publish_supervisor_records(instance, user_args, adopted=adopt,
                                 began_run=began_run)
-    trace.record_supervisor_start(
+    evidence.record_supervisor_start(
         OPERATOR_HOME, instance=instance.display_name,
         session=start_session_num, code=running_code_fingerprint())
 
@@ -374,23 +377,12 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                                             workdir, instance.id)),
                         assignment=assignment,
                         code_state=_launch_code_state())
-                    try:
-                        waiting = operator_mail.pending(OPERATOR_HOME, instance.id)
-                    except operator_mail.MailError as exc:
-                        # An unreadable mailbox must not kill an unattended
-                        # loop, so this session goes ahead without a mail
-                        # preamble -- but it goes ahead having said so. The
-                        # messages are neither read nor archived, so they are
-                        # offered again at the next launch: a jam that is
-                        # announced every session, rather than a delivery that
-                        # silently never happens.
-                        log(f"  Could not read queued mail ({exc})")
-                        log("  Continuing without it; nothing was marked read")
-                        waiting = []
-                    if waiting:
-                        senders = ", ".join(operator_mail.sender_names(waiting))
-                        log(f"  Delivering {len(waiting)} queued message(s) from {senders}")
-                        launch_preamble += operator_mail.render_for_agent(waiting)
+                    # Queued mail was injected into the preamble here. Mail is not
+                    # part of this kernel: delivery is a concern with its own
+                    # unsolved question -- `send_keys` proves only that a keystroke
+                    # was sent, not that a session was ready, received it, or read
+                    # it -- and a supervision kernel should not be the thing that
+                    # pretends otherwise.
 
                     # Persist the pending resume id too: if the launch fails or the
                     # process dies here, the id must survive on disk rather than being
@@ -416,18 +408,6 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                         if shutdown["requested"]:
                             raise KeyboardInterrupt
                         continue
-                    launch_failures = 0
-                    if waiting:
-                        try:
-                            operator_mail.archive(OPERATOR_HOME, instance.id,
-                                                  [m["id"] for m in waiting])
-                        except operator_mail.MailError as exc:
-                            # The mail was delivered into the session; only the
-                            # bookkeeping failed. Left pending, it is delivered
-                            # again next launch -- a duplicate the agent can
-                            # see, which is the better failure of the two.
-                            log(f"  Delivered mail could not be marked read ({exc})")
-                            log("  It will be offered again at the next launch")
                     resume_id_used = ""
                     last_launched = session_num
                     session_started_at = time.time()
@@ -518,7 +498,7 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                         # answers False for "not there" and for "could not
                         # look", which is the right call for the *branch* -- one
                         # more poll is cheap -- but writing that False into the
-                        # trace would enter a guess as an observation, and the
+                        # evidence would enter a guess as an observation, and the
                         # postmortem reading it has no way to tell them apart.
                         restart_probe = marker_state(instance.restart_marker)
                         if restart_probe is True:
@@ -578,7 +558,7 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                         # touches the marker while copilot is still up, so the
                         # supervisor sees the request before it sees the exit.
                         # Recording only the branch above is why every
-                        # `session_exit` in the trace carried `restart=False`
+                        # `session_exit` in the evidence carried `restart=False`
                         # -- not because no session ever ended by handoff, but
                         # because the ones that did were never written down.
                         #
@@ -587,7 +567,7 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                         # `stop_session_gracefully` and the kill behind it both
                         # fail, the supervisor dies -- and a record written
                         # after that point is the one that would never exist.
-                        # A trace saying "a restart was requested" when the
+                        # A evidence saying "a restart was requested" when the
                         # teardown then failed is recoverable by whoever reads
                         # it next; silence about the last thing that happened
                         # before the supervisor died is not.
@@ -642,7 +622,7 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                                 f"nothing. That is not idleness — something is "
                                 f"ending these sessions. Stopping instead of "
                                 f"starting session #{session_num + 1}.")
-                            log(f"  What ended them: operator trace "
+                            log(f"  What ended them: operator evidence "
                                 f"--kind session_exit")
                             log(f"  Resume with: operator --loop --name "
                                 f"{instance.display_name}")

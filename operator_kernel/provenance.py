@@ -17,6 +17,9 @@ import ntpath
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from config import TOOLKIT_VERSION
+import instance
+import process_identity
 
 from config import (CODE_CURRENT, CODE_MISMATCH, CODE_STALE, CODE_UNKNOWN, CODE_UNRECORDED, FILE_ABSENT, _RUNNING_CODE, _UNPROBED)
 from presence import entry
@@ -143,7 +146,7 @@ def _save_loop_code(instance: Instance, adopted: bool = False,
     ``RUN_STARTED`` written by a predecessor. Both are recorded because both
     are only knowable at startup, and because without them a deliberate
     supervisor handover is indistinguishable on disk from one caused by every
-    process in the logon session being destroyed: they leave the same trace, a
+    process in the logon session being destroyed: they leave the same evidence, a
     supervisor younger than the run it is running.
 
     Losing this costs a staleness verdict, never the running session, so it
@@ -189,7 +192,7 @@ def loop_code_state(instance: Instance,
     so an operator fix is inert for every instance already running when it
     landed. That was not a hypothetical: the fix that made ``session_exit``
     record handoff endings landed at 19:36 on 2026-08-04, and every
-    supervisor on the machine had started at 13:28 -- so the trace kept
+    supervisor on the machine had started at 13:28 -- so the evidence kept
     producing pre-fix records, dated after the fix, with nothing in them
     saying so. Backlog 0001 tells its next reader to scope a re-measurement
     to records "at or after 2026-08-05", and that instruction was already

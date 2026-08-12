@@ -17,6 +17,7 @@ import ntpath
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+import instance
 
 from config import BASE_CLAUSES, CODE_CURRENT, CODE_MISMATCH, CODE_STALE
 from instance import Instance

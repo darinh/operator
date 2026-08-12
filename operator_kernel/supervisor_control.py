@@ -17,11 +17,14 @@ import ntpath
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from presence import path_present
+import instance
+import evidence
 
 from config import (LOG_FILE, METRICS_GRACE_SECONDS, MUX, POLL_INTERVAL, SESSION_ID_WAIT, SUPERVISOR_STARTUP_ALLOWANCE)
 from presence import dir_present, entry, path_present
 from instance import Instance, managed_instances
-from operator_mux import MuxError
+from mux import MuxError
 from probes import _pid_alive, log, remove_file
 from supervisor import _spawn_background_loop
 from supervisor_records import (_load_loop_args, _running_loop_pid, _supervisor_present, _supervisor_status, _supervisor_where)
@@ -163,7 +166,7 @@ def _own_instance_id() -> "str | None":
     down before it has reported on the rest. It also prints "this session's own
     supervisor" against somebody else's name.
     """
-    chain = trace.ancestry()
+    chain = evidence.ancestry()
     if not chain:
         return None
     mine = {}

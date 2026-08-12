@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 # Imported after ROOT joins sys.path -- these live at the repo root.
 import copilot_operator  # noqa: E402
-import operator_mux  # noqa: E402
+import mux  # noqa: E402
 
 
 # ── the multiplexer boundary ────────────────────────────────────
@@ -54,7 +54,7 @@ import operator_mux  # noqa: E402
 # Tests that want different behaviour still override `op.MUX` themselves; this
 # runs first, so their own monkeypatch wins. Real-multiplexer coverage lives in
 # test_integration.py, which builds its own `Mux()` and is untouched by this.
-class FakeMux(operator_mux.Mux):
+class FakeMux(mux.Mux):
     """A `Mux` whose backend is a dict instead of a terminal multiplexer."""
 
     def __init__(self, sessions: tuple[str, ...] = ()):
@@ -232,7 +232,7 @@ def _no_real_multiplexer(request: pytest.FixtureRequest):
         return
 
     real_mux = copilot_operator.MUX
-    real_run = operator_mux.subprocess.run
+    real_run = mux.subprocess.run
 
     def guarded_run(cmd, *args, **kwargs):
         if _is_a_multiplexer_spawn(cmd):
@@ -246,11 +246,11 @@ def _no_real_multiplexer(request: pytest.FixtureRequest):
         return real_run(cmd, *args, **kwargs)
 
     copilot_operator.MUX = FakeMux()
-    operator_mux.subprocess.run = guarded_run
+    mux.subprocess.run = guarded_run
     try:
         yield
     finally:
-        operator_mux.subprocess.run = real_run
+        mux.subprocess.run = real_run
         copilot_operator.MUX = real_mux
 
 

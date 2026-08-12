@@ -17,6 +17,8 @@ import ntpath
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+import instance
+import process_identity
 
 from config import (CLOCK_SKEW_TOLERANCE, LOOP_PID_BOOT_KEY, LOOP_PID_START_KEY, SUPERVISOR_STARTUP_CEILING, SUPERVISOR_STARTUP_GRACE, _UNPROBED)
 from instance import Instance

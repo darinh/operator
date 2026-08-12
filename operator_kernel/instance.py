@@ -20,7 +20,7 @@ from pathlib import Path
 
 from config import MUX, RESTART_DIR, UUID_RE
 from presence import dir_present, path_present
-from operator_mux import safe_instance_id
+from mux import safe_instance_id
 from probes import log, remove_file, utcnow
 
 # ── instance ────────────────────────────────────────────────────
@@ -114,7 +114,7 @@ class Instance:
         A supervisor is long-lived and imported its code once, at startup, so
         a fix landing afterwards does not reach it (that is what
         ``restart-loop`` is for). Nothing recorded *which* code it started
-        with, so neither a person nor the trace could tell a supervisor
+        with, so neither a person nor the evidence could tell a supervisor
         running today's fix from one running last week's — and the records
         both produce are byte-identical in shape.
         """

@@ -15,8 +15,9 @@ build-backend = "setuptools.build_meta"
 packages = ["operator_kernel"]
 
 [tool.setuptools.dynamic]
-version = { attr = "operator_kernel.copilot_tools_version.__version__" }
+version = { attr = "operator_kernel.version.__version__" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["operator_kernel", "tests"]
+norecursedirs = ["tests/pending"]
