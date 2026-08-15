@@ -272,6 +272,36 @@ def record_mandate_read(operator_home: Path, *, instance: str, session: int,
         })
     except Exception:
         return
+def record_withheld_clause(operator_home: Path, *, instance: str, session: int,
+                           source: str, phrases) -> None:
+    """Record text that tried to grant authority and was withheld. Never raises.
+
+    A `fact.*`: the supervisor scanned a clause it was handed and removed it.
+
+    This is where the withheld wording goes. It is deliberately not in the
+    preamble -- quoting the caught phrase back into the text made the final
+    scan fire on the refusal note itself -- and it has to be *somewhere*, or
+    refusing a grant is indistinguishable from never having seen one.
+
+    Worth reading when it appears. The only clause that can currently trip it
+    comes from the work database, which agents write, so a record here means
+    something wrote a permission grant into a work item. That is either a
+    confused agent or a deliberate one, and both are worth knowing about.
+    """
+    try:
+        _append(trace_path(Path(operator_home)), {
+            "ts": _utcnow(),
+            "event": "withheld_clause",
+            "pid": os.getpid(),
+            "instance": str(instance),
+            "session": session,
+            "source": str(source),
+            "phrases": list(phrases),
+        })
+    except Exception:
+        return
+
+
 def ancestry(pid: "int | None" = None,
              limit: int = 12) -> "list[dict] | None":
     """The process chain above ``pid``, nearest parent first.

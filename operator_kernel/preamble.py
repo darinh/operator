@@ -22,11 +22,13 @@ import instance
 from config import BASE_CLAUSES, CODE_CURRENT, CODE_MISMATCH, CODE_STALE
 from instance import Instance
 from claims import claims
-from mandate import Mandate, authority_clause, assert_no_unattributed_authority
+from mandate import (Mandate, authority_clause, assert_no_unattributed_authority,
+                     vet_clause)
 
 def build_preamble(agent_name: str, instance: Instance, crash_recovery: bool = False,
-                   assignment=None, code_state: str = CODE_CURRENT,
-                   mandate: "Mandate | None" = None) -> str:
+                   assignment: str = "", code_state: str = CODE_CURRENT,
+                   mandate: "Mandate | None" = None,
+                   on_withheld=None) -> str:
     """Compose the launch preamble from mechanism plus attributed authority.
 
     Two kinds of sentence go to a session, and they are kept apart on purpose.
@@ -78,14 +80,29 @@ def build_preamble(agent_name: str, instance: Instance, crash_recovery: bool = F
     if notice:
         clauses.append(notice)
     # The assignment is resolved by `operator session start` before the agent's
-    # first token (FR-2), and reaches it here. Nothing is said when there is
-    # nothing to say: `describe` returns "" for an unassigned session, and an
+    # first token (FR-2), and reaches it here already rendered. Nothing is said
+    # when there is nothing to say: an unassigned session passes "", and an
     # always-present line reading "you have no assignment" would be paid for on
     # every token of every session that has none.
-    if assignment is not None:
-        described = operator_session.describe(assignment)
-        if described:
-            clauses.append(described)
+    #
+    # A string rather than an object this function describes. It used to call
+    # `operator_session.describe(assignment)` -- a module the kernel boundary
+    # forbids and which `preamble.py` never imported, so the call was a latent
+    # `NameError`. Describing a work item is not supervision; hand the kernel
+    # the sentence instead of the thing that can produce it.
+    #
+    # Vetted rather than trusted, because the work database is written by
+    # agents. This is the only clause today with a non-kernel author, and it is
+    # the reason the scan below cannot simply raise.
+    if assignment:
+        clause, withheld = vet_clause(assignment, "this session's work item")
+        clauses.append(clause)
+        if withheld and on_withheld is not None:
+            # Reported rather than returned, so that adding a vetted clause
+            # never changes this function's signature and so that a caller
+            # cannot forget to vet -- the vetting is here, and the callback
+            # only decides where the detail is written down.
+            on_withheld("this session's work item", withheld)
     # Numbered from the clauses actually collected, rather than from a counter
     # incremented alongside them. Both spellings produce the same text today;
     # they differ in what they make *possible*. A counter is two statements --
@@ -103,15 +120,15 @@ def build_preamble(agent_name: str, instance: Instance, crash_recovery: bool = F
     # which clause happened to be last.
     for offset, body in enumerate(clauses):
         text += f" ({BASE_CLAUSES + 1 + offset}) {body}"
-    # Checked here rather than only in the test suite, because the test can
-    # only see the preambles it thought to construct while this sees every one
-    # ever built. Raising stops the launch, which is the right trade while the
-    # only contributors are kernel code: a failure here means the supervisor
-    # was about to tell a session it had authority nobody granted, and nine
-    # seats not starting is a smaller harm than nine seats believing that. When
-    # extensions can contribute clauses this must become a refusal of the
-    # offending *clause*, recorded against its author -- a third-party package
-    # must not be able to stop the fleet.
+    # Every clause the kernel did not author has already been through
+    # `vet_clause`, which withholds rather than raises. What is left to check
+    # is the kernel's own literal text plus the no-mandate clause -- and the
+    # only thing that can make *those* grant is a kernel bug, so raising is
+    # right here and a raise can no longer be provoked from outside. It used to
+    # be: the assignment clause is rendered from the work database, agents
+    # write that database, and a raise here is caught by nothing in
+    # `run_loop_mode`, so a granting phrase in a backlog item permanently
+    # killed that seat's supervisor. A reviewer traced it.
     # Exempt the mandate's own words, and only when a mandate exists. A human
     # may grant anything; the rule is that a human said it. When there is no
     # mandate the clause is the kernel's own refusal text, which has no human

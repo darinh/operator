@@ -12,6 +12,9 @@ nothing reports the whole tree clean, which reads exactly like success.
 from __future__ import annotations
 
 import ast
+import io
+import os
+import tokenize
 from pathlib import Path
 
 import pytest
@@ -80,27 +83,37 @@ MAX_MODULE_LINES = 800
 #: the ledger, and roughly 250 lines leave with them.
 MAX_KERNEL_CODE_LINES = 4100
 
+#: The kernel-wide *total*-line ceiling, for navigability rather than
+#: complexity. Restored after the switch to code lines deleted it, leaving
+#: overall size uncapped -- so "tighter, not looser" was true of the code
+#: measure and silent about totals. Generous, because prose is welcome here;
+#: present, because "no ceiling at all" is not a decision anyone made.
+MAX_KERNEL_TOTAL_LINES = 9000
+
 #: Per-module code ceiling, the same split applied one file down.
 #: `supervisor.py` is the largest at 446.
 MAX_MODULE_CODE_LINES = 500
 
 
 def code_lines(source: str) -> int:
-    """Lines that are neither docstring, comment, nor blank.
+    """Lines carrying any code token: not docstring, comment, or blank.
 
-    Counted over a *set* of docstring line numbers rather than by summing each
-    docstring's length. The first draft summed, and double-charged every blank
-    line inside a docstring -- once as prose and once as blank -- which made
-    heavily documented modules score negative. It also made the kernel's
-    measured size an underestimate, so the budget derived from it would have
-    been set too low.
+    Tokenised rather than matched line by line. The first draft asked whether a
+    stripped line started with ``#``, which is true of every line of a
+    triple-quoted payload whose content happens to be comment-shaped -- so a
+    100-line embedded data blob scored 2, and the control missed it because its
+    fixture used the word ``row``. A budget that can be zeroed by choosing the
+    right filler is not a budget.
 
-    Docstrings are found through `ast`, not by counting quotes: a module that
-    assigns a triple-quoted string to a variable is holding data, not
-    documenting itself, and should be charged for it.
+    Docstring *spans* come from the AST, because "the first statement of a
+    module, class or function, and a string" is a structural fact no tokeniser
+    knows. Everything else is decided by whether a line contains a token that
+    is not a comment, a newline, or indentation bookkeeping -- so
+    ``\"\"\"doc\"\"\"; x = 1`` counts as the code line it is, rather than
+    vanishing into its docstring's span.
     """
     tree = ast.parse(source)
-    doc_lines: set[int] = set()
+    doc_tokens: set[tuple[int, int]] = set()
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Module, ast.FunctionDef,
                                  ast.AsyncFunctionDef, ast.ClassDef)):
@@ -112,17 +125,24 @@ def code_lines(source: str) -> int:
         if (isinstance(first, ast.Expr)
                 and isinstance(first.value, ast.Constant)
                 and isinstance(first.value.value, str)):
-            doc_lines.update(range(first.lineno, (first.end_lineno or
-                                                  first.lineno) + 1))
-    counted = 0
-    for number, line in enumerate(source.splitlines(), start=1):
-        if number in doc_lines:
+            # Keyed on the exact start position, not the line span. Keying on
+            # lines skips *every* token sharing the docstring's last line,
+            # which silently swallowed the `x = 1` in `"""doc"""; x = 1` and
+            # made the control for that case fail in the direction that looks
+            # like the code is fine.
+            doc_tokens.add((first.value.lineno, first.value.col_offset))
+
+    counted: set[int] = set()
+    skip = {tokenize.COMMENT, tokenize.NL, tokenize.NEWLINE, tokenize.INDENT,
+            tokenize.DEDENT, tokenize.ENDMARKER, tokenize.ENCODING}
+    reader = io.StringIO(source).readline
+    for token in tokenize.generate_tokens(reader):
+        if token.type in skip or not token.string.strip():
             continue
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
+        if token.start in doc_tokens:
             continue
-        counted += 1
-    return counted
+        counted.update(range(token.start[0], token.end[0] + 1))
+    return len(counted)
 
 #: The ceiling on the kernel as a whole.
 #:
@@ -189,18 +209,78 @@ def test_the_kernel_imports_nothing_it_is_defined_as_not_being():
     )
 
 
-def test_no_kernel_module_exceeds_the_line_ceiling():
-    oversize = [
-        f"{p.name}: {len(p.read_text(encoding='utf-8').splitlines())} lines"
-        for p in kernel_modules()
-        if len(p.read_text(encoding="utf-8").splitlines()) > MAX_MODULE_LINES
-    ]
-    assert oversize == [], (
-        f"over the {MAX_MODULE_LINES}-line module ceiling:\n  "
-        + "\n  ".join(oversize)
-        + "\n\nSplit it or move it out. The module this kernel replaces reached "
-        "9,120 lines and no single commit was the problem."
+def test_the_kernel_does_not_use_forbidden_modules_it_never_imported():
+    """A forbidden name used without importing it is invisible to an import scan.
+
+    `test_the_kernel_imports_nothing_it_should_not` reads `import` statements,
+    so a module referenced as a bare name passes it silently -- and the guard
+    then reports the tree clean while the violation is present, which is the
+    exact failure mode the module docstring warns about.
+
+    It was present. `preamble.py` and `supervisor.py` both called
+    `operator_session`, which is on `FORBIDDEN` and was imported by neither, so
+    every call was a latent `NameError`. In `supervisor.py` it was worse than
+    latent: `_loop_work_db` and `_loop_start_session` each swallow `Exception`
+    and return `None`, so the `NameError` was caught and the whole
+    work-assignment subsystem returned "no assignment" forever -- indis-
+    tinguishable from a session that genuinely had none. FR-2 says the
+    assignment reaches the agent before its first token; it never did.
+    """
+    offenders = []
+    for path in kernel_modules():
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        bound = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    bound.add((alias.asname or alias.name).split(".")[0])
+            elif isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    bound.add(alias.asname or alias.name)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                   ast.ClassDef)):
+                bound.add(node.name)
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                bound.add(node.id)
+        used = {node.id for node in ast.walk(tree)
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)}
+        for ghost in sorted((used & FORBIDDEN) - bound):
+            offenders.append(f"{path.name}: {ghost}")
+    assert offenders == [], (
+        "the kernel calls forbidden modules it never imported, so every call "
+        "is a NameError waiting for its branch to be taken:\n  "
+        + "\n  ".join(offenders)
+        + "\n\nEither the dependency is injected by the caller, or the code "
+        "using it does not belong in the kernel."
     )
+
+
+def test_the_ghost_name_detector_fires(tmp_path):
+    """Positive control, on synthetic source rather than the tree.
+
+    Scoring against the real tree would make this pass the moment the tree is
+    clean, which is precisely when a detector's silence stops being evidence.
+    """
+    source = "def f():\n    return operator_session.describe(1)\n"
+    tree = ast.parse(source)
+    used = {n.id for n in ast.walk(tree)
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
+    assert used & FORBIDDEN == {"operator_session"}
+
+
+def test_the_ghost_name_detector_accepts_a_bound_name():
+    """Negative control: a name that *is* bound must not be reported.
+
+    Without this the detector could report every use of anything and still
+    look like it worked.
+    """
+    source = "operator_session = make_stub()\nx = operator_session.describe(1)\n"
+    tree = ast.parse(source)
+    bound = {n.id for n in ast.walk(tree)
+             if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+    used = {n.id for n in ast.walk(tree)
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
+    assert (used & FORBIDDEN) - bound == set()
 
 
 def test_the_kernel_as_a_whole_stays_under_its_budget():
@@ -257,8 +337,61 @@ def test_the_budget_does_charge_for_string_data():
     assert code_lines(data) > 30
 
 
+def test_the_budget_charges_for_comment_shaped_string_data():
+    """The control that the one above was too polite to be.
+
+    Its fixture said `row`, so a line-based reader that treated any line
+    starting with `#` as a comment passed it -- while a payload of
+    comment-shaped lines scored 2 instead of 100. A budget that can be zeroed
+    by choosing the right filler is not a budget, and the only thing standing
+    between those two fixtures was the word I happened to pick.
+    """
+    data = 'PAYLOAD = """' + "\n# looks like a comment\n" * 50 + '"""\n'
+    assert code_lines(data) > 50
+
+
+def test_the_budget_charges_a_line_that_shares_a_docstring_line():
+    """`\"\"\"doc\"\"\"; x = 1` is a line of code and must be charged as one."""
+    assert code_lines('def f():\n    """doc"""; x = 1\n') == 2
+
+
 def test_the_budget_does_not_charge_for_comments_or_blanks():
     assert code_lines("# a\n\n# b\n\nx = 1\n") == 1
+
+
+def test_no_kernel_module_exceeds_the_line_ceiling():
+    """Total lines, for navigability. Distinct from the code budget.
+
+    Kept explicitly, because when the kernel-wide budget switched to code lines
+    the kernel-wide *total* ceiling was deleted with it and nothing capped
+    overall size any more. A reviewer caught that, and caught that the commit
+    describing the change as "tighter, not looser" was therefore true of code
+    and silent about totals.
+    """
+    oversize = [
+        f"{p.name}: {len(p.read_text(encoding='utf-8').splitlines())} lines"
+        for p in kernel_modules()
+        if len(p.read_text(encoding="utf-8").splitlines()) > MAX_MODULE_LINES
+    ]
+    assert oversize == [], (
+        f"over the {MAX_MODULE_LINES}-line module ceiling:\n  "
+        + "\n  ".join(oversize)
+        + "\n\nSplit it or move it out. The module this kernel replaces reached "
+        "9,120 lines and no single commit was the problem."
+    )
+
+
+def test_the_kernel_as_a_whole_stays_under_its_total_ceiling():
+    """The navigability ceiling for the whole kernel, restored.
+
+    Generous on purpose -- prose is welcome and this is not the complexity
+    budget -- but not absent, which is what it briefly became.
+    """
+    total = sum(len(p.read_text(encoding="utf-8").splitlines())
+                for p in kernel_modules())
+    assert total <= MAX_KERNEL_TOTAL_LINES, (
+        f"kernel is {total} total lines, ceiling {MAX_KERNEL_TOTAL_LINES}."
+    )
 
 
 # ── controls ────────────────────────────────────────────────────
@@ -290,10 +423,30 @@ def test_the_forbidden_list_is_not_vacuous():
 
     Every name here must be a module of the system being extracted from, or the
     entry is a guess that will go on reading like a considered decision.
+
+    The source repository is located relative to this one rather than by
+    absolute path. The absolute spelling worked on exactly one machine and
+    would have skipped -- silently, reading as a pass -- on any clone or CI
+    runner, which is the whole failure this file exists to talk about.
+
+    `COPILOT_TOOLS_REPO` overrides it, so a checkout that lives elsewhere can
+    still be checked instead of skipped.
     """
-    old = Path(r"C:\Users\darin\repos\copilot-tools")
-    if not old.exists():          # the source repo is gone; nothing to check against
-        pytest.skip("source repository not present")
+    override = os.environ.get("COPILOT_TOOLS_REPO")
+    if override:
+        candidates = [Path(override)]
+    else:
+        # Both spellings, because this file is run from the primary checkout
+        # *and* from linked worktrees under `.worktrees/`, which sit one level
+        # deeper. Getting this wrong does not fail -- it skips, which reads as
+        # a pass, which is how the absolute path survived as long as it did.
+        candidates = [REPO.parent / "copilot-tools",
+                      REPO.parent.parent / "copilot-tools"]
+    found = [path for path in candidates if path.exists()]
+    if not found:
+        pytest.skip("source repository not present at "
+                    + " or ".join(str(c) for c in candidates))
+    old = found[0]
     existing = {p.stem for p in old.glob("*.py")}
     unreal = sorted(FORBIDDEN - existing)
     assert unreal == [], f"FORBIDDEN names modules that do not exist: {unreal}"

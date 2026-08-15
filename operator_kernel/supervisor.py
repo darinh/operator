@@ -37,6 +37,39 @@ from provenance import _launch_code_state, running_code_fingerprint
 from session_state import (is_copilot_running, stop_session_gracefully, wait_for_metrics_capture)
 from supervisor_records import (_publish_supervisor_records, _record_supervisor_starting, _running_loop_pid)
 
+#: The work-item store, injected by whoever starts the loop. ``None`` means no
+#: store was supplied and the assignment features are simply off.
+#:
+#: A hook rather than an import because the store is on the far side of the
+#: kernel boundary -- `operator_session` is on `test_kernel_boundary.FORBIDDEN`,
+#: since deciding what an agent should work on is not supervising it.
+#:
+#: It was neither, until a reviewer's remark sent me looking. Both functions
+#: below called `operator_session` as a bare name that nothing imported, so
+#: every call raised `NameError` -- and both catch `Exception` and return
+#: ``None``, so the whole work-assignment subsystem answered "no assignment"
+#: forever, which is exactly what a session with no work item looks like. FR-2
+#: says the assignment reaches the agent before its first token; it never has.
+#: `test_kernel_boundary` scans imports, so a forbidden module used as a bare
+#: name was invisible to it and the boundary read clean.
+_SESSION_STORE = None
+
+
+def session_store():
+    return _SESSION_STORE
+
+
+def set_session_store(store) -> None:
+    """Supply the work-item store, or ``None`` to run without one.
+
+    Called by the entry point, not by kernel code. The kernel's half of the
+    contract is that it works without one: no store means no assignment clause
+    and no claim, and never means no session.
+    """
+    global _SESSION_STORE
+    _SESSION_STORE = store
+
+
 def _loop_work_db(workdir: Path):
     """The claim/session database for the project being supervised, or ``None``.
 
@@ -46,11 +79,14 @@ def _loop_work_db(workdir: Path):
     Resolved from the *primary* checkout so a loop running inside a worktree
     finds the project's real entry instead of minting a second one.
     """
+    store = session_store()
+    if store is None:
+        return None
     try:
         found = catalog_guid(primary_repo_root(workdir))
         if found.guid is None:
             return None
-        return operator_session.db_path(project_dir(found.guid))
+        return store.db_path(project_dir(found.guid))
     except Exception as exc:                                # noqa: BLE001
         log(f"  Could not resolve this project's work database ({exc})")
         return None
@@ -70,9 +106,12 @@ def _loop_start_session(db, instance: "Instance", session_num: int):
     """
     if db is None:
         return None
+    store = session_store()
+    if store is None:
+        return None
     try:
-        operator_session.init_db(db)
-        return operator_session.start_session(
+        store.init_db(db)
+        return store.start_session(
             db, instance=instance.id, session=session_num)
     except Exception as exc:                                # noqa: BLE001
         log(f"  Could not resolve this session's assignment ({exc})")
@@ -387,7 +426,12 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                                             workdir, instance.id)),
                         assignment=assignment,
                         code_state=_launch_code_state(),
-                        mandate=session_mandate)
+                        mandate=session_mandate,
+                        on_withheld=lambda source, phrases: (
+                            evidence.record_withheld_clause(
+                                OPERATOR_HOME, instance=instance.id,
+                                session=session_num, source=source,
+                                phrases=phrases)))
                     # Queued mail was injected into the preamble here. Mail is not
                     # part of this kernel: delivery is a concern with its own
                     # unsolved question -- `send_keys` proves only that a keystroke
