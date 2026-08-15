@@ -28,7 +28,7 @@ from mandate import (Mandate, authority_clause, assert_no_unattributed_authority
 def build_preamble(agent_name: str, instance: Instance, crash_recovery: bool = False,
                    assignment: str = "", code_state: str = CODE_CURRENT,
                    mandate: "Mandate | None" = None,
-                   on_withheld=None) -> str:
+                   on_withheld=None, handoff_waiting: str = "") -> str:
     """Compose the launch preamble from mechanism plus attributed authority.
 
     Two kinds of sentence go to a session, and they are kept apart on purpose.
@@ -69,7 +69,30 @@ def build_preamble(agent_name: str, instance: Instance, crash_recovery: bool = F
         "Now: check for your session handoff and get to work."
     )
     clauses: list[str] = [authority_clause(mandate)]
-    if crash_recovery:
+    if handoff_waiting:
+        # Stated, rather than left to the standing instruction in (3).
+        #
+        # Only the *absence* of a handoff used to produce a clause, so a
+        # session with one waiting got a preamble identical to a session with
+        # nothing to read. On 2026-08-15 an agent launched 6 seconds after its
+        # predecessor wrote a full handoff, was told nothing about it, asked
+        # `operator session start` instead -- which answers about work-item
+        # claims, not handoffs -- and read "No assignment" as "no handoff".
+        # It invented work in a frozen repository for half an hour.
+        #
+        # The path is named because "check for a handoff file" is a search and
+        # this is an address: the previous wording left the agent to rediscover
+        # a location the supervisor had just finished establishing.
+        clauses.append(
+            "A handoff from the previous session is waiting at "
+            f"{handoff_waiting}. Read it before doing anything else, including "
+            "before looking for other work — it is the record of what the last "
+            "session was in the middle of. If it names work, that work is your "
+            "assignment. Do not go looking for something else to do because a "
+            "different tool reported nothing; no other command answers this "
+            "question."
+        )
+    if crash_recovery and not handoff_waiting:
         clauses.append(
             "This session is being resumed because a handoff file could not be "
             "found for this project. Either a crash occurred or the previous session "

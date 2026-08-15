@@ -26,6 +26,100 @@ from presence import path_present
 from probes import log
 from provenance import running_code_fingerprint
 
+#: A handoff from the previous session is on disk and waiting to be read.
+HANDOFF_WAITING = "waiting"
+#: No handoff, and one was expected here: the previous session did not reach
+#: `handoff`. This is the crash-recovery case.
+HANDOFF_MISSING = "missing"
+#: Nobody could tell. The catalog would not open, or the probe was denied.
+HANDOFF_UNKNOWN = "unknown"
+#: The project is not registered, so no handoff could ever have been written
+#: here and its absence establishes nothing.
+HANDOFF_UNEXPECTED = "unexpected"
+
+
+class HandoffState:
+    """What the launcher established about the waiting handoff, and where.
+
+    A *named* state rather than the boolean this replaces, because the boolean
+    could only say "crash recovery" or "not crash recovery" -- and the second
+    answer covered four situations that call for four different sentences to
+    the agent. Chief among them: **a handoff is sitting on disk right now**.
+
+    That collapse had a cost, paid on 2026-08-15. A session was launched with a
+    handoff written six seconds earlier; the preamble said nothing about it,
+    because the only branch that says anything is the one for its *absence*. The
+    agent ran `operator session start`, read "No assignment" -- an answer about
+    work-item claims, not about handoffs -- and inferred there was no handoff to
+    read. It then invented a task in a frozen repository and burned the session
+    on it. Everything it needed was on disk, and nothing in the text it was
+    given contradicted the wrong inference.
+
+    The instruction "always check for a session handoff file" was present and is
+    not enough on its own: an agent that skips it produces a transcript
+    identical to one that had nothing to read. This is the repository's own
+    north star -- a signal indistinguishable from its absence -- so the remedy
+    is the one used everywhere else here: say the observed thing out loud, and
+    write down that it was said.
+    """
+
+    __slots__ = ("verdict", "path")
+
+    def __init__(self, verdict: str, path: "Path | None" = None) -> None:
+        self.verdict = verdict
+        self.path = path
+
+    def __repr__(self) -> str:  # pragma: no cover - diagnostic only
+        return f"HandoffState({self.verdict!r}, {self.path!r})"
+
+
+def handoff_state(workdir: Path, instance_id: str = "") -> HandoffState:
+    """Establish what is waiting for the session about to launch.
+
+    Every ``return`` names what was observed. In particular a failed probe is
+    ``HANDOFF_UNKNOWN`` and never ``HANDOFF_MISSING``: telling an agent its
+    predecessor crashed is a claim about the last session, and a probe that
+    could not look has established nothing about it.
+    """
+    handoff_file = project_handoff_file(workdir, instance_id)
+    if handoff_file is CATALOG_UNREADABLE:
+        # The catalog would not open. That establishes nothing about whether
+        # this project is registered, so it must not be reported as either a
+        # missing handoff or an unregistered project.
+        log("  Could not read the project catalog — not reporting this as "
+            "crash recovery")
+        return HandoffState(HANDOFF_UNKNOWN)
+    if handoff_file is None:
+        log("  Project is not registered in the catalog — no handoff file "
+            "is expected here")
+        return HandoffState(HANDOFF_UNEXPECTED)
+    # Probed once and held: asking twice invites the two answers to disagree,
+    # and the tri-state exists so the unknown case can be decided deliberately.
+    present = path_present(handoff_file)
+    if present is None:
+        # Telling the agent a handoff is missing is a claim about the last
+        # session. A probe that failed has not established anything.
+        log(f"  Could not examine {handoff_file} — not reporting this as "
+            f"crash recovery")
+        return HandoffState(HANDOFF_UNKNOWN, handoff_file)
+    if present:
+        return HandoffState(HANDOFF_WAITING, handoff_file)
+    if instance_id:
+        legacy = handoff_file.parent.parent / "next-session.md"
+        legacy_present = path_present(legacy)
+        if legacy_present is None:
+            log(f"  Could not examine {legacy} — not reporting this as "
+                f"crash recovery")
+            return HandoffState(HANDOFF_UNKNOWN, legacy)
+        if legacy_present:
+            log(f"  No handoff at {handoff_file}, but an unmigrated one is "
+                f"at {legacy} — not reporting this as crash recovery")
+            return HandoffState(HANDOFF_WAITING, legacy)
+    log("  No handoff file found for this project — treating this as "
+        "crash recovery")
+    return HandoffState(HANDOFF_MISSING, handoff_file)
+
+
 def crash_recovery_verdict(workdir: Path, instance_id: str = "") -> bool:
     """Did the session before this launch end without leaving a handoff?
 
@@ -59,44 +153,13 @@ def crash_recovery_verdict(workdir: Path, instance_id: str = "") -> bool:
     while a real handoff sits beside it. Reporting that as a crash would tell
     the agent its predecessor died in the one situation where the predecessor
     demonstrably did not.
+
+    Reporting is delegated so that this answer and the richer one cannot drift
+    apart: two copies of the same branch tree would eventually disagree about
+    which situation is a crash, and this predicate is the one that tells an
+    agent its predecessor died.
     """
-    handoff_file = project_handoff_file(workdir, instance_id)
-    if handoff_file is CATALOG_UNREADABLE:
-        # The catalog would not open. That establishes nothing about whether
-        # this project is registered, so it must not be reported as either a
-        # missing handoff or an unregistered project.
-        log("  Could not read the project catalog — not reporting this as "
-            "crash recovery")
-        return False
-    if handoff_file is None:
-        log("  Project is not registered in the catalog — no handoff file "
-            "is expected here")
-        return False
-    # Probed once and held: asking twice invites the two answers to disagree,
-    # and the tri-state exists so the unknown case can be decided deliberately.
-    present = path_present(handoff_file)
-    if present is None:
-        # Telling the agent a handoff is missing is a claim about the last
-        # session. A probe that failed has not established anything.
-        log(f"  Could not examine {handoff_file} — not reporting this as "
-            f"crash recovery")
-        return False
-    if present:
-        return False
-    if instance_id:
-        legacy = handoff_file.parent.parent / "next-session.md"
-        legacy_present = path_present(legacy)
-        if legacy_present is None:
-            log(f"  Could not examine {legacy} — not reporting this as "
-                f"crash recovery")
-            return False
-        if legacy_present:
-            log(f"  No handoff at {handoff_file}, but an unmigrated one is "
-                f"at {legacy} — not reporting this as crash recovery")
-            return False
-    log("  No handoff file found for this project — treating this as "
-        "crash recovery")
-    return True
+    return handoff_state(workdir, instance_id).verdict == HANDOFF_MISSING
 
 
 def read_exit_code(instance) -> int | None:
