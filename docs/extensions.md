@@ -1,5 +1,22 @@
 # Extensions — design, after a three-family council
 
+**Status.** The in-loop half is built: `operator_kernel/extensions.py` and
+`operator_kernel/extension_worker.py`, with `tests/test_extensions.py`. §1
+through §5 are implemented or refused as written, except that the closed hook
+set is the three in-loop questions only. **The fleet host of §D-2 —
+`on_fact`, `on_tick`, `propose_work` — is not built**, and when it is it goes
+outside `operator_kernel/`: it is never on a critical path, and a supervision
+kernel that grows a ledger tailer has stopped being one. The open items of §8
+are still open, and the last of them is still the one most likely to be fatal.
+
+One departure from §1.7 worth naming, because it reads as a contradiction and
+is not: *one worker per extension* is implemented as one worker per **call**.
+That satisfies the reason for the rule more strongly than a persistent worker
+would — no extension can leave state where another call reads it, and a hung
+call cannot corrupt the next one's framing — at the cost of an interpreter
+start per call, which these hooks can afford because they fire at a launch or
+a gate rather than on the poll loop.
+
 Three reviewers from three model families were asked to design this
 independently: one from the protocol down, one from containment, and one from
 twenty concrete plugins someone would actually write. This document is the

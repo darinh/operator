@@ -552,7 +552,7 @@ You said intent, not requirements, so being explicit about what I decided:
 
 # Progress, 2026-08-15
 
-The kernel repository is public at **github.com/darinh/operator**. 204 tests
+The kernel repository is public at **github.com/darinh/operator**. 341 tests
 passing. `copilot-tools` is frozen to safety fixes (`4777ee2`).
 
 ## Decided since rev 5
@@ -565,23 +565,57 @@ passing. `copilot-tools` is frozen to safety fixes (`4777ee2`).
 | Seat id shape | **Not session-derived.** A seat outlives its sessions; a per-session identity destroys the per-seat history that effort estimates and calibration are computed from. `validate_seat_id` refuses session-shaped ids. |
 | Ceilings | Configurable, unlimited by default; cost still recorded as a fact. |
 | Review cadence | One PR at noon. The deadline governs assembly, never scheduling. |
-| Plugins | Runtime-loaded, closed hook set, two enforced prohibitions (§ below). |
+| Plugins | Out-of-process workers, closed hook set, two enforced invariants (§ below). |
 
-## The plugin system
+## The extension system
 
-Asked for so others can extend this. Designed mostly as prohibitions, because a
-plugin system is the shortest route back to the failures this kernel exists to
-prevent:
+Asked for so others can extend this. Designed mostly as prohibitions, because
+an extension system is the shortest route back to the failures this kernel
+exists to prevent. The design is `docs/extensions.md` — three reviewers from
+three model families, working independently — and the first attempt at it, four
+synchronous in-process callbacks, is superseded there and in the code.
 
-- **A plugin may not grant authority.** Its briefing text arrives attributed and
-  marked unverified. Backlog 0013 was one unattributed sentence reaching every
-  session; a plugin is a second way to write it with a package name in front.
-- **A plugin may not weaken a gate.** Contributions are additive; there is no
-  removal API and a test asserts its absence by name.
-- The hook set is closed, so a plugin cannot name its way into a future call
-  site. Hooks receive only what the call site passes.
-- A plugin's failure is recorded against the plugin, with detail, and the fleet
-  carries on. Installing a package must not be able to stop nine seats.
+Two hosts, because a nightly digest has to run at 08:00 whether or not any seat
+is up and the supervisor loop is per-seat:
+
+- **In-loop hooks** — `admit_launch`, `gate_change`, `detect_repo`, in
+  `operator_kernel/extensions.py`. Deadline-bounded, additive, fail-open.
+- **The fleet host** — `on_fact`, `on_tick`, `propose_work`. Never on a
+  critical path, and deliberately **outside `operator_kernel/`**: tailing a
+  ledger to send a digest is not supervision. Not built yet.
+
+What is enforced rather than documented:
+
+- **Extension code never runs in a supervisor process.** One worker process per
+  call, spawned by `extension_worker.py`. Cancellation is process termination,
+  which is the only kind Python has on Windows — a thread blocked in native
+  code cannot be interrupted, so an in-process hook's deadline is aspirational.
+  Discovery reads entry-point metadata and imports nothing; the first attempt
+  called `ep.load()`, so a module-level `while True` hung the supervisor before
+  any deadline could apply.
+- **INV-AUTH: an extension may not grant authority.** Its text arrives
+  attributed and marked unverified, through the same `mandate.vet_clause` scan
+  that work items and handoffs go through. Backlog 0013 was one unattributed
+  sentence reaching every session; an extension is a second way to write it
+  with a package name in front, which reads as *more* authoritative.
+- **INV-WORK: an extension may not create work.** No in-loop hook produces any,
+  the fleet host only ever proposes to a human queue, and the kernel's atomic
+  lease disposes. Backlog 0014 was manufactured work moving the progress
+  fingerprint; an extension reproduces it with a supply chain attached.
+- **A gate that errored is never a gate that said no.** `GateOutcome` keeps
+  `blocks` and `errors` apart in the type. Collapsing them lets one regex bug
+  block every merge on nine seats, stop the fingerprints, and trip the progress
+  breaker — one bad package stopping the fleet wearing the disguise of *the
+  agents got stuck*.
+- **Fail-open is the only policy**, which is a statement about the kernel: a
+  safety property may never be solely an extension's, so nothing fails closed
+  on an extension's absence. Cost ceilings and quiet hours are kernel gates
+  that read values an extension supplies.
+- **It is not a sandbox and is never described as one.** A worker runs as the
+  owner and can read everything the owner can. The subprocess buys crash
+  isolation, resource isolation and reliable cancellation — containment against
+  accident. Confidentiality needs the separate OS account below, and it is the
+  same gap, not a second one.
 
 ## Still open, and what each is waiting for
 
