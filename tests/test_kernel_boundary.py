@@ -43,10 +43,23 @@ FORBIDDEN = frozenset({
 #: nobody makes into a failure somebody has to answer for.
 MAX_MODULE_LINES = 800
 
-#: The ceiling on the kernel as a whole. The extraction spike measured the
-#: supervision kernel at roughly 6,000 lines against the old system's 28,443.
-#: This is that measurement plus room, not an aspiration.
-MAX_KERNEL_LINES = 7000
+#: The ceiling on the kernel as a whole.
+#:
+#: 7000 first, from the extraction spike's measurement of ~6000 plus room.
+#: Raised once, to 7500, when `seat.py` took it to 7022 -- and the raise was
+#: made only after checking for fat and not finding any: the project catalogue
+#: helpers in `paths.py` look like they do not belong until you follow them to
+#: `crash_recovery_verdict`, which needs the handoff path, and to the
+#: supervisor, which needs the primary checkout. Identity is real supervision
+#: surface too; the kernel decides who commits, and backlog 0013 is what happens
+#: when nothing does.
+#:
+#: **If this needs raising again, cut before you raise, and cut here first:**
+#: the project catalogue (`projects_root`, `project_dir`, `catalog_rows`,
+#: `guid_is_usable`) exists to resolve one handoff path and one working
+#: directory. Both become arguments the caller passes once continuity moves to
+#: the ledger, and roughly 250 lines leave with them.
+MAX_KERNEL_LINES = 7500
 
 
 def kernel_modules() -> list[Path]:
