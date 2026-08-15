@@ -546,3 +546,63 @@ You said intent, not requirements, so being explicit about what I decided:
 - **A day with nothing done produces no PR.** Not an empty one, and not a
   padded one. A quiet day should look quiet.
 
+
+
+---
+
+# Progress, 2026-08-15
+
+The kernel repository is public at **github.com/darinh/operator**. 204 tests
+passing. `copilot-tools` is frozen to safety fixes (`4777ee2`).
+
+## Decided since rev 5
+
+| Question | Answer |
+|---|---|
+| Rewrite or extract? | Extract. The spike (`docs/spike-extraction.md`) measured it rather than argued it. |
+| New repo? | Yes, public, kernel scope only. |
+| Seat identity | `<seat> (agent) <darin+agent-<seat>@users.noreply.github.com>`, accountable human in a trailer. |
+| Seat id shape | **Not session-derived.** A seat outlives its sessions; a per-session identity destroys the per-seat history that effort estimates and calibration are computed from. `validate_seat_id` refuses session-shaped ids. |
+| Ceilings | Configurable, unlimited by default; cost still recorded as a fact. |
+| Review cadence | One PR at noon. The deadline governs assembly, never scheduling. |
+| Plugins | Runtime-loaded, closed hook set, two enforced prohibitions (§ below). |
+
+## The plugin system
+
+Asked for so others can extend this. Designed mostly as prohibitions, because a
+plugin system is the shortest route back to the failures this kernel exists to
+prevent:
+
+- **A plugin may not grant authority.** Its briefing text arrives attributed and
+  marked unverified. Backlog 0013 was one unattributed sentence reaching every
+  session; a plugin is a second way to write it with a package name in front.
+- **A plugin may not weaken a gate.** Contributions are additive; there is no
+  removal API and a test asserts its absence by name.
+- The hook set is closed, so a plugin cannot name its way into a future call
+  site. Hooks receive only what the call site passes.
+- A plugin's failure is recorded against the plugin, with detail, and the fleet
+  carries on. Installing a package must not be able to stop nine seats.
+
+## Still open, and what each is waiting for
+
+- **The daily PR** — now possible (there is a remote), not yet built.
+- **Trust boundary** — unanswered. Agents share the owner's filesystem identity,
+  so "an agent cannot grant itself authority" remains decorative while a seat
+  can write the mandate, the gate code and the ledger. Making it real means a
+  separate OS account and ACLs. **This is the one open question that changes
+  what the design can honestly claim.**
+- **`tests/pending/`** — two migrated suites awaiting a FakeMux fixture and the
+  board. Not weakened to pass.
+- **The intent layer** — proof-of-change makes manufactured work look *stronger*
+  (0014 with evidence attached), so it needs something above it.
+- Sandboxed counterfactual test execution; patch-sensitivity spec; harness-native
+  resume for the crash case; reading `cli-agent-runner`'s 13 defenses.
+
+## Corrections made to this plan by evidence
+
+- The rewrite was withdrawn after the council found the autopsy argued against it.
+- Harness-native resume was reinstated after verification found it in four of six
+  harnesses — but only for crashes, since resuming an exhausted context
+  re-exhausts it.
+- The kernel budget went 7000 → 7500 once, after looking for fat and not finding
+  it. The next cut is named in the test rather than left to judgement.
