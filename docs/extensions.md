@@ -1,5 +1,47 @@
 # Extensions — design, after a three-family council
 
+**Status.** The in-loop half is built: `operator_kernel/extensions.py` and
+`operator_kernel/extension_worker.py`, with `tests/test_extensions.py`. §1
+through §5 are implemented or refused as written, except that the closed hook
+set is the three in-loop questions only. **Nothing calls it yet** — no
+supervisor path discovers extensions or asks a hook, so admission, gates and
+repository detection are inert until they are wired in. **The fleet host of
+§D-2 — `on_fact`, `on_tick`, `propose_work` — is not built**, and when it is it
+goes outside `operator_kernel/`: it is never on a critical path, and a
+supervision kernel that grows a ledger tailer has stopped being one. The open
+items of §8 are still open, and the last of them is still the one most likely
+to be fatal.
+
+One departure from §1.7 worth naming, because it reads as a contradiction and
+is not: *one worker per extension* is implemented as one worker per **call**.
+That satisfies the reason for the rule more strongly than a persistent worker
+would — no extension can leave state where another call reads it, and a hung
+call cannot corrupt the next one's framing — at the cost of an interpreter
+start per call, which these hooks can afford because they fire at a launch or
+a gate rather than on the poll loop.
+
+**What D-4 turned out to understate.** "Deadlines are enforceable because the
+worker is a separate process" is true and was not sufficient. With the worker's
+output on *pipes*, `subprocess.run` kills the worker at the timeout and then
+drains those pipes with no timeout of its own — and a grandchild inherited the
+handles, so the drain waits for the grandchild. Measured here: **20.11 seconds
+to return from a 1.0-second deadline**, seat unsupervised throughout. The
+worker's output goes to temporary files for that reason, which also bounds
+memory: a hook printing in a tight loop wrote 375 MB in two seconds, and
+through a pipe that is 375 MB of the supervisor's address space.
+
+**And what §3.3 turned out to understate.** A gate can be turned from *no* into
+*could not run* without any bug in the gate, by three routes that all had to be
+closed. Decoding the worker's output as the machine's locale under
+`errors="strict"` — which is what `text=True` does — meant one undecodable byte
+from native code killed the reader thread and discarded a reply that had
+already said `block`. Reading the reply out of stdout at all meant a megabyte
+of post-verdict logging pushed it out of the tail the host reads. And the
+cleanup after a deadline raised `OSError` when a surviving grandchild held the
+sandbox directory, which was caught and reported as *the worker never started*.
+The collapse §3.3 forbids was reachable by an extension logging a UTF-8 path,
+by one that logs a lot, and by this file's own tidy-up.
+
 Three reviewers from three model families were asked to design this
 independently: one from the protocol down, one from containment, and one from
 twenty concrete plugins someone would actually write. This document is the

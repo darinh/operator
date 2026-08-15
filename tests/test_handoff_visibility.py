@@ -382,6 +382,8 @@ def test_recording_the_verdict_never_raises(tmp_path, monkeypatch):
                         lambda *a, **k: (_ for _ in ()).throw(OSError("nope")))
     op.evidence.record_handoff_state(
         tmp_path, instance="seat", session=1, verdict=op.HANDOFF_WAITING)
+    assert not (tmp_path / "trace.jsonl").exists(), (
+        "the record was written after all, so this exercised nothing")
 
 
 # --- the wiring, which every test above would let you delete ----------------
