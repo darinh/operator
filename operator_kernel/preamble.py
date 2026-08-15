@@ -22,26 +22,51 @@ import instance
 from config import BASE_CLAUSES, CODE_CURRENT, CODE_MISMATCH, CODE_STALE
 from instance import Instance
 from claims import claims
+from mandate import Mandate, authority_clause, assert_no_unattributed_authority
 
 def build_preamble(agent_name: str, instance: Instance, crash_recovery: bool = False,
-                   assignment=None, code_state: str = CODE_CURRENT) -> str:
+                   assignment=None, code_state: str = CODE_CURRENT,
+                   mandate: "Mandate | None" = None) -> str:
+    """Compose the launch preamble from mechanism plus attributed authority.
+
+    Two kinds of sentence go to a session, and they are kept apart on purpose.
+
+    **Mechanism** is what this supervisor does: it relaunches, it reads a
+    handoff file, it is not being watched. The supervisor may assert those
+    because they are claims about its own behaviour, checkable against it.
+
+    **Authority** is what the agent is permitted to do. That comes from
+    `mandate.authority_clause` and nowhere else. Backlog 0013 -- one
+    unattributed sentence granting "blanket human approval for ALL decisions",
+    which reached every session and was later quoted back to the owner as his
+    own instruction -- was written in the first person of this function, and
+    survived the extraction into this kernel intact. `mandate.py` is why it
+    cannot be written here again, and
+    `tests/test_preamble_authority.py` is what fails if it is.
+
+    Note what is *not* said any more: nothing here tells the agent to make its
+    best judgement and proceed, because whether it may do that is a question
+    about its authority. Where no mandate is on file the agent is told exactly
+    that, which is a weaker and truer thing than the sentence it replaces.
+    """
     text = (
-        "You are running under an automated operator wrapper that a human set up. "
-        "Key facts: (1) You have blanket human approval for ALL decisions — tool calls, "
-        "file edits, git operations, architectural choices. Do not ask for direction or "
-        "confirmation. Make your best judgment call and proceed. If you are genuinely "
-        "uncertain between approaches that have very different consequences, state your "
-        "reasoning and pick one. (2) Session restart: when context gets heavy or a task is "
+        "You are running unattended under the operator supervisor, which launched "
+        "this session and will relaunch it if it dies. Key facts: (1) Nobody is "
+        "reading this session while it runs, so a prompt addressed to the user is "
+        "not seen by anyone and the seat idles until something kills it. "
+        "(2) Session restart: when context gets heavy or a task is "
         "complete with next steps, use the handoff command: handoff --instance "
         f"{instance.display_name} --status \"what you completed\" --next \"what to do next\" "
         "--context \"key decisions and gotchas\" — this atomically writes the handoff file "
         "and triggers the restart. It works the same on every platform. (3) On startup: "
         "always check for a session handoff file to resume work. (4) You are the "
-        f"@{agent_name} agent with --yolo permissions (all tools/files/URLs auto-approved). "
+        f"@{agent_name} agent, and the harness will not stop to confirm individual "
+        "tool calls, file edits or commands — which is a fact about the harness, not "
+        "a grant of permission to use it for a given purpose. "
         f"(5) Operator instance: {instance.display_name}. "
         "Now: check for your session handoff and get to work."
     )
-    clauses: list[str] = []
+    clauses: list[str] = [authority_clause(mandate)]
     if crash_recovery:
         clauses.append(
             "This session is being resumed because a handoff file could not be "
@@ -78,6 +103,24 @@ def build_preamble(agent_name: str, instance: Instance, crash_recovery: bool = F
     # which clause happened to be last.
     for offset, body in enumerate(clauses):
         text += f" ({BASE_CLAUSES + 1 + offset}) {body}"
+    # Checked here rather than only in the test suite, because the test can
+    # only see the preambles it thought to construct while this sees every one
+    # ever built. Raising stops the launch, which is the right trade while the
+    # only contributors are kernel code: a failure here means the supervisor
+    # was about to tell a session it had authority nobody granted, and nine
+    # seats not starting is a smaller harm than nine seats believing that. When
+    # extensions can contribute clauses this must become a refusal of the
+    # offending *clause*, recorded against its author -- a third-party package
+    # must not be able to stop the fleet.
+    # Exempt the mandate's own words, and only when a mandate exists. A human
+    # may grant anything; the rule is that a human said it. When there is no
+    # mandate the clause is the kernel's own refusal text, which has no human
+    # behind it either -- exempting it would carve a hole exactly the shape of
+    # the sentence this module exists to keep out. The first draft did exempt
+    # it, and only the control that tries to smuggle a grant through that
+    # clause revealed it.
+    assert_no_unattributed_authority(
+        text, attributed=clauses[0] if mandate is not None else None)
     return text
 
 

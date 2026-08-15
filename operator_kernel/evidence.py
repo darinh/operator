@@ -233,6 +233,45 @@ def _procfs_available() -> bool:
         return False
 
 
+def record_mandate_read(operator_home: Path, *, instance: str, session: int,
+                        mandate=None) -> None:
+    """Record the authority a session was launched with. Never raises.
+
+    A `fact.*`, not a claim: the supervisor read a file and hashed it, which
+    is an observation about its own behaviour.
+
+    This exists because the kernel cannot *prevent* a mandate being edited. A
+    seat runs under the owner's filesystem identity, so it can write the file
+    that says what it may do -- and that gap does not close until agents get
+    their own OS account, which is the open question in `docs/plan.md`. What
+    the kernel can do meanwhile is make the edit *visible*: every launch
+    records the digest of the text it used, so a mandate that changes shows up
+    as a change in the ledger, with the session that ran under each version
+    named beside it.
+
+    That is a weaker guarantee than prevention and is deliberately not
+    described as anything else. It converts a silent rewrite into one that can
+    be found afterwards, which is exactly the difference backlog 0013 turned
+    on: the sentence was discoverable only because git had kept it.
+    """
+    try:
+        _append(trace_path(Path(operator_home)), {
+            "ts": _utcnow(),
+            "event": "mandate_read",
+            "pid": os.getpid(),
+            "instance": str(instance),
+            "session": session,
+            # None rather than a placeholder digest: "no mandate" and "a
+            # mandate whose text happens to be empty" are different states,
+            # and only the first means the session was told it had no grant.
+            "present": mandate is not None,
+            "author": getattr(mandate, "author", None),
+            "recorded": getattr(mandate, "recorded", None),
+            "source": getattr(mandate, "source", None),
+            "digest": getattr(mandate, "digest", None),
+        })
+    except Exception:
+        return
 def ancestry(pid: "int | None" = None,
              limit: int = 12) -> "list[dict] | None":
     """The process chain above ``pid``, nearest parent first.

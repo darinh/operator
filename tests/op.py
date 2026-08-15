@@ -29,7 +29,7 @@ _MODULE_NAMES = (
     "session_state", "provenance", "supervisor_records", "breakers", "exits",
     "preamble", "supervisor", "supervisor_control", "trace", "claims",
     "snapshot", "process_identity", "mux", "console", "sqlite_store",
-    "version",
+    "version", "mandate",
 )
 
 _ALIASES = {

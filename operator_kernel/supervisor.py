@@ -31,6 +31,7 @@ from instance import Instance
 from launch import (args_have_explicit_session, extract_agent_from_args, handle_existing_session, has_agent_flag, start_session, with_experimental)
 from mux import MuxError
 from preamble import build_preamble
+from mandate import mandate_path, read_mandate
 from probes import die, log, marker_set, marker_state, remove_file, utcnow
 from provenance import _launch_code_state, running_code_fingerprint
 from session_state import (is_copilot_running, stop_session_gracefully, wait_for_metrics_capture)
@@ -370,13 +371,23 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                     assignment = _loop_start_session(work_db, instance,
                                                      session_num)
                     last_heartbeat = 0.0
+                    # Read per launch rather than once at start-up, so editing
+                    # the mandate takes effect at the next session instead of
+                    # requiring nine supervisors to be restarted -- and so the
+                    # digest recorded below describes the text this session
+                    # actually received.
+                    session_mandate = read_mandate(mandate_path(workdir))
+                    evidence.record_mandate_read(
+                        OPERATOR_HOME, instance=instance.id,
+                        session=session_num, mandate=session_mandate)
                     launch_preamble = build_preamble(
                         agent, instance,
                         crash_recovery=(had_predecessor
                                         and crash_recovery_verdict(
                                             workdir, instance.id)),
                         assignment=assignment,
-                        code_state=_launch_code_state())
+                        code_state=_launch_code_state(),
+                        mandate=session_mandate)
                     # Queued mail was injected into the preamble here. Mail is not
                     # part of this kernel: delivery is a concern with its own
                     # unsolved question -- `send_keys` proves only that a keystroke
