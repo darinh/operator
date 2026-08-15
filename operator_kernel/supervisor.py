@@ -432,6 +432,7 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                                          if handoff.verdict == HANDOFF_WAITING
                                          else ""),
                         handoff_unknown=(handoff.verdict == HANDOFF_UNKNOWN),
+                        handoff_written=handoff.written,
                         assignment=assignment,
                         code_state=_launch_code_state(),
                         mandate=session_mandate,

@@ -63,14 +63,42 @@ class HandoffState:
     write down that it was said.
     """
 
-    __slots__ = ("verdict", "path")
+    __slots__ = ("verdict", "path", "written")
 
-    def __init__(self, verdict: str, path: "Path | None" = None) -> None:
+    def __init__(self, verdict: str, path: "Path | None" = None,
+                 written: str = "") -> None:
         self.verdict = verdict
         self.path = path
+        self.written = written
 
     def __repr__(self) -> str:  # pragma: no cover - diagnostic only
-        return f"HandoffState({self.verdict!r}, {self.path!r})"
+        return f"HandoffState({self.verdict!r}, {self.path!r}, {self.written!r})"
+
+
+def _written_at(path: Path) -> str:
+    """When the handoff was last written, as UTC ISO-8601, or ``""``.
+
+    Reported rather than judged. The protocol is that the *reader* deletes the
+    handoff, and nothing enforces it -- so a file still on disk is either a
+    handoff nobody has picked up (exactly the case worth announcing loudly) or
+    one a previous session read and failed to delete before dying.
+
+    A reviewer proposed treating a handoff older than the previous session as
+    absent. That is refused: "the agent did not delete it" is not evidence that
+    the agent read it, and suppressing a real handoff silently drops a
+    session's accumulated context, which is the harm this whole change exists
+    to prevent. Announcing a stale one costs a read; hiding a live one costs
+    the work. So the age is handed to the agent, which can see both the
+    timestamp and its own clock, instead of being decided here on a guess.
+
+    Never raises: a stat that fails yields no timestamp, and a clause without
+    one is still an announcement.
+    """
+    try:
+        return (datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+                .strftime("%Y-%m-%dT%H:%M:%SZ"))
+    except (OSError, ValueError, OverflowError):
+        return ""
 
 
 def handoff_state(workdir: Path, instance_id: str = "") -> HandoffState:
@@ -103,7 +131,8 @@ def handoff_state(workdir: Path, instance_id: str = "") -> HandoffState:
             f"crash recovery")
         return HandoffState(HANDOFF_UNKNOWN, handoff_file)
     if present:
-        return HandoffState(HANDOFF_WAITING, handoff_file)
+        return HandoffState(HANDOFF_WAITING, handoff_file,
+                            _written_at(handoff_file))
     if instance_id:
         legacy = handoff_file.parent.parent / "next-session.md"
         legacy_present = path_present(legacy)
@@ -114,7 +143,7 @@ def handoff_state(workdir: Path, instance_id: str = "") -> HandoffState:
         if legacy_present:
             log(f"  No handoff at {handoff_file}, but an unmigrated one is "
                 f"at {legacy} — not reporting this as crash recovery")
-            return HandoffState(HANDOFF_WAITING, legacy)
+            return HandoffState(HANDOFF_WAITING, legacy, _written_at(legacy))
     log("  No handoff file found for this project — treating this as "
         "crash recovery")
     return HandoffState(HANDOFF_MISSING, handoff_file)

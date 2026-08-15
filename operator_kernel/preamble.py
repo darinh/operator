@@ -29,7 +29,8 @@ def build_preamble(agent_name: str, instance: Instance, crash_recovery: bool = F
                    assignment: str = "", code_state: str = CODE_CURRENT,
                    mandate: "Mandate | None" = None,
                    on_withheld=None, handoff_waiting: str = "",
-                   handoff_unknown: bool = False) -> str:
+                   handoff_unknown: bool = False,
+                   handoff_written: str = "") -> str:
     """Compose the launch preamble from mechanism plus attributed authority.
 
     Two kinds of sentence go to a session, and they are kept apart on purpose.
@@ -111,6 +112,29 @@ def build_preamble(agent_name: str, instance: Instance, crash_recovery: bool = F
         clauses.append(address)
         if withheld and on_withheld is not None:
             on_withheld("the handoff file's location", withheld)
+        if handoff_written:
+            # The age, and the protocol that explains an old one.
+            #
+            # Nothing deletes the handoff except its reader, and that is a
+            # convention rather than something the kernel enforces -- so a file
+            # on disk is either one nobody has picked up, or one a previous
+            # session read and died before removing. Those need opposite
+            # responses, and the supervisor cannot tell them apart: it can only
+            # report when the file was written and let the session compare that
+            # against its own clock.
+            #
+            # Saying the delete step out loud is also the cheapest available
+            # fix for the cause. A reader that deletes leaves no stale file to
+            # be re-announced, and the reason agents skip it is that nothing
+            # ever told them it was theirs to do.
+            clauses.append(
+                f"It was written at {handoff_written} (UTC). The reader is the "
+                "one who deletes a handoff, so delete it once you have taken in "
+                "its contents — otherwise the next session is told about it "
+                "again. If that timestamp is not recent, treat the contents as "
+                "possibly already acted on and check the repository before "
+                "redoing anything it describes."
+            )
     elif handoff_unknown:
         # "Could not look" is not "not there", and the difference has to reach
         # the agent rather than stopping at the tri-state inside `exits`.

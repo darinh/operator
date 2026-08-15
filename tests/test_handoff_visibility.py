@@ -107,6 +107,95 @@ def test_an_ordinary_path_is_not_withheld(seat):
     assert seen == []
 
 
+# --- staleness, which the kernel reports rather than judges -----------------
+
+def test_the_age_of_the_handoff_is_reported(seat):
+    """Nothing deletes a handoff except its reader, and that is a convention.
+
+    So a file on disk is either one nobody picked up or one a session read and
+    died before removing, and those want opposite responses. The supervisor
+    cannot tell them apart -- it can only say when the file was written and let
+    the session compare that against its own clock.
+    """
+    text = _preamble(seat, handoff_waiting="/tmp/h.md",
+                     handoff_written="2026-08-15T21:06:21Z")
+    assert "2026-08-15T21:06:21Z" in text
+
+
+def test_the_delete_step_is_stated(seat):
+    """The cheapest fix for the cause rather than the symptom.
+
+    A reader that deletes leaves nothing stale to re-announce, and the reason
+    agents skip it is that nothing ever told them it was theirs to do.
+    """
+    text = _preamble(seat, handoff_waiting="/tmp/h.md",
+                     handoff_written="2026-08-15T21:06:21Z")
+    assert "deletes a handoff" in text
+
+
+def test_an_unreadable_timestamp_still_announces_the_handoff(seat):
+    """A stat that failed must not cost the announcement.
+
+    The control for the two above: without it they are satisfied by an
+    implementation that only announces a handoff when it can date one, which
+    would drop the announcement in precisely the conditions -- a denied or
+    racing filesystem -- where a session most needs it.
+    """
+    text = _preamble(seat, handoff_waiting="/tmp/h.md", handoff_written="")
+    assert "A handoff from the previous session is waiting" in text
+    assert "/tmp/h.md" in text
+    assert "(UTC)" not in text
+
+
+def test_a_failed_stat_yields_no_timestamp_rather_than_raising(
+        tmp_path, monkeypatch):
+    """`_written_at` is on the launch path, so it may not raise.
+
+    The test above proves the *composer* copes with an empty timestamp; this
+    proves the thing that produces one actually returns empty instead of
+    unwinding into `run_loop_mode`, which catches neither `OSError` nor
+    anything else it would arrive as.
+    """
+    handoff = tmp_path / "copilot-tools.md"
+    handoff.write_text("# Session Handoff\n", encoding="utf-8")
+
+    real_stat = Path.stat
+    calls = []
+
+    def denied(self, *args, **kwargs):
+        if self == handoff:
+            calls.append(self)
+            raise OSError("permission denied")
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", denied)
+    assert op._written_at(handoff) == ""
+    assert calls, "the denial was never reached, so this asserts nothing"
+
+
+def test_a_stale_handoff_is_never_suppressed(tmp_path, monkeypatch):
+    """The reviewer's proposed fix, refused deliberately and on the record.
+
+    Treating a handoff older than the previous session as absent was proposed
+    to stop stale ones being announced. It is refused: "the agent did not
+    delete it" is not evidence that the agent read it, so the rule would
+    silently drop a session's accumulated context -- the exact harm this file
+    exists to prevent, and a far worse trade than one unnecessary read.
+
+    An ancient handoff is still a waiting handoff.
+    """
+    import os
+
+    ancient = tmp_path / "copilot-tools.md"
+    ancient.write_text("# Session Handoff\n", encoding="utf-8")
+    long_ago = 1_600_000_000  # 2020-09-13
+    os.utime(ancient, (long_ago, long_ago))
+
+    state = _classify(monkeypatch, ancient)
+    assert state.verdict == op.HANDOFF_WAITING
+    assert state.written.startswith("2020-09-13")
+
+
 def test_an_undetermined_handoff_is_said_out_loud(seat):
     """"Could not look" must reach the agent, not stop at the tri-state.
 
@@ -348,6 +437,13 @@ def test_the_loop_tells_a_session_about_its_waiting_handoff(
 
     assert "A handoff from the previous session is waiting" in preamble
     assert str(handoff) in preamble
+    # And its age reaches the text. Asserted here rather than only against
+    # `build_preamble`, because the argument that carries it is one more
+    # wiring line that can be dropped without any unit test noticing -- which
+    # is how `handoff_unknown` was found missing.
+    written = op._written_at(handoff)
+    assert written and written in preamble
+    assert "deletes a handoff" in preamble
 
 
 def test_the_loop_records_what_the_session_was_told(monkeypatch, tmp_path):
