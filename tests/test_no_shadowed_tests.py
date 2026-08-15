@@ -79,6 +79,92 @@ def test_the_shadowing_detector_ignores_methods_of_different_classes():
     assert duplicate_test_names(source) == []
 
 
+def asserts_nothing(source: str) -> "list[str]":
+    """Tests whose body can produce no verdict: no `assert`, no expected raise.
+
+    The fourth way to leave no result behind, and the one that arrives by
+    editing rather than by naming. A test written correctly loses its
+    assertions to a careless replace, and what is left still runs, still
+    exercises the code, and still prints a dot. The guard it was covering is
+    gone and the suite says everything is fine.
+
+    That happened here, to a test asserting that a deeply nested reply cannot
+    crash the reply reader: an edit replaced the block and dropped the last
+    three lines with it. Nothing in the run could have said so -- the *mutation*
+    control found it, by surviving.
+
+    A call to `pytest.raises`, `pytest.warns`, `pytest.fail` or a bare `raise`
+    counts, and so does a call to anything named `assert_*`: a function whose
+    name is a promise to raise is a verdict in the same sense, and this suite
+    uses `assert_no_unattributed_authority` that way deliberately. A call to
+    any *other* helper that asserts internally does not count, and that is
+    deliberate too: this is a cheap syntactic check, so it over-reports rather
+    than reasoning about what a helper does. Give such a test one assertion of
+    its own on the value the helper returns.
+    """
+    verdictless: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not node.name.startswith("test_"):
+            continue
+        found = False
+        for inner in ast.walk(node):
+            if isinstance(inner, (ast.Assert, ast.Raise)):
+                found = True
+                break
+            name = ""
+            if isinstance(inner, ast.Call):
+                target = inner.func
+                if isinstance(target, ast.Attribute):
+                    name = target.attr
+                elif isinstance(target, ast.Name):
+                    name = target.id
+            if (name in ("raises", "warns", "fail", "xfail", "deprecated_call")
+                    or name.startswith("assert")):
+                found = True
+                break
+        if not found:
+            verdictless.append(node.name)
+    return verdictless
+
+
+def test_no_test_can_pass_without_producing_a_verdict():
+    offenders = []
+    for path in _test_files():
+        for name in asserts_nothing(path.read_text(encoding="utf-8")):
+            offenders.append(f"{path.name}: {name}")
+    assert offenders == [], (
+        "these tests assert nothing, so they pass for every implementation "
+        "including the broken one:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_the_verdictless_detector_fires():
+    """Positive control, on the exact shape that got past review here."""
+    source = ("def test_a(tmp_path):\n"
+              "    (tmp_path / 'x').write_text('data')\n")
+    assert asserts_nothing(source) == ["test_a"]
+
+
+@pytest.mark.parametrize("body", [
+    "    assert 1 == 1\n",
+    "    with pytest.raises(ValueError):\n        int('x')\n",
+    "    for x in (1, 2):\n        assert x\n",
+    "    if True:\n        raise AssertionError('no')\n",
+    "    assert_no_unattributed_authority('text')\n",
+])
+def test_the_verdictless_detector_accepts_a_real_verdict(body):
+    """Negative controls: a detector that reports every test is not a detector,
+    and the nested cases are the ones a body-only scan would miss."""
+    assert asserts_nothing("def test_a():\n" + body) == []
+
+
+def test_the_verdictless_detector_ignores_helpers():
+    """Only `test_`-named functions. A helper is allowed to just build data."""
+    assert asserts_nothing("def build(tmp):\n    return 1\n") == []
+
+
 def test_every_test_file_is_collectable():
     """A file that cannot be parsed contributes no tests and no failure either.
 

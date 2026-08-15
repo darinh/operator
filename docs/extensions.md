@@ -31,11 +31,16 @@ memory: a hook printing in a tight loop wrote 375 MB in two seconds, and
 through a pipe that is 375 MB of the supervisor's address space.
 
 **And what §3.3 turned out to understate.** A gate can be turned from *no* into
-*could not run* without any bug in the gate. Decoding the worker's stdout as
-the machine's locale under `errors="strict"` — which is what `text=True` does —
-means one undecodable byte from native code kills the reader thread, empties
-`stdout`, and discards a reply that had already said `block`. The collapse §3.3
-forbids was reachable by an extension logging a UTF-8 path.
+*could not run* without any bug in the gate, by three routes that all had to be
+closed. Decoding the worker's output as the machine's locale under
+`errors="strict"` — which is what `text=True` does — meant one undecodable byte
+from native code killed the reader thread and discarded a reply that had
+already said `block`. Reading the reply out of stdout at all meant a megabyte
+of post-verdict logging pushed it out of the tail the host reads. And the
+cleanup after a deadline raised `OSError` when a surviving grandchild held the
+sandbox directory, which was caught and reported as *the worker never started*.
+The collapse §3.3 forbids was reachable by an extension logging a UTF-8 path,
+by one that logs a lot, and by this file's own tidy-up.
 
 Three reviewers from three model families were asked to design this
 independently: one from the protocol down, one from containment, and one from

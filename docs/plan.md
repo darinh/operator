@@ -552,7 +552,7 @@ You said intent, not requirements, so being explicit about what I decided:
 
 # Progress, 2026-08-15
 
-The kernel repository is public at **github.com/darinh/operator**. 341 tests
+The kernel repository is public at **github.com/darinh/operator**. 381 tests
 passing. `copilot-tools` is frozen to safety fixes (`4777ee2`).
 
 ## Decided since rev 5

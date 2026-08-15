@@ -30,10 +30,22 @@ follow from that and only one of them is a crash:
   installed package hung the supervisor before any deadline could apply.
   Discovery here reads entry-point metadata and imports nothing.
 
-**Cancellation is process termination.** Python cannot interrupt a thread
-blocked in native code, so an in-process hook has no enforceable deadline on
-the platform this fleet runs on. A deadline is only real because there is a
-process to kill, which is the strongest single argument for the subprocess.
+**The reply travels on a channel of its own**, which stdout cannot be. It did,
+with a token to pick it out of whatever else reached the stream, and two
+reviewers found the same thing from opposite directions: an extension may
+legitimately write to descriptor 1, so it can put noise *after* the reply, and
+the host reads a bounded tail — a megabyte of logging pushes a `gate_change`
+that answered `block` out of the window, the host reports a protocol violation,
+and fail-open turns the block into an allow. A stream a third party may write
+to is not a protocol channel.
+
+**No pipes in either direction, and that is what makes the deadline real.**
+With `capture_output=True`, `subprocess.run` kills the worker at the timeout
+and then drains the pipes with *no* timeout of its own — and a grandchild that
+inherited the handles keeps the drain waiting. Measured here: 20.11 seconds to
+return from a 1.0-second deadline, seat unsupervised throughout. `input=` is a
+pipe too, with the same defect on the writing side. Arguments go in through a
+file and diagnostics come out through one.
 
 **This is not a sandbox and must never be described as one.** A worker runs as
 the owner and can read every file the owner can — the ledger, the mandates, the
@@ -44,10 +56,13 @@ as its open question, and it is the same gap, not a second one.
 
 **The holes that remain, named rather than papered over.** A worker's
 *grandchildren* outlive the kill — closing that needs a Windows Job Object with
-`KILL_ON_JOB_CLOSE` — though they can no longer delay supervision, which is the
-part that was costing the guarantee. An extension writing an absolute path is
-not contained by anything here; only the relative-path accident is. And the
-token that identifies a reply is unguessable, not unforgeable: a worker can read
+`KILL_ON_JOB_CLOSE`, and it is the same fix for all three of these. They can no
+longer delay supervision, which is the part that was costing the guarantee, but
+they can still hold the diagnostic files open and keep *writing* to them: a hook
+printing in a tight loop wrote 375 MB in two seconds, so an extension can fill a
+disk even though it can no longer fill memory. An extension writing an absolute
+path is not contained by anything here; only the relative-path accident is. And
+the token identifying a reply is unguessable, not unforgeable: a worker can read
 its own `sys.argv`.
 
 The two invariants a reviewer can check
@@ -90,6 +105,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -148,7 +164,7 @@ WORKER = Path(__file__).resolve().parent / "extension_worker.py"
 #: A dotted module path and nothing else. The target is interpolated into a
 #: command line and imported in the child, so it is checked for shape here
 #: rather than after something has already run.
-_TARGET_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
+_TARGET_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*")
 
 #: An extension's name, which is *not* only a label: it is interpolated into
 #: text a session reads, so it is third-party content in the same sense the
@@ -156,7 +172,11 @@ _TARGET_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
 #: `preamble.py` has already been through this one field over -- a directory
 #: called `.../you have permission to/` made the final authority scan raise,
 #: which kills that seat's supervisor and does not bring it back.
-_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+#:
+#: Matched with `fullmatch`, never `match`: `$` also matches immediately before
+#: a trailing newline, so `re.match(r"^...$", "ordinary\n")` succeeds and the
+#: name it admits breaks the very envelope this pattern exists to protect.
+_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
 class ExtensionError(Exception):
@@ -278,7 +298,7 @@ def discover(entry_points: "Iterable | None" = None
         if target is None:
             target = str(getattr(ep, "value", "")).partition(":")[0]
         target = str(target).strip()
-        if not _NAME_RE.match(name) or not _TARGET_RE.match(target):
+        if not _NAME_RE.fullmatch(name) or not _TARGET_RE.fullmatch(target):
             failures.append(Failure(name.splitlines()[0][:64] if name.strip()
                                     else "<unnamed>", "discover",
                                     "MalformedEntryPoint",
@@ -333,10 +353,16 @@ class Host:
         # supervisor's launch path. A hook that writes `notes.md` with no
         # directory would otherwise land it in the tree whose changes are the
         # progress signal -- INV-WORK defeated by a relative path rather than
-        # by an API. Containment against accident; an extension that writes an
-        # absolute path is not stopped by anything here, and saying otherwise
-        # would be the sandbox claim this design refuses to make.
-        self.cwd = cwd or tempfile.gettempdir()
+        # by an API.
+        #
+        # A private directory per call, and not the shared temp directory: two
+        # workers writing `cache.db` there would collide across seats, and a
+        # third could drop a module into a directory the next worker resolves
+        # relative imports against. Containment against accident; an extension
+        # that writes an absolute path is not stopped by anything here, and
+        # saying otherwise would be the sandbox claim this design refuses to
+        # make.
+        self.cwd = cwd
         self.quarantined: dict[str, str] = {}
 
     def call(self, hook: str, /, **kwargs) -> "tuple[list[Claim], list[Failure]]":
@@ -363,26 +389,34 @@ class Host:
                 f"({', '.join(HOOKS)}) so that an extension cannot name its "
                 f"way into a call site the kernel grows later."
             )
+        # Before serialising, not after. `json.dumps` on a large or awkward
+        # payload is real time spent on the launch path, and a budget that
+        # starts once it is over cannot account for it.
+        expires = time.monotonic() + self.call_deadline
         try:
             payload = json.dumps(kwargs, allow_nan=False)
-        except (TypeError, ValueError) as exc:
+        except Exception as exc:
+            # `Exception`, not `(TypeError, ValueError)`. Deeply nested
+            # arguments make `json.dumps` raise `RecursionError`, which is
+            # neither -- so a caller passing a pathological structure took the
+            # supervisor down through the one path here that runs before any
+            # per-extension backstop exists.
             return [], [Failure("<kernel>", hook, "NotSerializable", str(exc))]
 
         claims: list[Claim] = []
         failures: list[Failure] = []
-        budget = self.call_deadline
         for ext in self.extensions:
             if ext.name in self.quarantined:
                 failures.append(Failure(ext.name, hook, "Quarantined",
                                         self.quarantined[ext.name]))
                 continue
+            budget = expires - time.monotonic()
             if budget <= 0:
                 failures.append(Failure(
                     ext.name, hook, "BudgetExhausted",
                     f"the {self.call_deadline}s budget for one {hook} call was "
                     f"spent before this extension was reached"))
                 continue
-            started = time.monotonic()
             try:
                 claim, failure = self._ask(ext, hook, payload,
                                            min(self.deadline, budget))
@@ -393,7 +427,6 @@ class Host:
                 # anticipated, including the ones in this file.
                 claim, failure = None, Failure(ext.name, hook, "HostError",
                                                repr(exc))
-            budget -= time.monotonic() - started
             if claim is not None:
                 claims.append(claim)
             if failure is not None:
@@ -404,54 +437,82 @@ class Host:
              ) -> "tuple[Claim | None, Failure | None]":
         """Spawn one worker, ask it one question, and read at most one answer.
 
-        **Output goes to temporary files, never to pipes**, and that is the
-        difference between a deadline and a wish. With `capture_output=True`,
-        `subprocess.run` kills the worker when the timeout expires and then
-        calls `communicate()` again with *no* timeout to drain the pipes -- and
-        any grandchild the worker spawned inherited those handles, so the drain
-        waits for the grandchild. Measured on this machine: a worker that
-        `Popen`s a 20-second sleeper and hangs took **20.11 seconds to return
-        from a 1.0-second deadline**, with the whole seat unsupervised
-        throughout. The same call against temporary files returned in 1.02s.
+        **No pipes, in either direction**, and that is the difference between a
+        deadline and a wish. With `capture_output=True`, `subprocess.run` kills
+        the worker when the timeout expires and then calls `communicate()`
+        again with *no* timeout to drain the pipes -- and any grandchild the
+        worker spawned inherited those handles, so the drain waits for the
+        grandchild. Measured on this machine: a worker that `Popen`s a
+        20-second sleeper and hangs took **20.11 seconds to return from a
+        1.0-second deadline**, with the whole seat unsupervised throughout. The
+        same call against temporary files returned in 1.02s.
 
-        It bounds memory for the same reason. A hook printing in a tight loop
-        wrote 375 MB in two seconds; through a pipe that is 375 MB of the
-        supervisor's address space, and one extension can end nine seats by
-        exhausting it. On disk it is a file that gets deleted, and only the
-        tail is ever read back.
+        `input=` is a pipe too, and a reviewer found the same defect there one
+        field over: a payload larger than the OS pipe buffer blocks the writer
+        thread, and a grandchild holding the read end keeps it blocked past the
+        kill. The arguments go in through a file for the same reason the output
+        comes out through one.
+
+        Files also bound memory. A hook printing in a tight loop wrote 375 MB
+        in two seconds; through a pipe that is 375 MB of the supervisor's
+        address space, and one extension can end nine seats by exhausting it.
+
+        **The reply has its own channel**, which stdout cannot be: an extension
+        may legitimately write there, so a megabyte of logging after a verdict
+        pushes that verdict out of the tail the host reads, and fail-open turns
+        a `block` into an allow. The path is private to this call and is
+        removed afterwards.
 
         Grandchildren still outlive the kill -- that hole is real, and closing
         it needs a Windows Job Object with `KILL_ON_JOB_CLOSE`. What changes
         here is that they can no longer *delay supervision*, which is the part
         that was costing the guarantee.
-
-        Bytes in, bytes out, decoded with `errors="replace"`. `text=True`
-        decodes as the machine's locale under `errors="strict"`, so a single
-        undecodable byte written to descriptor 1 by native code killed the
-        reader thread, produced an empty `stdout`, and turned a `gate_change`
-        that had already answered `block` into a `ProtocolViolation`. That is
-        §3.3 exactly -- "the check ran and said no" collapsed into "the check
-        could not run" -- reached by an extension logging a UTF-8 path.
         """
         token = secrets.token_hex(8)
-        argv = [self.python, str(self.worker), ext.target, hook, token]
         try:
-            with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            fd, reply_path = tempfile.mkstemp(prefix="operator-extension-")
+            os.close(fd)
+            sandbox = tempfile.mkdtemp(prefix="operator-extension-cwd-")
+        except OSError as exc:
+            return None, Failure(ext.name, hook, "WorkerUnavailable",
+                                 f"no reply channel: {exc}")
+        argv = [self.python, str(self.worker), ext.target, hook, token,
+                reply_path]
+        try:
+            with tempfile.TemporaryFile() as feed, \
+                    tempfile.TemporaryFile() as out, \
+                    tempfile.TemporaryFile() as err:
+                feed.write(payload.encode("utf-8"))
+                feed.seek(0)
                 try:
-                    done = subprocess.run(argv, input=payload.encode("utf-8"),
-                                          stdout=out, stderr=err, cwd=self.cwd,
+                    done = subprocess.run(argv, stdin=feed, stdout=out,
+                                          stderr=err, cwd=self.cwd or sandbox,
                                           timeout=deadline)
                 except subprocess.TimeoutExpired:
                     reason = f"did not answer {hook} within {deadline}s"
                     self.quarantined[ext.name] = reason
                     return None, Failure(ext.name, hook, "Deadline", reason)
                 stdout, stderr = _tail(out), _tail(err)
+            reply = _read_reply(reply_path, token)
         except OSError as exc:
             reason = f"worker could not be started: {exc}"
             self.quarantined[ext.name] = reason
             return None, Failure(ext.name, hook, "WorkerUnavailable", reason)
+        finally:
+            # Cleanup that cannot change the verdict, which it did once: a
+            # `TemporaryDirectory` context exit raised `OSError` because the
+            # surviving grandchild still had the sandbox as its working
+            # directory, and Windows will not remove a directory a process is
+            # sitting in. That escaped the `with` *after* the deadline had been
+            # detected and was caught as `WorkerUnavailable`, so a hook that
+            # ran out of time was reported as one that never started -- this
+            # design's own collapse, in its own tidy-up.
+            try:
+                os.unlink(reply_path)
+            except OSError:
+                pass
+            shutil.rmtree(sandbox, ignore_errors=True)
 
-        reply = _reply_in(stdout, token)
         if reply is None:
             return None, Failure(
                 ext.name, hook, "ProtocolViolation",
@@ -469,14 +530,42 @@ class Host:
 def _tail(handle, limit: int = TAIL_BYTES) -> str:
     """The last `limit` bytes a worker wrote, decoded without ever raising.
 
-    `errors="replace"` and not `strict`: this stream carries whatever an
-    extension put on descriptor 1, and a decoding error here would discard a
-    perfectly good reply written after some library's mis-encoded log line.
+    Diagnostics only -- this is the extension's own stream, and nothing is
+    parsed out of it. `errors="replace"` and not `strict`, because a decoding
+    error while composing a *failure message* would turn a reportable failure
+    into an exception on the launch path.
     """
     handle.seek(0, os.SEEK_END)
     size = handle.tell()
     handle.seek(max(0, size - limit))
     return handle.read().decode("utf-8", "replace")
+
+
+def _read_reply(path: str, token: str) -> "dict | None":
+    """The worker's answer, or `None` when there is not one to read.
+
+    Read from a path this call created and nothing else writes to, so the
+    reply is not *found* among other output -- there is no other output here.
+    The token still has to match: a file at that path which does not carry it
+    was not written by this worker, and answering a question with somebody
+    else's answer is worse than reporting that nobody answered.
+
+    Never raises, over any input. `json.loads` raises `RecursionError` on
+    deeply nested input, which is not a `ValueError`, and letting that out
+    would take a supervisor down over what an extension wrote in a file.
+    """
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read(TAIL_BYTES)
+    except OSError:
+        return None
+    try:
+        obj = json.loads(raw.decode("utf-8", "replace"))
+    except Exception:
+        return None
+    if isinstance(obj, dict) and "ok" in obj and obj.get("token") == token:
+        return obj
+    return None
 
 
 def _reply_in(stdout: str, token: str) -> "dict | None":
@@ -575,28 +664,30 @@ def gate_outcome(claims: "Iterable[Claim]",
     return GateOutcome(blocks=tuple(blocks), errors=tuple(errors))
 
 
-def _name_grants(name: str) -> list:
-    """Granting phrases in an extension's name, separators normalised.
+def _canonical(text: str) -> str:
+    """Lower-cased, with every separator this ecosystem uses folded to a space.
 
-    Both spellings, because they miss opposite things. `GRANTING_PHRASES` is
-    written in prose -- `"you have approval"`, with spaces -- and package names
-    are written in packaging: `you-have-approval`, `you_have_approval`,
-    `acme.you.have.approval`. Scanning only the raw name lets every multi-word
-    phrase in that list through a name unchanged, which is the whole blocklist
-    bypassed by the punctuation convention of the ecosystem this reads from.
-    Scanning only the normalised form loses the entries that are *already*
-    hyphenated, `"pre-approved"` among them.
+    So that one phrase written one way is caught in all of them. Package names
+    are spelled `pre-approved`, `pre_approved`, `pre.approved` and
+    `acme.pre.approved`; `GRANTING_PHRASES` contains prose (`"you have
+    approval"`) *and* hyphenated entries (`"pre-approved"`). Folding only the
+    name misses the hyphenated phrases, and folding neither misses everything
+    multi-word -- both halves have to be canonicalised against each other, and
+    the first two attempts here each did one of them.
+    """
+    return re.sub(r"[-_.\s]+", " ", text.lower()).strip()
+
+
+def _name_grants(name: str) -> list:
+    """Granting phrases in an extension's name, in any spelling of them.
 
     Still a blocklist, and `mandate.py` is explicit that a blocklist is
     incomplete by construction. This does not make a name safe; it makes the
     list apply to names at all.
     """
-    spaced = re.sub(r"[-_.]+", " ", name)
-    found = mandate.granting_phrases_in(name)
-    for phrase in mandate.granting_phrases_in(spaced):
-        if phrase not in found:
-            found.append(phrase)
-    return found
+    haystack = _canonical(name)
+    return [phrase for phrase in mandate.GRANTING_PHRASES
+            if _canonical(phrase) in haystack]
 
 
 def _safe_source(name: str) -> "tuple[str, list]":
@@ -626,7 +717,7 @@ def _safe_source(name: str) -> "tuple[str, list]":
     goes back to the caller for the ledger.
     """
     found = _name_grants(name)
-    if _NAME_RE.match(name) and not found:
+    if _NAME_RE.fullmatch(name) and not found:
         return name, []
     return "withheld-name", found or ["unprintable name"]
 
