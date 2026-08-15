@@ -141,6 +141,46 @@ class FakeMux(mux.Mux):
 _MUX_BINARIES = frozenset({"tmux", "psmux", "pmux"})
 
 
+def _spawn_head(cmd) -> str:
+    """The executable ``cmd`` would start, whatever shape the caller used.
+
+    ``subprocess.run`` takes four shapes and the guard above used to understand
+    one of them. A sequence is ``argv`` and its head is a whole filename, which
+    may legitimately contain spaces. A **string** is a command *line*: with
+    ``shell=True`` on any platform, and without it on Windows, where the string
+    goes to ``CreateProcess`` unsplit -- so ``"tmux kill-server"`` starts tmux,
+    and reading the whole string as a program name answered ``False`` for it.
+    **Bytes** are either of those, encoded. And a ``PathLike`` stringifies to
+    its ``repr`` unless asked properly.
+
+    So the string form is split at the first separator and a leading quoted
+    program is unquoted, while the sequence form is left whole. Getting this
+    backwards would break the opposite case: splitting a sequence head turns
+    ``["C:\\Program Files\\tmux.exe"]`` into ``C:\\Program``, which is not a
+    multiplexer and would be delegated.
+    """
+    if isinstance(cmd, (list, tuple)):
+        head = cmd[0] if cmd else ""
+        if hasattr(head, "__fspath__"):
+            head = os.fspath(head)
+        if isinstance(head, (bytes, bytearray)):
+            head = head.decode("utf-8", "replace")
+        return str(head).strip()
+
+    head = cmd
+    if hasattr(head, "__fspath__"):
+        head = os.fspath(head)
+    if isinstance(head, (bytes, bytearray)):
+        head = head.decode("utf-8", "replace")
+    head = str(head).strip()
+    if head[:1] in ('"', "'"):
+        quote, rest = head[0], head[1:]
+        closing = rest.find(quote)
+        return rest[:closing] if closing != -1 else rest
+    parts = head.split(None, 1)
+    return parts[0] if parts else ""
+
+
 def _is_a_multiplexer_spawn(cmd) -> bool:
     """True when ``cmd`` would start a real terminal multiplexer client.
 
@@ -186,9 +226,15 @@ def _is_a_multiplexer_spawn(cmd) -> bool:
     separators, so it is the union of the two syntaxes rather than a guess at
     it. Over-refusing inside the test suite costs a loud error; under-refusing
     costs a real server.
+
+    The argv shapes it accepts are handled by :func:`_spawn_head`, and that
+    split exists because this predicate answered ``False`` for
+    ``"tmux kill-server"`` and for ``b"tmux"`` -- the string and bytes forms --
+    while answering ``True`` for the list form the tests happened to use. The
+    most destructive argv named anywhere in this file was one of the two it
+    missed.
     """
-    head = cmd[0] if isinstance(cmd, (list, tuple)) and cmd else cmd
-    name = ntpath.basename(str(head)).lower()
+    name = ntpath.basename(_spawn_head(cmd)).lower()
     if name.endswith(".exe"):
         name = name[:-4]
     return name in _MUX_BINARIES
@@ -276,6 +322,72 @@ def _no_real_multiplexer(request: pytest.FixtureRequest):
     finally:
         mux.subprocess.run = real_run
         op.MUX = real_mux
+
+
+@pytest.fixture(autouse=True)
+def _no_process_wide_leaks():
+    """Undo the two things a supervisor legitimately does to its own process.
+
+    `run_loop_mode` installs SIGINT/SIGTERM handlers and registers an `atexit`
+    callback -- correct for a real supervisor, which owns its process for its
+    whole life, and a leak inside a test runner, which does not. Twenty-two
+    tests in `test_loop_resilience.py` call it, so promoting that file into the
+    collected suite left the pytest process running with a handler belonging to
+    a supervisor that no longer exists, and with one exit callback per test
+    holding a path under a deleted `tmp_path`.
+
+    The interrupt handler is the half that matters. `_on_signal` sets a
+    shutdown flag on an object nobody is looking at any more, so after this
+    module runs, Ctrl-C during the rest of the suite is *absorbed*: the
+    developer presses it and nothing happens.
+
+    `atexit.register` is wrapped rather than counted, because `atexit` offers no
+    way to enumerate what is registered -- only `unregister`, which needs the
+    callable in hand. Recording them on the way through is the only way to give
+    them back.
+
+    Like `_no_real_multiplexer`, this requests no ordinary fixture, so it is not
+    pulled into monkeypatch's finalisation stack.
+    """
+    import atexit
+    import signal
+
+    names = [name for name in ("SIGINT", "SIGTERM", "SIGBREAK")
+             if hasattr(signal, name)]
+    handlers = {}
+    for name in names:
+        number = getattr(signal, name)
+        try:
+            handlers[number] = signal.getsignal(number)
+        except (ValueError, OSError):
+            # Not the main thread, or the platform refuses to report it.
+            # Nothing to restore is a better answer than a crashed fixture.
+            pass
+
+    registered = []
+    real_register = atexit.register
+
+    def recording_register(func, *args, **kwargs):
+        registered.append(func)
+        return real_register(func, *args, **kwargs)
+
+    atexit.register = recording_register
+    try:
+        yield
+    finally:
+        atexit.register = real_register
+        for func in registered:
+            atexit.unregister(func)
+        for number, handler in handlers.items():
+            # `getsignal` answers None for a handler set outside Python, and
+            # `signal(number, None)` is a TypeError -- restoring nothing is
+            # right there, and it must not take the teardown down with it.
+            if handler is None:
+                continue
+            try:
+                signal.signal(number, handler)
+            except (ValueError, OSError):
+                pass
 
 
 @pytest.fixture

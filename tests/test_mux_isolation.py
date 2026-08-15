@@ -126,26 +126,61 @@ def test_every_holder_sees_the_same_multiplexer():
     )
 
 
-def test_a_test_gets_its_own_multiplexer_not_a_shared_one():
-    """State written by one test must not be readable by the next.
+#: Every fake this module has been handed, kept alive on purpose. Identity is
+#: the question being asked, and `id()` is reused once an object is collected,
+#: so comparing bare ids would eventually compare a live fake against a dead
+#: one's address and fail for a reason that has nothing to do with isolation.
+_MULTIPLEXERS_SEEN: list = []
 
-    The fake is a dict, so a single shared instance would carry sessions
-    across tests -- the same order-dependence the real server produced, moved
-    in-process where it is harder to see.
+
+def _record_a_fresh_multiplexer():
+    """Assert this test's fake is new and empty, then remember it.
+
+    Written as a helper each test calls, rather than as an assertion in a
+    second test about what a first test did, and the difference is the whole
+    point. The earlier version of this pair asserted `"leak-detector" not in
+    op.MUX.sessions` in a test that depended on its predecessor having put it
+    there -- so under `-k`, under `pytest-xdist`, or under any randomised
+    ordering, the second test ran against an empty table and passed without
+    grading anything. A test that passes for the wrong reason when run alone is
+    the shape this repository is least able to afford.
+
+    Each caller now grades itself: the table it was handed is empty, and the
+    object is not one any earlier test in this process was handed. Run alone,
+    the emptiness assertion still bites; run together, so does the identity one.
     """
     assert op.MUX.sessions == {}, (
         f"this test began with sessions already present: {op.MUX.sessions}. "
         f"The fake is being shared between tests rather than rebuilt."
     )
+    assert not any(seen is op.MUX for seen in _MULTIPLEXERS_SEEN), (
+        "this test was handed a multiplexer an earlier test already used; the "
+        "autouse fixture is not building a new one per test"
+    )
+    _MULTIPLEXERS_SEEN.append(op.MUX)
+
+
+def test_a_test_gets_its_own_multiplexer_not_a_shared_one():
+    """State written by one test must not be readable by the next.
+
+    The fake is a dict, so a single shared instance would carry sessions across
+    tests -- the same order-dependence the real server produced, moved
+    in-process where it is harder to see.
+    """
+    _record_a_fresh_multiplexer()
     op.MUX.new_session("leak-detector", str(REPO), ["true"])
     assert "leak-detector" in op.MUX.sessions
 
 
-def test_a_second_test_does_not_inherit_the_first_ones_sessions():
-    """Deliberately paired with the test above, and ordered after it."""
-    assert "leak-detector" not in op.MUX.sessions, (
-        "a session created by the previous test survived into this one"
-    )
+def test_a_second_test_is_handed_a_different_multiplexer_again():
+    """Paired with the test above, but no longer dependent on it.
+
+    It asserts the same self-contained property, so running it alone grades
+    something rather than passing on an empty table it never expected to
+    contain anything.
+    """
+    _record_a_fresh_multiplexer()
+    assert "leak-detector" not in op.MUX.sessions
 
 
 # ── the spawn-poison half ───────────────────────────────────────
@@ -184,6 +219,15 @@ def test_the_guard_delegates_every_other_subprocess():
 @pytest.mark.parametrize("argv", [
     ["tmux"], ["psmux"], ["pmux"], ["tmux.exe"], ["TMUX.EXE"],
     [r"C:\tools\tmux.exe"], ["/usr/bin/tmux"], [r"C:tmux.exe"],
+    ["tmux", "kill-server"], [r"C:\Program Files\tmux.exe"],
+    # The shapes the predicate used to miss. `subprocess.run` accepts a command
+    # LINE as a string -- with shell=True anywhere, and without it on Windows,
+    # where it goes to CreateProcess unsplit. Both were answered False, and
+    # `"tmux kill-server"` is the single most destructive argv this file names.
+    "tmux", "tmux kill-server", "/usr/bin/tmux attach", r"C:tmux.exe kill-server",
+    '"C:\\Program Files\\tmux.exe" kill-server',
+    b"tmux", b"tmux kill-server", [b"tmux"],
+    Path("tmux"), [Path(r"C:\tools\tmux.exe")],
 ])
 def test_the_spawn_predicate_recognises_a_multiplexer(argv):
     """Windows and POSIX spellings both, on whichever platform is running.
@@ -197,7 +241,14 @@ def test_the_spawn_predicate_recognises_a_multiplexer(argv):
 
 @pytest.mark.parametrize("argv", [
     ["python"], ["git", "status"], ["tmuxinator"], ["notmux"], ["copilot"],
+    "python -c pass", "tmuxinator start", "notmux", b"python", "", [],
+    ["python", "tmux.py"], "python tmux.py",
 ])
 def test_the_spawn_predicate_leaves_everything_else_alone(argv):
-    """Negative control: a predicate that refuses everything also 'passes'."""
+    """Negative control: a predicate that refuses everything also 'passes'.
+
+    `["python", "tmux.py"]` and its string form are the cases that matter most
+    here: the guard must read the *program*, not any argument that happens to
+    name a multiplexer, or the suite loses the ability to run child processes.
+    """
     assert _is_a_multiplexer_spawn(argv) is False

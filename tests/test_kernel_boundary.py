@@ -177,7 +177,21 @@ def _module_names() -> set[str]:
 
 
 def imported_names(source: str) -> set[str]:
-    """Top-level module names imported by ``source``, however spelled."""
+    """Top-level module names imported by ``source``, however spelled.
+
+    Literal dynamic imports count. `__import__("copilot_operator")` and
+    `importlib.import_module("operator_liveness")` are the two forms that
+    reproduce the exact defect this scan exists to catch while leaving no
+    `Import` node behind, so a scan that reads only import *statements* reports
+    the tree clean while the violation is present -- the failure mode
+    `test_the_kernel_does_not_use_forbidden_modules_it_never_imported` was
+    written for, in a different disguise.
+
+    Only literal string arguments are read. A computed module name cannot be
+    resolved statically, and guessing at one would produce false accusations
+    that are worse than the silence: this scan's whole value is that a failure
+    means something.
+    """
     names: set[str] = set()
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
@@ -187,7 +201,30 @@ def imported_names(source: str) -> set[str]:
             # `level` non-zero is a relative import, which names nothing outside.
             if node.level == 0 and node.module:
                 names.add(node.module.split(".")[0])
+        elif isinstance(node, ast.Call):
+            target = _dynamic_import_argument(node)
+            if target:
+                names.add(target.split(".")[0])
     return names
+
+
+def _dynamic_import_argument(node: ast.Call) -> str | None:
+    """The literal module name in `__import__(...)`/`importlib.import_module(...)`."""
+    func = node.func
+    if isinstance(func, ast.Name):
+        called = func.id
+    elif isinstance(func, ast.Attribute):
+        called = func.attr
+    else:
+        return None
+    if called not in ("__import__", "import_module"):
+        return None
+    if not node.args:
+        return None
+    first = node.args[0]
+    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+        return first.value
+    return None
 
 
 def test_there_are_kernel_modules_to_check():
@@ -226,6 +263,19 @@ def suite_modules() -> list[Path]:
     return sorted((REPO / "tests").rglob("*.py"))
 
 
+def _importable_suite_names() -> set[str]:
+    """Test modules importable as top-level names.
+
+    Only `tests/` itself is on `pythonpath` (see pyproject), so
+    `tests/pending/test_restart_all_loops.py` does NOT make
+    `test_restart_all_loops` importable. Counting it as local would let an
+    outside module of that name through the scan below on the strength of a
+    nested file that shares its stem -- accepting a stranger because somebody
+    unrelated has the same name.
+    """
+    return {p.stem for p in (REPO / "tests").glob("*.py")}
+
+
 def test_the_test_suite_imports_nothing_from_outside_this_repository():
     """The boundary applies to the suite, and it was the suite that broke it.
 
@@ -257,7 +307,7 @@ def test_the_test_suite_imports_nothing_from_outside_this_repository():
 
     stdlib = sys.stdlib_module_names
     kernel = _module_names()
-    local = {p.stem for p in suite_modules()}
+    local = _importable_suite_names()
     offenders: list[str] = []
     for path in suite_modules():
         for name in imported_names(path.read_text(encoding="utf-8")):
@@ -281,6 +331,25 @@ def test_the_test_suite_imports_nothing_from_outside_this_repository():
 def test_there_are_suite_modules_to_check():
     """Otherwise the scan above passes by finding no files."""
     assert len(suite_modules()) >= 5
+    assert len(_importable_suite_names()) >= 5
+
+
+def test_only_top_level_test_modules_count_as_importable():
+    """`tests/pending/` is scanned, but its stems are not importable names.
+
+    Both halves matter and they pull in opposite directions, which is why they
+    are pinned together: a pending file must be READ by the scan, and its name
+    must not be accepted as a local module by it.
+    """
+    scanned = {p.name for p in suite_modules()}
+    assert "test_restart_all_loops.py" in scanned, (
+        "the scan no longer reads tests/pending/, which is where the next "
+        "cross-repository import will arrive"
+    )
+    assert "test_restart_all_loops" not in _importable_suite_names(), (
+        "a nested test stem is being treated as an importable top-level name, "
+        "so an outside module of that name would pass the scan"
+    )
 
 
 def test_the_suite_import_scan_would_catch_the_import_that_prompted_it():
@@ -298,6 +367,43 @@ def test_the_suite_import_scan_would_catch_the_import_that_prompted_it():
         "operator_liveness is now a kernel module name, so the scan would "
         "accept the bare import; this control needs rewriting"
     )
+
+
+@pytest.mark.parametrize("source", [
+    'x = __import__("copilot_operator")',
+    'import importlib\nx = importlib.import_module("copilot_operator")',
+    'from importlib import import_module\nx = import_module("copilot_operator")',
+    'def f():\n    return __import__("copilot_operator")',
+])
+def test_the_scan_sees_dynamic_imports_too(source):
+    """A statement-only scan reports a clean tree while the violation is there.
+
+    `__import__("copilot_operator")` leaves no `Import` node, so the two names
+    this whole change is about could walk straight back in under a spelling the
+    guard could not see -- including from inside a function body, which is where
+    the four `import operator_trace` calls this change repointed were living.
+    """
+    assert "copilot_operator" in imported_names(source)
+
+
+@pytest.mark.parametrize("source", [
+    'x = __import__(name)',
+    'x = importlib.import_module(module_for(seat))',
+    'x = some.other.import_module("copilot_operator")',
+])
+def test_the_dynamic_scan_does_not_invent_names(source):
+    """Negative control.
+
+    A computed name cannot be resolved statically. Reporting one anyway would
+    make this scan's failures untrustworthy, and an untrustworthy guard is
+    turned off. The third case is a method that merely shares a name with
+    `importlib.import_module` -- it is accepted only because the argument is a
+    literal, so it is the one false positive worth being honest about: if some
+    unrelated `import_module("x")` ever appears here, it will be reported.
+    """
+    names = imported_names(source)
+    assert "name" not in names
+    assert "module_for" not in names
 
 
 def test_the_kernel_does_not_use_forbidden_modules_it_never_imported():

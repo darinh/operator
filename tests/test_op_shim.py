@@ -21,6 +21,7 @@ tests were written against. Two properties make it safe to do that:
 """
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
@@ -63,37 +64,75 @@ def test_every_module_the_shim_binds_lives_in_the_kernel():
     )
 
 
-def test_the_stray_module_detector_would_have_fired_on_the_one_that_slipped():
-    """Positive control, on the exact module that got through.
+def test_the_stray_module_detector_refuses_the_module_that_slipped():
+    """Positive control, feeding the real predicate the module that got through.
 
-    Scored against the tree alone this file starts passing the moment the tree
-    is clean, which is when a detector's silence stops being evidence.
+    An earlier version of this test asserted only that the standard library's
+    `trace` does not live under `operator_kernel/` and that
+    `operator_kernel/trace.py` does not exist. Both were true BEFORE the fix and
+    stay true if somebody replaces the detector with `strays = []`. It graded
+    the filesystem, not the guard. `is_kernel_module` was extracted from `_bind`
+    so the control can hand it the exact module that slipped and watch it be
+    refused.
     """
     import trace as stdlib_trace
 
-    origin = Path(stdlib_trace.__file__).resolve()
-    assert KERNEL not in origin.parents, (
-        "the standard library's `trace` now appears to live in the kernel; "
-        "this control no longer grades anything"
+    assert op.is_kernel_module(stdlib_trace) is False, (
+        "the guard accepts the standard library's `trace`, which is what it "
+        "silently bound into the kernel namespace before this fix"
     )
     assert not (KERNEL / "trace.py").exists(), (
         "a kernel module named `trace` would shadow the standard library -- "
-        "see test_no_module_name_collisions.py"
+        "see test_no_module_name_collisions.py -- and would make this control "
+        "grade nothing"
     )
 
 
-@pytest.mark.parametrize("alias", sorted(op._ALIASES))
-def test_every_alias_resolves_to_the_kernel_module_it_claims(alias):
-    """An alias is a rename recorded in one place, so it must be the right one.
+def test_the_stray_module_detector_accepts_a_real_kernel_module():
+    """Negative control: a predicate that refuses everything also 'passes'."""
+    assert op.is_kernel_module(op.config) is True
 
-    `operator_trace` was mapped to `"trace"`, which is not a kernel module at
-    all. The renamed behaviour lives in `evidence.py`.
+
+def test_the_stray_module_detector_refuses_a_module_with_no_file():
+    """Builtins and namespace packages have no `__file__`; neither is a kernel."""
+    import sys as stdlib_sys
+
+    assert getattr(stdlib_sys, "__file__", None) is None
+    assert op.is_kernel_module(stdlib_sys) is False
+
+
+@pytest.mark.parametrize("alias", sorted(op._ALIASES))
+def test_every_alias_resolves_to_a_module_the_shim_binds(alias):
+    """A consistency check, and *only* that -- which is worth saying plainly.
+
+    This would have passed against the defect. Before the fix,
+    `_MODULE_NAMES` contained `"trace"` and `_ALIASES["operator_trace"]` was
+    `"trace"`, so membership held and both names resolved to the identical
+    (wrong) module, satisfying every assertion here. The tests that would have
+    caught it are `test_every_module_the_shim_binds_lives_in_the_kernel` and
+    `test_the_renamed_trace_module_has_what_its_callers_ask_for`. An earlier
+    version of this docstring claimed the credit; it was wrong, and a wrong
+    claim about which test catches which defect is how the wrong one gets
+    deleted later as redundant.
     """
     target = op._ALIASES[alias]
     assert target in op._MODULE_NAMES, (
         f"alias {alias!r} points at {target!r}, which the shim does not bind"
     )
     assert getattr(op, alias) is getattr(op, target)
+
+
+def test_the_alias_that_was_wrong_is_pinned_to_the_module_that_is_right():
+    """The mapping itself, pinned by name.
+
+    The generic checks above are all satisfiable by a self-consistent wrong
+    answer, so the one mapping known to have been wrong is written down.
+    """
+    assert op._ALIASES["operator_trace"] == "evidence"
+    assert "trace" not in op._MODULE_NAMES, (
+        "`trace` is back in the bind list; there is no operator_kernel/trace.py "
+        "and it resolves to the standard library's tracing module"
+    )
 
 
 def test_the_renamed_trace_module_has_what_its_callers_ask_for():
@@ -111,6 +150,42 @@ def test_the_renamed_trace_module_has_what_its_callers_ask_for():
         )
 
 
+def _kernel_modules_binding(name: str) -> set[str]:
+    """Kernel modules holding a module-level `name`, read off the source.
+
+    Derived from disk and NOT from `op.holders_of`, which is the thing under
+    test. Scoring the forwarding map against itself makes a module the shim
+    forgot invisible twice: absent from the expected set and absent from the
+    write, so the assertion passes by agreeing with the defect.
+    """
+    holders: set[str] = set()
+    for path in sorted(KERNEL.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in tree.body:
+            if isinstance(node, ast.ImportFrom):
+                if any(alias.name == name for alias in node.names):
+                    holders.add(path.stem)
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id == name:
+                        holders.add(path.stem)
+    return holders
+
+
+def test_the_forwarding_map_matches_what_the_source_says(monkeypatch):
+    """`holders_of` must agree with an independent reading of the kernel."""
+    for name in ("RESTART_DIR", "MUX", "OPERATOR_HOME"):
+        from_source = _kernel_modules_binding(name)
+        from_shim = {module.__name__ for module in op.holders_of(name)}
+        assert from_source, f"no kernel module binds {name}; pick another name"
+        assert from_source <= from_shim, (
+            f"`holders_of({name!r})` misses "
+            f"{sorted(from_source - from_shim)}. A write through `op` would "
+            f"skip them, which is exactly how the multiplexer substitution "
+            f"managed to look applied."
+        )
+
+
 # ── the forwarding claim ────────────────────────────────────────
 def test_a_write_reaches_every_module_binding_the_name(monkeypatch):
     """The docstring's first claim, on a name several modules hold.
@@ -119,16 +194,21 @@ def test_a_write_reaches_every_module_binding_the_name(monkeypatch):
     defines it and `instance` does `from config import RESTART_DIR`, so a write
     that reached only `config` would leave the reader pointed at the real
     `~/.operator` while the test believed it had been relocated.
+
+    The expected set comes from the source, not from `holders_of` -- see
+    `_kernel_modules_binding`.
     """
-    holders = op.holders_of("RESTART_DIR")
-    assert len(holders) >= 2, (
+    expected = _kernel_modules_binding("RESTART_DIR")
+    assert len(expected) >= 2, (
         "RESTART_DIR is held by fewer than two modules, so this test no longer "
         "grades forwarding -- pick a name that is imported across modules"
     )
     sentinel = Path("/sentinel/restart")
     monkeypatch.setattr(op, "RESTART_DIR", sentinel)
-    unreached = [m.__name__ for m in holders
-                 if getattr(m, "RESTART_DIR", None) != sentinel]
+    unreached = sorted(
+        name for name in expected
+        if getattr(__import__(name), "RESTART_DIR", None) != sentinel
+    )
     assert unreached == [], f"the write did not reach: {unreached}"
 
 

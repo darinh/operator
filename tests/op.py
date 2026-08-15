@@ -53,6 +53,28 @@ _ALIASES = {
 }
 
 
+KERNEL = Path(__file__).resolve().parent.parent / "operator_kernel"
+
+
+def is_kernel_module(module) -> bool:
+    """Does ``module`` actually live in this repository's kernel?
+
+    A separate, callable predicate rather than an inline check inside
+    :meth:`_KernelNamespace._bind`, so that a test can hand it the module that
+    got through -- the standard library's ``trace`` -- and watch it be refused.
+    Inline, the only available control was "stdlib ``trace`` is not under
+    ``operator_kernel/``", which is a true statement about the filesystem that
+    holds whether or not the predicate exists at all.
+    """
+    origin = getattr(module, "__file__", None)
+    if origin is None:
+        return False
+    try:
+        return KERNEL in Path(origin).resolve().parents
+    except OSError:
+        return False
+
+
 class _KernelNamespace(types.ModuleType):
     """One namespace over many modules, with writes forwarded to the owner."""
 
@@ -62,22 +84,21 @@ class _KernelNamespace(types.ModuleType):
 
     def _bind(self):
         holders = self.__dict__["_owner"]
-        kernel = Path(__file__).resolve().parent.parent / "operator_kernel"
         for mod_name in _MODULE_NAMES:
             module = __import__(mod_name)
-            origin = getattr(module, "__file__", None)
             # A name in `_MODULE_NAMES` that is not a kernel module does not
             # fail -- it imports something ELSE and binds its contents here
             # under kernel-looking names. `"trace"` did precisely that for the
             # life of the extraction. Resolving to the wrong file is the
             # failure this repository has now hit four times, so it is checked
             # rather than assumed.
-            if origin is None or kernel not in Path(origin).resolve().parents:
+            if not is_kernel_module(module):
                 raise ImportError(
                     f"tests/op.py names {mod_name!r} as a kernel module, but it "
-                    f"resolves to {origin!r}, which is not under "
-                    f"{kernel}. Binding it would put another package's names "
-                    f"into the kernel namespace under kernel spellings."
+                    f"resolves to {getattr(module, '__file__', None)!r}, which "
+                    f"is not under {KERNEL}. Binding it would put another "
+                    f"package's names into the kernel namespace under kernel "
+                    f"spellings."
                 )
             self.__dict__[mod_name] = module
             for key, value in vars(module).items():
@@ -113,6 +134,8 @@ class _KernelNamespace(types.ModuleType):
 _ns = _KernelNamespace(__name__)
 _ns.__dict__["_MODULE_NAMES"] = _MODULE_NAMES
 _ns.__dict__["_ALIASES"] = _ALIASES
+_ns.__dict__["KERNEL"] = KERNEL
+_ns.__dict__["is_kernel_module"] = is_kernel_module
 _ns.__dict__["Path"] = Path
 _ns.__dict__["sys"] = sys
 _ns._bind()
