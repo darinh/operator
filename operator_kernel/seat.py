@@ -4,13 +4,13 @@ A *seat* is durable. It outlives the sessions that run in it — that split is t
 one this kernel is built on, and it is why there is somewhere to stand while the
 agent process is dead. So the seat's identity has to be durable too.
 
-**This is why a seat id is not derived from a session id.** The suggestion is
-reasonable on its face and it would quietly undo the design: a new identity
-every restart means hundreds of one-off authors in `git log`, no way to ask what
-a given seat has done over a week, and no per-seat history for effort estimates
-or calibration to be computed against — which is the thing that makes a seat
-improve rather than merely persist. A session identifier belongs in a commit
-trailer as context, not in the author field as identity.
+**A seat id is not derived from a session id**, and the reason is the split
+above. A per-session identity mints a new author on every restart: hundreds of
+one-off names in `git log`, no way to ask what a seat has done over a week, and
+no per-seat history for effort estimates or calibration to be computed against
+— which is the mechanism by which a seat improves rather than merely persists. A
+session identifier belongs in a commit trailer as context, not in the author
+field as identity.
 
 So a seat id is a stable, human-meaningful name: the same name that appears on
 the board and that you type at the command line. `validate_seat_id` refuses ids
