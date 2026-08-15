@@ -619,6 +619,16 @@ What is enforced rather than documented:
 
 ## Still open, and what each is waiting for
 
+- **Work assignment is switched off on every seat**, and has never been on.
+  `supervisor.set_session_store` is called by nothing in this repository,
+  because the entry point that would call it is still in the frozen
+  `copilot-tools` — so `session_store()` returns `None`, and FR-2's promise
+  that the assignment reaches the agent before its first token is unkept. It
+  is not silent any more (`tests/test_work_assignment.py`), which is all the
+  kernel can do about it: deciding what an agent should work on is on the far
+  side of the kernel boundary, so the wiring belongs to whatever grows into
+  the entry point. **This is the largest unbuilt thing here that already looks
+  built.**
 - **The daily PR** — now possible (there is a remote), not yet built.
 - **Trust boundary** — unanswered. Agents share the owner's filesystem identity,
   so "an agent cannot grant itself authority" remains decorative while a seat

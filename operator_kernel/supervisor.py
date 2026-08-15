@@ -45,14 +45,11 @@ from supervisor_records import (_publish_supervisor_records, _record_supervisor_
 #: kernel boundary -- `operator_session` is on `test_kernel_boundary.FORBIDDEN`,
 #: since deciding what an agent should work on is not supervising it.
 #:
-#: It was neither, until a reviewer's remark sent me looking. Both functions
-#: below called `operator_session` as a bare name that nothing imported, so
-#: every call raised `NameError` -- and both catch `Exception` and return
-#: ``None``, so the whole work-assignment subsystem answered "no assignment"
-#: forever, which is exactly what a session with no work item looks like. FR-2
-#: says the assignment reaches the agent before its first token; it never has.
-#: `test_kernel_boundary` scans imports, so a forbidden module used as a bare
-#: name was invisible to it and the boundary read clean.
+#: It was neither, until a reviewer's remark sent me looking: both functions
+#: below called `operator_session` as a bare name nothing imported, so every
+#: call raised `NameError`, both handlers caught it, and the subsystem
+#: answered "no assignment" for its whole life. An import scan cannot see a
+#: bare name. Nothing calls `set_session_store` yet -- test_work_assignment.py.
 _SESSION_STORE = None
 
 
@@ -78,10 +75,13 @@ def _loop_work_db(workdir: Path):
     launch a session whether or not this project is registered, so every
     failure here becomes ``None`` and a log line rather than an exception.
     Resolved from the *primary* checkout so a loop running inside a worktree
-    finds the project's real entry instead of minting a second one.
+    finds the project's real entry. A missing store *says so*: unannounced, it
+    is the "no assignment" an empty queue gives, and only one is a fault.
     """
     store = session_store()
     if store is None:
+        log("  No work store is configured, so assignment is off -- which is "
+            "not the same as having no work assigned.")
         return None
     try:
         found = catalog_guid(primary_repo_root(workdir))
