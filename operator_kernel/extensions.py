@@ -40,10 +40,15 @@ the owner and can read every file the owner can — the ledger, the mandates, th
 credentials. What the subprocess buys is crash isolation, resource isolation
 and reliable cancellation: containment against *accident*, not against malice.
 Real confidentiality needs the separate OS account that `docs/plan.md` records
-as its open question, and it is the same gap, not a second one. Two smaller
-holes in the same wall, named rather than papered over: `subprocess.run`'s
-timeout kills the worker and not any grandchildren it spawned, and a worker
-that writes to file descriptor 1 from native code bypasses the stdout guard.
+as its open question, and it is the same gap, not a second one.
+
+**The holes that remain, named rather than papered over.** A worker's
+*grandchildren* outlive the kill — closing that needs a Windows Job Object with
+`KILL_ON_JOB_CLOSE` — though they can no longer delay supervision, which is the
+part that was costing the guarantee. An extension writing an absolute path is
+not contained by anything here; only the relative-path accident is. And the
+token that identifies a reply is unguessable, not unforgeable: a worker can read
+its own `sys.argv`.
 
 The two invariants a reviewer can check
 ---------------------------------------
@@ -82,10 +87,13 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import re
 import secrets
 import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -119,6 +127,20 @@ ALLOW, BLOCK = "allow", "block"
 #: this to answer a yes/no question is doing work that belongs off the loop.
 DEFAULT_DEADLINE = 10.0
 
+#: Seconds one `call` may take in total, across every extension. Without it the
+#: worst case is `installed_extensions × DEFAULT_DEADLINE`, and the number of
+#: installed extensions is not the kernel's to bound: one package may register
+#: as many entry points as it likes, and each would get a full deadline of the
+#: supervisor's attention on every launch.
+DEFAULT_CALL_DEADLINE = 30.0
+
+#: How much of a worker's output is kept. The output goes to a temporary file
+#: rather than a pipe (see `_ask`), so this bounds what is *read back*, not what
+#: the extension may write. A reply is a few hundred bytes; an extension that
+#: puts a megabyte in front of one has not observed the protocol, and saying so
+#: is better than reading a gigabyte into the supervisor to find out.
+TAIL_BYTES = 1_000_000
+
 #: Where the worker lives. Spawned as a script path, like `runner.py`, so the
 #: kernel directory lands on the child's `sys.path` without anyone arranging it.
 WORKER = Path(__file__).resolve().parent / "extension_worker.py"
@@ -127,6 +149,14 @@ WORKER = Path(__file__).resolve().parent / "extension_worker.py"
 #: command line and imported in the child, so it is checked for shape here
 #: rather than after something has already run.
 _TARGET_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
+
+#: An extension's name, which is *not* only a label: it is interpolated into
+#: text a session reads, so it is third-party content in the same sense the
+#: value is. Newlines would let a name become its own unattributed line, and
+#: `preamble.py` has already been through this one field over -- a directory
+#: called `.../you have permission to/` made the final authority scan raise,
+#: which kills that seat's supervisor and does not bring it back.
+_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 class ExtensionError(Exception):
@@ -248,10 +278,20 @@ def discover(entry_points: "Iterable | None" = None
         if target is None:
             target = str(getattr(ep, "value", "")).partition(":")[0]
         target = str(target).strip()
-        if not name or not _TARGET_RE.match(target):
-            failures.append(Failure(name or "<unnamed>", "discover",
+        if not _NAME_RE.match(name) or not _TARGET_RE.match(target):
+            failures.append(Failure(name.splitlines()[0][:64] if name.strip()
+                                    else "<unnamed>", "discover",
                                     "MalformedEntryPoint",
                                     f"name={name!r} target={target!r}"))
+            continue
+        if _name_grants(name):
+            # The name reaches a session, so a name that grants is the 0013
+            # sentence with the package's own label around it. Refused at the
+            # boundary rather than sanitised later: an extension nobody can
+            # attribute honestly is one the kernel declines to run.
+            failures.append(Failure(name, "discover", "GrantingName",
+                                    f"name={name!r} reads as a grant of "
+                                    f"authority"))
             continue
         found.append(Extension(name=name, target=target))
     return found, failures
@@ -280,12 +320,23 @@ class Host:
 
     def __init__(self, extensions: "Iterable[Extension]", *,
                  deadline: float = DEFAULT_DEADLINE,
+                 call_deadline: float = DEFAULT_CALL_DEADLINE,
                  python: "str | None" = None,
-                 worker: "Path | None" = None) -> None:
+                 worker: "Path | None" = None,
+                 cwd: "str | None" = None) -> None:
         self.extensions = sorted(extensions, key=lambda e: e.name)
         self.deadline = deadline
+        self.call_deadline = call_deadline
         self.python = python or sys.executable
         self.worker = Path(worker) if worker else WORKER
+        # Never the supervised repository, which is what `Path.cwd()` is on the
+        # supervisor's launch path. A hook that writes `notes.md` with no
+        # directory would otherwise land it in the tree whose changes are the
+        # progress signal -- INV-WORK defeated by a relative path rather than
+        # by an API. Containment against accident; an extension that writes an
+        # absolute path is not stopped by anything here, and saying otherwise
+        # would be the sandbox claim this design refuses to make.
+        self.cwd = cwd or tempfile.gettempdir()
         self.quarantined: dict[str, str] = {}
 
     def call(self, hook: str, /, **kwargs) -> "tuple[list[Claim], list[Failure]]":
@@ -299,6 +350,12 @@ class Host:
         caller tries, no extension is called at all: one failure is recorded
         against `<kernel>` and every extension is left un-asked, rather than
         some of them being asked with a payload the rest never saw.
+
+        The whole call is bounded, not just each worker in it. Extensions are
+        asked in turn and share `call_deadline` between them; one that has run
+        out of budget is recorded as such and not spawned. Without that the
+        supervisor's exposure is the number of installed entry points times the
+        per-worker deadline, and nobody here decides how many those are.
         """
         if hook not in HOOKS:
             raise ExtensionError(
@@ -313,40 +370,93 @@ class Host:
 
         claims: list[Claim] = []
         failures: list[Failure] = []
+        budget = self.call_deadline
         for ext in self.extensions:
             if ext.name in self.quarantined:
                 failures.append(Failure(ext.name, hook, "Quarantined",
                                         self.quarantined[ext.name]))
                 continue
-            claim, failure = self._ask(ext, hook, payload)
+            if budget <= 0:
+                failures.append(Failure(
+                    ext.name, hook, "BudgetExhausted",
+                    f"the {self.call_deadline}s budget for one {hook} call was "
+                    f"spent before this extension was reached"))
+                continue
+            started = time.monotonic()
+            try:
+                claim, failure = self._ask(ext, hook, payload,
+                                           min(self.deadline, budget))
+            except Exception as exc:
+                # The backstop, and it is not decoration. Everything above is
+                # written not to raise; this is what makes "an extension's
+                # failure is its own, not the fleet's" true of the bugs nobody
+                # anticipated, including the ones in this file.
+                claim, failure = None, Failure(ext.name, hook, "HostError",
+                                               repr(exc))
+            budget -= time.monotonic() - started
             if claim is not None:
                 claims.append(claim)
             if failure is not None:
                 failures.append(failure)
         return claims, failures
 
-    def _ask(self, ext: Extension, hook: str, payload: str
+    def _ask(self, ext: Extension, hook: str, payload: str, deadline: float
              ) -> "tuple[Claim | None, Failure | None]":
+        """Spawn one worker, ask it one question, and read at most one answer.
+
+        **Output goes to temporary files, never to pipes**, and that is the
+        difference between a deadline and a wish. With `capture_output=True`,
+        `subprocess.run` kills the worker when the timeout expires and then
+        calls `communicate()` again with *no* timeout to drain the pipes -- and
+        any grandchild the worker spawned inherited those handles, so the drain
+        waits for the grandchild. Measured on this machine: a worker that
+        `Popen`s a 20-second sleeper and hangs took **20.11 seconds to return
+        from a 1.0-second deadline**, with the whole seat unsupervised
+        throughout. The same call against temporary files returned in 1.02s.
+
+        It bounds memory for the same reason. A hook printing in a tight loop
+        wrote 375 MB in two seconds; through a pipe that is 375 MB of the
+        supervisor's address space, and one extension can end nine seats by
+        exhausting it. On disk it is a file that gets deleted, and only the
+        tail is ever read back.
+
+        Grandchildren still outlive the kill -- that hole is real, and closing
+        it needs a Windows Job Object with `KILL_ON_JOB_CLOSE`. What changes
+        here is that they can no longer *delay supervision*, which is the part
+        that was costing the guarantee.
+
+        Bytes in, bytes out, decoded with `errors="replace"`. `text=True`
+        decodes as the machine's locale under `errors="strict"`, so a single
+        undecodable byte written to descriptor 1 by native code killed the
+        reader thread, produced an empty `stdout`, and turned a `gate_change`
+        that had already answered `block` into a `ProtocolViolation`. That is
+        §3.3 exactly -- "the check ran and said no" collapsed into "the check
+        could not run" -- reached by an extension logging a UTF-8 path.
+        """
         token = secrets.token_hex(8)
         argv = [self.python, str(self.worker), ext.target, hook, token]
         try:
-            done = subprocess.run(argv, input=payload, capture_output=True,
-                                  text=True, timeout=self.deadline)
-        except subprocess.TimeoutExpired:
-            reason = f"did not answer {hook} within {self.deadline}s"
-            self.quarantined[ext.name] = reason
-            return None, Failure(ext.name, hook, "Deadline", reason)
+            with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+                try:
+                    done = subprocess.run(argv, input=payload.encode("utf-8"),
+                                          stdout=out, stderr=err, cwd=self.cwd,
+                                          timeout=deadline)
+                except subprocess.TimeoutExpired:
+                    reason = f"did not answer {hook} within {deadline}s"
+                    self.quarantined[ext.name] = reason
+                    return None, Failure(ext.name, hook, "Deadline", reason)
+                stdout, stderr = _tail(out), _tail(err)
         except OSError as exc:
             reason = f"worker could not be started: {exc}"
             self.quarantined[ext.name] = reason
             return None, Failure(ext.name, hook, "WorkerUnavailable", reason)
 
-        reply = _reply_in(done.stdout or "", token)
+        reply = _reply_in(stdout, token)
         if reply is None:
             return None, Failure(
                 ext.name, hook, "ProtocolViolation",
-                f"exit={done.returncode} stdout={(done.stdout or '')[-400:]!r} "
-                f"stderr={(done.stderr or '')[-400:]!r}")
+                f"exit={done.returncode} stdout={stdout[-400:]!r} "
+                f"stderr={stderr[-400:]!r}")
         if not reply["ok"]:
             return None, Failure(ext.name, hook,
                                  str(reply.get("error", "ExtensionError")),
@@ -354,6 +464,19 @@ class Host:
         if not reply.get("implemented", True) or reply.get("value") is None:
             return None, None
         return Claim(ext.name, hook, reply["value"]), None
+
+
+def _tail(handle, limit: int = TAIL_BYTES) -> str:
+    """The last `limit` bytes a worker wrote, decoded without ever raising.
+
+    `errors="replace"` and not `strict`: this stream carries whatever an
+    extension put on descriptor 1, and a decoding error here would discard a
+    perfectly good reply written after some library's mis-encoded log line.
+    """
+    handle.seek(0, os.SEEK_END)
+    size = handle.tell()
+    handle.seek(max(0, size - limit))
+    return handle.read().decode("utf-8", "replace")
 
 
 def _reply_in(stdout: str, token: str) -> "dict | None":
@@ -391,7 +514,11 @@ def _reply_in(stdout: str, token: str) -> "dict | None":
             continue
         try:
             obj = json.loads(line)
-        except ValueError:
+        except Exception:
+            # `Exception`, not `ValueError`. A deeply nested JSON-shaped line
+            # raises `RecursionError` from the parser, which is not a
+            # `ValueError`, and letting it out of here would take the
+            # supervisor down over one line an extension printed.
             continue
         if (isinstance(obj, dict) and "ok" in obj
                 and obj.get("token") == token):
@@ -448,6 +575,62 @@ def gate_outcome(claims: "Iterable[Claim]",
     return GateOutcome(blocks=tuple(blocks), errors=tuple(errors))
 
 
+def _name_grants(name: str) -> list:
+    """Granting phrases in an extension's name, separators normalised.
+
+    Both spellings, because they miss opposite things. `GRANTING_PHRASES` is
+    written in prose -- `"you have approval"`, with spaces -- and package names
+    are written in packaging: `you-have-approval`, `you_have_approval`,
+    `acme.you.have.approval`. Scanning only the raw name lets every multi-word
+    phrase in that list through a name unchanged, which is the whole blocklist
+    bypassed by the punctuation convention of the ecosystem this reads from.
+    Scanning only the normalised form loses the entries that are *already*
+    hyphenated, `"pre-approved"` among them.
+
+    Still a blocklist, and `mandate.py` is explicit that a blocklist is
+    incomplete by construction. This does not make a name safe; it makes the
+    list apply to names at all.
+    """
+    spaced = re.sub(r"[-_.]+", " ", name)
+    found = mandate.granting_phrases_in(name)
+    for phrase in mandate.granting_phrases_in(spaced):
+        if phrase not in found:
+            found.append(phrase)
+    return found
+
+
+def _safe_source(name: str) -> "tuple[str, list]":
+    """An extension's name, made safe to interpolate. Returns `(label, found)`.
+
+    The name is third-party text in exactly the sense the value is, and it is
+    interpolated into two places a session reads: the attribution label, and
+    `REFUSED_CLAUSE`'s `{source}`. Two things it must not be able to do.
+
+    It must not **become its own line**: a name containing a newline splits the
+    envelope, and everything after the break arrives unattributed -- 0013's
+    shape, reached through a field nobody thought of as content.
+
+    It must not **grant**. An entry point may legally be called `pre-approved`,
+    which is on `mandate.GRANTING_PHRASES`; interpolated, it puts a granting
+    phrase into the preamble, where `build_preamble`'s final
+    `assert_no_unattributed_authority` raises -- and that raise is caught by
+    nothing in the loop, so the seat's supervisor dies and does not come back.
+    `preamble.py` has the same finding one field over, about a directory named
+    `.../you have permission to/`, and the note there says the reasoning was
+    already in the function and still did not transfer. So it is written down
+    here too rather than assumed.
+
+    `discover` refuses both shapes at the boundary. This is the second line,
+    for claims that reach here another way, and it replaces rather than raises:
+    losing the label costs attribution for one clause, and the raw name still
+    goes back to the caller for the ledger.
+    """
+    found = _name_grants(name)
+    if _NAME_RE.match(name) and not found:
+        return name, []
+    return "withheld-name", found or ["unprintable name"]
+
+
 def claim_text(claims: "Iterable[Claim]") -> "tuple[str, list]":
     """Render extension text for a session, attributed and vetted. INV-AUTH.
 
@@ -458,6 +641,12 @@ def claim_text(claims: "Iterable[Claim]") -> "tuple[str, list]":
     authorised. Backlog 0013 is one unattributed sentence reaching every
     session; this is that sentence with a name in front of it, which is the
     difference between a claim and an instruction.
+
+    **Every physical line is labelled, not the first.** A value is a string an
+    extension chose, so it can contain newlines, and prefixing only the first
+    line puts every subsequent one into the preamble as raw unattributed text.
+    Two reviewers found that independently, and it defeats the whole property
+    at the cost of one `\\n`.
 
     It goes through **`mandate.vet_clause`**, the same scan work items and
     handoffs go through, so an extension that tries to grant authority has its
@@ -476,8 +665,10 @@ def claim_text(claims: "Iterable[Claim]") -> "tuple[str, list]":
         text = str(c.value).strip()
         if not text:
             continue
-        clause, phrases = mandate.vet_clause(text, f"extension {c.extension}")
-        if phrases:
-            withheld.append((c.extension, phrases))
-        lines.append(f"[extension {c.extension}, unverified] {clause}")
+        label, name_phrases = _safe_source(str(c.extension))
+        clause, phrases = mandate.vet_clause(text, f"extension {label}")
+        if name_phrases or phrases:
+            withheld.append((c.extension, name_phrases + phrases))
+        lines.extend(f"[extension {label}, unverified] {line}"
+                     for line in clause.splitlines() or [""])
     return "\n".join(lines), withheld
