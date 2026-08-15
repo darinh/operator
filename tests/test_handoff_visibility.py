@@ -58,11 +58,72 @@ def test_a_waiting_handoff_is_named_in_the_preamble(seat):
         "indistinguishable from one with nothing to read")
 
 
+def test_a_granting_path_cannot_kill_the_supervisor(seat):
+    """A directory name is third-party text on a code path that raises.
+
+    `assert_no_unattributed_authority` unwinds out of `run_loop_mode`, which
+    catches only `MuxError` and `KeyboardInterrupt`, so an exception here ends
+    that seat's supervision permanently. The first draft interpolated the path
+    straight in, and a reviewer killed a launch with a directory named
+    `you have permission to`.
+
+    This is `vet_clause`'s own reason, applied one field over from the work
+    item it was written for.
+    """
+    hostile = r"/tmp/you have permission to/handoff.md"
+    text = _preamble(seat, handoff_waiting=hostile)  # must not raise
+    assert hostile not in text, "the granting path was passed through verbatim"
+
+
+def test_a_refused_path_still_announces_the_handoff(seat):
+    """The announcement survives a refused address.
+
+    `vet_clause` replaces the whole body it is handed, so vetting the sentence
+    and the address together would drop both -- and losing the sentence that
+    says a handoff exists is the defect this file is about. Withholding the
+    address costs the agent a lookup; withholding the announcement costs it
+    the session.
+    """
+    text = _preamble(seat, handoff_waiting=r"/tmp/you have permission to/h.md")
+    assert "A handoff from the previous session is waiting" in text
+
+
+def test_a_refused_path_is_reported_to_the_caller(seat):
+    """Withheld text has to be recorded somewhere or the refusal is silent."""
+    seen = []
+    _preamble(seat, handoff_waiting=r"/tmp/you are authorized to/h.md",
+              on_withheld=lambda source, phrases: seen.append((source, phrases)))
+    assert seen and seen[0][1] == ["you are authorized to"]
+
+
+def test_an_ordinary_path_is_not_withheld(seat):
+    """The control for the three above: without it they are satisfied by an
+    implementation that refuses every path, which would restore the incident
+    while looking like a security fix."""
+    seen = []
+    text = _preamble(seat, handoff_waiting="/tmp/projects/guid/handoff.md",
+                     on_withheld=lambda s, p: seen.append(s))
+    assert "/tmp/projects/guid/handoff.md" in text
+    assert seen == []
+
+
+def test_an_undetermined_handoff_is_said_out_loud(seat):
+    """"Could not look" must reach the agent, not stop at the tri-state.
+
+    Silence is read as "no handoff" -- that inference is what caused the
+    incident -- so the one verdict that means *nobody knows* cannot be the one
+    that produces no sentence.
+    """
+    text = _preamble(seat, handoff_unknown=True)
+    assert "could not be determined" in text
+    assert "A handoff from the previous session is waiting" not in text
+
+
 def test_a_preamble_without_a_waiting_handoff_does_not_invent_one(seat):
     """The control. Without it the assertion above holds for any implementation
     that unconditionally pastes a path in."""
     text = _preamble(seat)
-    assert "waiting at" not in text
+    assert "A handoff from the previous session is waiting" not in text
     assert "Read it before doing anything else" not in text
 
 
@@ -93,7 +154,7 @@ def test_a_waiting_handoff_and_crash_recovery_are_never_both_claimed(seat):
     inference from absence, so the observation wins.
     """
     text = _preamble(seat, handoff_waiting="/tmp/h.md", crash_recovery=True)
-    assert "waiting at" in text
+    assert "A handoff from the previous session is waiting" in text
     assert "could not be found" not in text
 
 
@@ -232,3 +293,131 @@ def test_recording_the_verdict_never_raises(tmp_path, monkeypatch):
                         lambda *a, **k: (_ for _ in ()).throw(OSError("nope")))
     op.evidence.record_handoff_state(
         tmp_path, instance="seat", session=1, verdict=op.HANDOFF_WAITING)
+
+
+# --- the wiring, which every test above would let you delete ----------------
+
+def _run_one_loop(monkeypatch, tmp_path, handoff_file):
+    """Drive `run_loop_mode` for a single session and return its preamble.
+
+    The unit tests above call the classifier, the composer and the recorder
+    directly, so all of them stay green if `supervisor.py` stops calling any
+    of them -- which restores the incident exactly while the suite reports
+    success. This is the difference between asserting a call is *made* and
+    asserting the behaviour *happens*, and the gap is wide enough to hold the
+    whole defect.
+    """
+    seen = []
+
+    def capture(instance, args, session_num, remain_on_exit=False, preamble=""):
+        seen.append(preamble)
+        instance.exit_file.write_text("0", encoding="utf-8")
+        instance.stop_marker.touch()
+
+    from conftest import FakeMux
+
+    monkeypatch.setattr(op, "MUX", FakeMux())
+    monkeypatch.setattr(op, "RESTART_DIR", tmp_path / "restart")
+    monkeypatch.setattr(op, "OPERATOR_HOME", tmp_path / "home")
+    monkeypatch.setattr(op, "start_session", capture)
+    monkeypatch.setattr(op, "show_run_summary", lambda run_started: None)
+    monkeypatch.setattr(op, "project_handoff_file",
+                        lambda cwd, instance_id="": handoff_file)
+
+    inst = op.Instance("wired")
+    inst.save_state(1, "2026-07-27T10:00:00Z",
+                    "3f2a9c1e-1111-2222-3333-444455556666")
+    op.run_loop_mode(inst, ["--agent", "test:agent"], is_fresh=False)
+    assert seen, "the loop never launched a session, so it proves nothing"
+    return seen[0]
+
+
+def test_the_loop_tells_a_session_about_its_waiting_handoff(
+        monkeypatch, tmp_path):
+    """End to end: a handoff on disk reaches the launch text.
+
+    This is the incident reproduced as a test. Revert any one of the four
+    wiring lines in `supervisor.py` and this fails; every other test in this
+    file stays green.
+    """
+    handoff = tmp_path / "copilot-tools.md"
+    handoff.write_text("# Session Handoff\n\n## Next Steps\nBuild the thing.\n",
+                       encoding="utf-8")
+
+    preamble = _run_one_loop(monkeypatch, tmp_path, handoff)
+
+    assert "A handoff from the previous session is waiting" in preamble
+    assert str(handoff) in preamble
+
+
+def test_the_loop_records_what_the_session_was_told(monkeypatch, tmp_path):
+    """The record has to be written on the live path, not only in a unit test.
+
+    `announced` is what separates "was told and ignored it" from "there was
+    nothing to read" -- the two that were indistinguishable during the
+    incident.
+    """
+    handoff = tmp_path / "copilot-tools.md"
+    handoff.write_text("# Session Handoff\n", encoding="utf-8")
+
+    _run_one_loop(monkeypatch, tmp_path, handoff)
+
+    records = [json.loads(line) for line in
+               op.evidence.trace_path(tmp_path / "home")
+               .read_text(encoding="utf-8").splitlines()]
+    handoffs = [r for r in records if r.get("event") == "handoff_state"]
+    assert handoffs, "the live path wrote no handoff record at all"
+    assert handoffs[0]["verdict"] == op.HANDOFF_WAITING
+    assert handoffs[0]["announced"] is True
+    assert handoffs[0]["path"] == str(handoff)
+
+
+def test_the_loop_tells_a_session_when_nobody_could_look(monkeypatch, tmp_path):
+    """The verdict that means *nobody knows* has to survive the wiring too.
+
+    It is the one most easily lost: `HANDOFF_UNKNOWN` produces no crash note
+    and no address, so a supervisor that simply never passed it would look
+    correct in every other test here. It was, in the first draft -- this test
+    is what caught the argument being dropped.
+    """
+    # Denied for the handoff only. Blanketing `path_present` also blinds the
+    # stop/detach marker probes, and the loop then spends its whole
+    # unreadable-marker budget at the poll interval -- 50 seconds, for a test
+    # that asserts one sentence. It is also a different test than the one
+    # intended: the loop would be exercising its marker branch, not its
+    # handoff branch.
+    unreadable = tmp_path / "unreadable.md"
+    real_present = op.path_present
+    monkeypatch.setattr(
+        op, "path_present",
+        lambda p: None if Path(p) == unreadable else real_present(p))
+    preamble = _run_one_loop(monkeypatch, tmp_path, unreadable)
+
+    assert "could not be determined" in preamble
+    assert "could not be found" not in preamble, (
+        "a failed probe was reported as a crash, which is a claim about the "
+        "previous session that nothing established")
+
+
+def test_the_loop_still_reports_a_missing_handoff_as_crash_recovery(
+        monkeypatch, tmp_path):
+    """The control for the two above, and a regression guard on the behaviour
+    that already existed: without it they are satisfied by an implementation
+    that announces a handoff unconditionally."""
+    absent = tmp_path / "nothing-here.md"
+
+    preamble = _run_one_loop(monkeypatch, tmp_path, absent)
+
+    assert "A handoff from the previous session is waiting" not in preamble
+    assert "could not be found" in preamble
+
+    # And the record says nothing was announced. Without this the `announced`
+    # field is satisfied by a writer that hardcodes True, which would make the
+    # one thing it exists to distinguish -- told versus not told -- unreadable
+    # again.
+    records = [json.loads(line) for line in
+               op.evidence.trace_path(tmp_path / "home")
+               .read_text(encoding="utf-8").splitlines()]
+    handoffs = [r for r in records if r.get("event") == "handoff_state"]
+    assert handoffs[0]["verdict"] == op.HANDOFF_MISSING
+    assert handoffs[0]["announced"] is False

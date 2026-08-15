@@ -28,7 +28,8 @@ from mandate import (Mandate, authority_clause, assert_no_unattributed_authority
 def build_preamble(agent_name: str, instance: Instance, crash_recovery: bool = False,
                    assignment: str = "", code_state: str = CODE_CURRENT,
                    mandate: "Mandate | None" = None,
-                   on_withheld=None, handoff_waiting: str = "") -> str:
+                   on_withheld=None, handoff_waiting: str = "",
+                   handoff_unknown: bool = False) -> str:
     """Compose the launch preamble from mechanism plus attributed authority.
 
     Two kinds of sentence go to a session, and they are kept apart on purpose.
@@ -79,20 +80,49 @@ def build_preamble(agent_name: str, instance: Instance, crash_recovery: bool = F
         # `operator session start` instead -- which answers about work-item
         # claims, not handoffs -- and read "No assignment" as "no handoff".
         # It invented work in a frozen repository for half an hour.
-        #
-        # The path is named because "check for a handoff file" is a search and
-        # this is an address: the previous wording left the agent to rediscover
-        # a location the supervisor had just finished establishing.
         clauses.append(
-            "A handoff from the previous session is waiting at "
-            f"{handoff_waiting}. Read it before doing anything else, including "
-            "before looking for other work — it is the record of what the last "
-            "session was in the middle of. If it names work, that work is your "
-            "assignment. Do not go looking for something else to do because a "
-            "different tool reported nothing; no other command answers this "
-            "question."
+            "A handoff from the previous session is waiting for you. Read it "
+            "before doing anything else, including before looking for other "
+            "work — it is the record of what the last session was in the "
+            "middle of, and continuing it is normally the right thing to do. "
+            "Do not conclude there is nothing to resume because a different "
+            "command reported no work; no other command answers this question."
         )
-    if crash_recovery and not handoff_waiting:
+        # The path is not the kernel's text, and is vetted like the work item.
+        #
+        # A directory name is chosen by whoever made the directory, so it is
+        # third-party text on the one code path that *raises*:
+        # `assert_no_unattributed_authority` unwinds out of `run_loop_mode`,
+        # which catches only `MuxError` and `KeyboardInterrupt`, so the seat's
+        # supervisor dies and does not come back. The first draft interpolated
+        # the path directly and a reviewer demonstrated the kill with
+        # `.../you have permission to/handoff.md`. That is the same DoS
+        # `vet_clause` was written for, one field over -- the reasoning was
+        # already in this function, applied to `assignment`, and still did not
+        # transfer.
+        #
+        # Vetted *separately* from the announcement above, because `vet_clause`
+        # replaces the whole body it is handed. Vetting them together would
+        # drop the sentence that says a handoff exists, which is the defect
+        # this change exists to fix: the address is worth losing, the
+        # announcement is not.
+        address, withheld = vet_clause(f"It is at {handoff_waiting}.",
+                                       "the handoff file's location")
+        clauses.append(address)
+        if withheld and on_withheld is not None:
+            on_withheld("the handoff file's location", withheld)
+    elif handoff_unknown:
+        # "Could not look" is not "not there", and the difference has to reach
+        # the agent rather than stopping at the tri-state inside `exits`.
+        # Silence here would be read as "no handoff", which is the inference
+        # that caused the incident above.
+        clauses.append(
+            "Whether a handoff from the previous session exists could not be "
+            "determined: the probe for it failed, which is not the same as "
+            "finding none. Look for one yourself before concluding there is "
+            "nothing to resume."
+        )
+    elif crash_recovery:
         clauses.append(
             "This session is being resumed because a handoff file could not be "
             "found for this project. Either a crash occurred or the previous session "

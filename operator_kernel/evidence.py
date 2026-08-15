@@ -273,7 +273,7 @@ def record_mandate_read(operator_home: Path, *, instance: str, session: int,
     except Exception:
         return
 def record_handoff_state(operator_home: Path, *, instance: str, session: int,
-                         verdict: str, path=None) -> None:
+                         verdict: str, path=None, announced: bool = False) -> None:
     """Record what the launcher established about the waiting handoff.
 
     A `fact.*`: the supervisor probed a path and composed a sentence from what
@@ -306,6 +306,12 @@ def record_handoff_state(operator_home: Path, *, instance: str, session: int,
             "instance": str(instance),
             "session": session,
             "verdict": str(verdict),
+            # Whether a clause about it actually reached the launch text. The
+            # verdict is what the supervisor observed; this is what the session
+            # was told, and the gap between the two is where "it ignored the
+            # handoff" and "nobody mentioned the handoff" used to be the same
+            # record.
+            "announced": bool(announced),
             # The address the session was given, so a later reader can open
             # the same file rather than infer which one was meant.
             "path": None if path is None else str(path),
