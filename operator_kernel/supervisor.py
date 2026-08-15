@@ -26,7 +26,8 @@ import atexit
 
 from breakers import (evaluate_progress, evaluate_unaccounted, workspace_fingerprint)
 from config import (EXIT_NO_PROGRESS, EXIT_UNACCOUNTED, HEALTHY_SESSION_SECONDS, HEARTBEAT_INTERVAL, IS_WINDOWS, LAUNCH_BACKOFF_BASE, MAX_LAUNCH_FAILURES, MAX_NOCHANGE_SESSIONS, MAX_SESSIONS, MAX_UNACCOUNTED_SESSIONS, MUX, OPERATOR_HOME, POLL_INTERVAL, RESTART_PAUSE_SECONDS, SESSION_ID_WAIT, TAB_LOOPING, UUID_RE)
-from exits import (_record_session_exit, crash_recovery_verdict, ending_was_observed)
+from exits import (_record_session_exit, crash_recovery_verdict, ending_was_observed,
+                   handoff_state, HANDOFF_MISSING, HANDOFF_UNKNOWN, HANDOFF_WAITING)
 from instance import Instance
 from launch import (args_have_explicit_session, extract_agent_from_args, handle_existing_session, has_agent_flag, start_session, with_experimental)
 from mux import MuxError
@@ -419,11 +420,19 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                     evidence.record_mandate_read(
                         OPERATOR_HOME, instance=instance.id,
                         session=session_num, mandate=session_mandate)
+                    handoff = handoff_state(workdir, instance.id)
                     launch_preamble = build_preamble(
                         agent, instance,
+                        # All three read the one probe above. Probing again per
+                        # clause would let them disagree with each other and
+                        # with the record written below.
                         crash_recovery=(had_predecessor
-                                        and crash_recovery_verdict(
-                                            workdir, instance.id)),
+                                        and handoff.verdict == HANDOFF_MISSING),
+                        handoff_waiting=(str(handoff.path)
+                                         if handoff.verdict == HANDOFF_WAITING
+                                         else ""),
+                        handoff_unknown=(handoff.verdict == HANDOFF_UNKNOWN),
+                        handoff_written=handoff.written,
                         assignment=assignment,
                         code_state=_launch_code_state(),
                         mandate=session_mandate,
@@ -432,6 +441,17 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                                 OPERATOR_HOME, instance=instance.id,
                                 session=session_num, source=source,
                                 phrases=phrases)))
+                    # Recorded *after* composition, so the record says what the
+                    # session was told rather than what the supervisor saw.
+                    # Written before it, the two came apart in exactly the case
+                    # worth catching: a clause that could not be rendered still
+                    # left a record claiming the handoff had been announced.
+                    evidence.record_handoff_state(
+                        OPERATOR_HOME, instance=instance.id,
+                        session=session_num, verdict=handoff.verdict,
+                        path=handoff.path,
+                        announced=(handoff.verdict in (HANDOFF_WAITING,
+                                                       HANDOFF_UNKNOWN)))
                     # Queued mail was injected into the preamble here. Mail is not
                     # part of this kernel: delivery is a concern with its own
                     # unsolved question -- `send_keys` proves only that a keystroke

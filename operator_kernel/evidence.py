@@ -272,6 +272,54 @@ def record_mandate_read(operator_home: Path, *, instance: str, session: int,
         })
     except Exception:
         return
+def record_handoff_state(operator_home: Path, *, instance: str, session: int,
+                         verdict: str, path=None, announced: bool = False) -> None:
+    """Record what the launcher established about the waiting handoff.
+
+    A `fact.*`: the supervisor probed a path and composed a sentence from what
+    it found.
+
+    The same argument as `record_mandate_read`, one file over. The kernel
+    cannot *make* a session read its handoff -- it can only put the address in
+    the launch text and carry on. What it can do is write down which of the
+    four situations obtained, so that "the session was told a handoff was
+    waiting and ignored it" stops being indistinguishable from "there was
+    nothing to read".
+
+    Those two were genuinely indistinguishable until now, and the cost was
+    measured rather than imagined: on 2026-08-15 a session was launched 6
+    seconds after its predecessor wrote a handoff, never opened it, and spent
+    its life on self-assigned work in a frozen repository. Nothing in any log
+    on the machine recorded that a handoff had been available, so the failure
+    could only be reconstructed afterwards by hand from file mtimes.
+
+    ``verdict`` is one of the ``HANDOFF_*`` constants in `exits`, passed as a
+    string rather than imported, because evidence records what it is told and
+    importing the classifier here would give this module an opinion about
+    supervision.
+    """
+    try:
+        _append(trace_path(Path(operator_home)), {
+            "ts": _utcnow(),
+            "event": "handoff_state",
+            "pid": os.getpid(),
+            "instance": str(instance),
+            "session": session,
+            "verdict": str(verdict),
+            # Whether a clause about it actually reached the launch text. The
+            # verdict is what the supervisor observed; this is what the session
+            # was told, and the gap between the two is where "it ignored the
+            # handoff" and "nobody mentioned the handoff" used to be the same
+            # record.
+            "announced": bool(announced),
+            # The address the session was given, so a later reader can open
+            # the same file rather than infer which one was meant.
+            "path": None if path is None else str(path),
+        })
+    except Exception:
+        return
+
+
 def record_withheld_clause(operator_home: Path, *, instance: str, session: int,
                            source: str, phrases) -> None:
     """Record text that tried to grant authority and was withheld. Never raises.

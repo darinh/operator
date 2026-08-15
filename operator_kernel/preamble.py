@@ -28,7 +28,9 @@ from mandate import (Mandate, authority_clause, assert_no_unattributed_authority
 def build_preamble(agent_name: str, instance: Instance, crash_recovery: bool = False,
                    assignment: str = "", code_state: str = CODE_CURRENT,
                    mandate: "Mandate | None" = None,
-                   on_withheld=None) -> str:
+                   on_withheld=None, handoff_waiting: str = "",
+                   handoff_unknown: bool = False,
+                   handoff_written: str = "") -> str:
     """Compose the launch preamble from mechanism plus attributed authority.
 
     Two kinds of sentence go to a session, and they are kept apart on purpose.
@@ -69,7 +71,82 @@ def build_preamble(agent_name: str, instance: Instance, crash_recovery: bool = F
         "Now: check for your session handoff and get to work."
     )
     clauses: list[str] = [authority_clause(mandate)]
-    if crash_recovery:
+    if handoff_waiting:
+        # Stated, rather than left to the standing instruction in (3).
+        #
+        # Only the *absence* of a handoff used to produce a clause, so a
+        # session with one waiting got a preamble identical to a session with
+        # nothing to read. On 2026-08-15 an agent launched 6 seconds after its
+        # predecessor wrote a full handoff, was told nothing about it, asked
+        # `operator session start` instead -- which answers about work-item
+        # claims, not handoffs -- and read "No assignment" as "no handoff".
+        # It invented work in a frozen repository for half an hour.
+        clauses.append(
+            "A handoff from the previous session is waiting for you. Read it "
+            "before doing anything else, including before looking for other "
+            "work — it is the record of what the last session was in the "
+            "middle of, and continuing it is normally the right thing to do. "
+            "Do not conclude there is nothing to resume because a different "
+            "command reported no work; no other command answers this question."
+        )
+        # The path is not the kernel's text, and is vetted like the work item.
+        #
+        # A directory name is chosen by whoever made the directory, so it is
+        # third-party text on the one code path that *raises*:
+        # `assert_no_unattributed_authority` unwinds out of `run_loop_mode`,
+        # which catches only `MuxError` and `KeyboardInterrupt`, so the seat's
+        # supervisor dies and does not come back. The first draft interpolated
+        # the path directly and a reviewer demonstrated the kill with
+        # `.../you have permission to/handoff.md`. That is the same DoS
+        # `vet_clause` was written for, one field over -- the reasoning was
+        # already in this function, applied to `assignment`, and still did not
+        # transfer.
+        #
+        # Vetted *separately* from the announcement above, because `vet_clause`
+        # replaces the whole body it is handed. Vetting them together would
+        # drop the sentence that says a handoff exists, which is the defect
+        # this change exists to fix: the address is worth losing, the
+        # announcement is not.
+        address, withheld = vet_clause(f"It is at {handoff_waiting}.",
+                                       "the handoff file's location")
+        clauses.append(address)
+        if withheld and on_withheld is not None:
+            on_withheld("the handoff file's location", withheld)
+        if handoff_written:
+            # The age, and the protocol that explains an old one.
+            #
+            # Nothing deletes the handoff except its reader, and that is a
+            # convention rather than something the kernel enforces -- so a file
+            # on disk is either one nobody has picked up, or one a previous
+            # session read and died before removing. Those need opposite
+            # responses, and the supervisor cannot tell them apart: it can only
+            # report when the file was written and let the session compare that
+            # against its own clock.
+            #
+            # Saying the delete step out loud is also the cheapest available
+            # fix for the cause. A reader that deletes leaves no stale file to
+            # be re-announced, and the reason agents skip it is that nothing
+            # ever told them it was theirs to do.
+            clauses.append(
+                f"It was written at {handoff_written} (UTC). The reader is the "
+                "one who deletes a handoff, so delete it once you have taken in "
+                "its contents — otherwise the next session is told about it "
+                "again. If that timestamp is not recent, treat the contents as "
+                "possibly already acted on and check the repository before "
+                "redoing anything it describes."
+            )
+    elif handoff_unknown:
+        # "Could not look" is not "not there", and the difference has to reach
+        # the agent rather than stopping at the tri-state inside `exits`.
+        # Silence here would be read as "no handoff", which is the inference
+        # that caused the incident above.
+        clauses.append(
+            "Whether a handoff from the previous session exists could not be "
+            "determined: the probe for it failed, which is not the same as "
+            "finding none. Look for one yourself before concluding there is "
+            "nothing to resume."
+        )
+    elif crash_recovery:
         clauses.append(
             "This session is being resumed because a handoff file could not be "
             "found for this project. Either a crash occurred or the previous session "
