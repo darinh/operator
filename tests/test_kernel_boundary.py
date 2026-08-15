@@ -28,6 +28,12 @@ KERNEL = REPO / "operator_kernel"
 #: review, which is the point of it being a list rather than a convention.
 ALLOWED_THIRD_PARTY: frozenset[str] = frozenset()
 
+#: What the *test suite* may import beyond the standard library, the kernel and
+#: its own modules. `pytest` and nothing else: the suite's dependency list is a
+#: place a convenience import becomes a requirement nobody declared, and the
+#: kernel's whole claim is that it runs with a stdlib Python.
+ALLOWED_TEST_THIRD_PARTY: frozenset[str] = frozenset({"pytest"})
+
 #: Modules the kernel is defined as *not* containing. These are the concerns
 #: that grew around the old supervisor and buried it: metrics, project
 #: instructions, backlog, mail, conversation capture, spec scaffolding. The
@@ -206,6 +212,91 @@ def test_the_kernel_imports_nothing_it_is_defined_as_not_being():
         + "\n\nThe kernel supervises processes. If it needs one of these, either "
         "the dependency belongs on the other side of the boundary, or the "
         "boundary moved and this list should say so explicitly."
+    )
+
+
+def suite_modules() -> list[Path]:
+    """Every checked-in test module, `tests/pending/` included.
+
+    Pending is scanned even though it is not collected. A test in there is
+    source this repository ships, and the moment somebody moves one back it is
+    live -- so excluding it would put the hole exactly where the next port
+    lands.
+    """
+    return sorted((REPO / "tests").rglob("*.py"))
+
+
+def test_the_test_suite_imports_nothing_from_outside_this_repository():
+    """The boundary applies to the suite, and it was the suite that broke it.
+
+    `test_the_kernel_imports_nothing_it_is_defined_as_not_being` scans
+    `operator_kernel/` only, so `tests/` was outside every guard in this file --
+    and `tests/` is where the violation was. Two of them, both invisible:
+
+    * `conftest.py` did `import copilot_operator`, a name on FORBIDDEN, and
+      substituted the multiplexer fake into *its* module attribute. The kernel
+      reads `config.MUX`, so the substitution was inert for the whole life of
+      the extraction while 289 tests passed.
+    * `test_loop_pid_identity.py` did `import operator_liveness`, and nine
+      assertions in it graded the OLD repository's module rather than the
+      `process_identity` it was moved here to verify.
+
+    Neither could fail. `copilot-tools` is installed as an editable package on
+    the extracting developer's machine, so both names resolve -- to
+    `../copilot-tools/*.py`. On a fresh clone or a CI runner they resolve to
+    nothing and the whole suite dies at collection, which is the same defect
+    wearing its loud face: 289 tests reported as passing here were 289 tests
+    that could not run anywhere else.
+
+    This is a static scan of import statements rather than a check on
+    `sys.modules`, because the failure is that the wrong module IMPORTS
+    cleanly. Asking the interpreter what it loaded gets a confident answer
+    about the wrong file.
+    """
+    import sys
+
+    stdlib = sys.stdlib_module_names
+    kernel = _module_names()
+    local = {p.stem for p in suite_modules()}
+    offenders: list[str] = []
+    for path in suite_modules():
+        for name in imported_names(path.read_text(encoding="utf-8")):
+            if name in FORBIDDEN:
+                offenders.append(
+                    f"{path.relative_to(REPO)}: {name} (forbidden)")
+            elif (name not in stdlib and name not in kernel
+                    and name not in local
+                    and name not in ALLOWED_TEST_THIRD_PARTY):
+                offenders.append(
+                    f"{path.relative_to(REPO)}: {name} (undeclared)")
+    assert offenders == [], (
+        "the test suite reached outside this repository:\n  "
+        + "\n  ".join(offenders)
+        + "\n\nA suite that imports its subject from another checkout reports "
+        "on that checkout. If the name is the kernel's under an older "
+        "spelling, take it from the `op` namespace, which aliases them."
+    )
+
+
+def test_there_are_suite_modules_to_check():
+    """Otherwise the scan above passes by finding no files."""
+    assert len(suite_modules()) >= 5
+
+
+def test_the_suite_import_scan_would_catch_the_import_that_prompted_it():
+    """Positive control, on synthetic source.
+
+    Scored against the tree, this test starts passing the moment the tree is
+    clean -- which is precisely when a detector's silence stops being evidence.
+    The two spellings below are the two that were actually present.
+    """
+    assert imported_names("import copilot_operator") & FORBIDDEN == {
+        "copilot_operator"}
+    found = imported_names("import operator_liveness as ol")
+    assert found == {"operator_liveness"}
+    assert "operator_liveness" not in _module_names(), (
+        "operator_liveness is now a kernel module name, so the scan would "
+        "accept the bare import; this control needs rewriting"
     )
 
 

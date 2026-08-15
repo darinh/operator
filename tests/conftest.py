@@ -16,18 +16,21 @@ import warnings
 from contextlib import contextmanager
 from pathlib import Path
 import pytest
-# Imported after ROOT joins sys.path -- these live at the repo root.
-import copilot_operator  # noqa: E402
+# Imported after the kernel joins sys.path (pyproject sets `pythonpath`).
+# `op` is the kernel presented as one namespace, and it is used here for the
+# one property this file needs: writes forward to EVERY module binding the
+# name. See tests/op.py, and `_no_real_multiplexer` below for why that matters.
 import mux  # noqa: E402
+import op  # noqa: E402
 
 
 # ── the multiplexer boundary ────────────────────────────────────
 #
-# `copilot_operator.MUX` is a module-level `Mux()` built at import time, so any
-# test that calls into copilot_operator without replacing it drives the
-# DEVELOPER'S OWN tmux/psmux server. Measured on 2026-08-01: 30 unit tests did
-# exactly that, 134 real `tmux has-session` invocations per suite run, against
-# whatever the machine happened to be running at the time.
+# `config.MUX` is a module-level `Mux()` built at import time, so any test that
+# calls into the kernel without replacing it drives the DEVELOPER'S OWN
+# tmux/psmux server. Measured on 2026-08-01: 30 unit tests did exactly that,
+# 134 real `tmux has-session` invocations per suite run, against whatever the
+# machine happened to be running at the time.
 #
 # Two things follow, and the second is the expensive one:
 #
@@ -193,23 +196,44 @@ def _is_a_multiplexer_spawn(cmd) -> bool:
 
 @pytest.fixture(autouse=True)
 def _no_real_multiplexer(request: pytest.FixtureRequest):
-    """Point `copilot_operator.MUX` at an empty in-memory multiplexer, and make
-    any *other* route to a real one raise.
+    """Point the kernel's `MUX` at an empty in-memory multiplexer, and make any
+    *other* route to a real one raise.
 
     An empty one, because that is what the leaking tests were already getting
     by accident: no session of theirs exists on the real server, so every
     `has_session` came back False. The behaviour they assert is unchanged; only
     its dependence on the machine goes away.
 
-    Substituting `copilot_operator.MUX` is not on its own enough, and the gap
-    is the kind that stays quiet. It closes the route the 30 leaking tests
-    took; it does nothing about a test that builds its own `Mux()` -- which is
-    exactly what test_integration.py does, deliberately, so the pattern is
-    already in the file a newcomer copies from. A substitution cannot report
-    what it did not intercept, so the second half poisons the spawn itself: any
-    attempt to start a tmux/psmux/pmux client fails, loudly, naming the argv.
-    Every other subprocess is delegated untouched -- the suite really does run
-    Python child processes and must keep being able to.
+    **The substitution is written through `op`, and that is the whole of why it
+    works.** It was carried into this repository as
+    `copilot_operator.MUX = FakeMux()` -- the attribute on the 9,120-line module
+    this kernel was extracted *from*, which is not a module the kernel reads and
+    is not even in this repository. So for the whole life of the extraction the
+    substitution half of this guard was INERT: measured 2026-08-15, `config.MUX`
+    and `launch.MUX` were both a real `Mux` inside a running test. Only the
+    spawn poison below was holding the line, which is why the leak showed up as
+    loud AssertionErrors in `tests/pending/` rather than as tests quietly
+    driving this machine's server. A guard that has been rewired past its target
+    still reads exactly like a guard; that is the failure this file keeps
+    re-learning, and this is its third instance.
+
+    `op.MUX = ...` and not `config.MUX = ...`, because seven kernel modules do
+    `from config import MUX` and hold their own reference. Writing only to
+    `config` would leave `launch`, `supervisor`, `session_state`, `snapshot`,
+    `instance` and `supervisor_control` pointed at the real server -- a
+    substitution that looks applied, in the file whose subject is substitutions
+    that look applied. `op.__setattr__` forwards to every module binding the
+    name; `test_mux_isolation.py` asserts that the set it reaches is complete.
+
+    Substituting is not on its own enough either, and the gap is the kind that
+    stays quiet. It closes the route the 30 leaking tests took; it does nothing
+    about a test that builds its own `Mux()` -- which is exactly what
+    test_integration.py does, deliberately, so the pattern is already in the
+    file a newcomer copies from. A substitution cannot report what it did not
+    intercept, so the second half poisons the spawn itself: any attempt to start
+    a tmux/psmux/pmux client fails, loudly, naming the argv. Every other
+    subprocess is delegated untouched -- the suite really does run Python child
+    processes and must keep being able to.
 
     Tests that mean to drive a real server mark themselves `real_multiplexer`
     and are exempted from both halves.
@@ -231,7 +255,7 @@ def _no_real_multiplexer(request: pytest.FixtureRequest):
         yield
         return
 
-    real_mux = copilot_operator.MUX
+    real_mux = op.MUX
     real_run = mux.subprocess.run
 
     def guarded_run(cmd, *args, **kwargs):
@@ -245,13 +269,13 @@ def _no_real_multiplexer(request: pytest.FixtureRequest):
             )
         return real_run(cmd, *args, **kwargs)
 
-    copilot_operator.MUX = FakeMux()
+    op.MUX = FakeMux()
     mux.subprocess.run = guarded_run
     try:
         yield
     finally:
         mux.subprocess.run = real_run
-        copilot_operator.MUX = real_mux
+        op.MUX = real_mux
 
 
 @pytest.fixture
@@ -268,7 +292,7 @@ def denied(monkeypatch, *paths, limit: int | None = None, counter=None):
     Three call sites are patched, not one. ``Path.exists()`` reaches the
     filesystem through ``os.stat`` -- and on 3.10 through a private pathlib
     accessor that copies ``os.stat`` at import time -- while the tri-state
-    probes in ``copilot_operator`` call ``os.lstat`` directly. Deny only
+    probes in the kernel call ``os.lstat`` directly. Deny only
     ``os.lstat`` and code that still uses ``exists()`` sails through, so the
     test grades nothing; deny only ``os.stat`` and the probes never see the
     failure they exist to handle; miss the accessor and the whole thing is

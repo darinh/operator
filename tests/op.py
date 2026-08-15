@@ -27,15 +27,28 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "operator_kernel
 _MODULE_NAMES = (
     "config", "paths", "gitio", "probes", "presence", "instance", "launch",
     "session_state", "provenance", "supervisor_records", "breakers", "exits",
-    "preamble", "supervisor", "supervisor_control", "trace", "claims",
+    "preamble", "supervisor", "supervisor_control", "evidence", "claims",
     "snapshot", "process_identity", "mux", "console", "sqlite_store",
     "version", "mandate",
 )
 
+#: Names the tests were written against, mapped to what the kernel calls them
+#: now. A rename during extraction is exactly the sort of thing a test should
+#: not have to know about -- but the mapping has to be RIGHT, and one of these
+#: was not. `operator_trace` pointed at `"trace"`, which is not a kernel module
+#: at all: there is no `operator_kernel/trace.py`, so `__import__("trace")`
+#: returned the STANDARD LIBRARY's tracing module and bound its contents into
+#: this namespace. `op.operator_trace.trace_path` was an AttributeError on
+#: Python's coverage tracer, `op.main` silently resolved to `trace.main`, and
+#: every public name in stdlib `trace` was registered as a write target, so
+#: `monkeypatch.setattr(op, "time", ...)` reached into it. The behaviour those
+#: tests want is in `evidence.py` -- `trace_path` and `ancestry` are both
+#: defined there. `_bind` now refuses a non-kernel module outright, so the next
+#: wrong entry here is an error at import rather than a wrong answer later.
 _ALIASES = {
     "operator_liveness": "process_identity",
     "install_manifest": "presence",
-    "operator_trace": "trace",
+    "operator_trace": "evidence",
     "work_claims": "claims",
 }
 
@@ -49,8 +62,23 @@ class _KernelNamespace(types.ModuleType):
 
     def _bind(self):
         holders = self.__dict__["_owner"]
+        kernel = Path(__file__).resolve().parent.parent / "operator_kernel"
         for mod_name in _MODULE_NAMES:
             module = __import__(mod_name)
+            origin = getattr(module, "__file__", None)
+            # A name in `_MODULE_NAMES` that is not a kernel module does not
+            # fail -- it imports something ELSE and binds its contents here
+            # under kernel-looking names. `"trace"` did precisely that for the
+            # life of the extraction. Resolving to the wrong file is the
+            # failure this repository has now hit four times, so it is checked
+            # rather than assumed.
+            if origin is None or kernel not in Path(origin).resolve().parents:
+                raise ImportError(
+                    f"tests/op.py names {mod_name!r} as a kernel module, but it "
+                    f"resolves to {origin!r}, which is not under "
+                    f"{kernel}. Binding it would put another package's names "
+                    f"into the kernel namespace under kernel spellings."
+                )
             self.__dict__[mod_name] = module
             for key, value in vars(module).items():
                 if key.startswith("__"):

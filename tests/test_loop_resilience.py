@@ -381,7 +381,7 @@ def test_a_session_ended_by_a_restart_request_is_traced(monkeypatch, tmp_path):
     """
     import json
 
-    import operator_trace
+    operator_trace = op.operator_trace
     from conftest import FakeMux
 
     inst = op.Instance("handoff-ender")
@@ -425,7 +425,7 @@ def test_a_restart_request_seen_after_the_session_is_gone_is_traced(
     exited. Also must not be filed as an unexplained death."""
     import json
 
-    import operator_trace
+    operator_trace = op.operator_trace
 
     def script(n, instance):
         instance.exit_file.write_text("0", encoding="utf-8")
@@ -464,7 +464,7 @@ def test_an_unreadable_restart_probe_is_traced_as_unknown(
     """
     import json
 
-    import operator_trace
+    operator_trace = op.operator_trace
 
     inst = op.Instance("unreadable-restart")
     real_present = op.path_present
@@ -704,7 +704,7 @@ def test_an_unexplained_exit_is_traced_with_its_real_exit_code(monkeypatch):
     """
     import json
 
-    import operator_trace
+    operator_trace = op.operator_trace
 
     def clean_exit_no_marker(instance, args, session_num,
                              remain_on_exit=False, preamble=""):
