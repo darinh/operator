@@ -27,17 +27,52 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "operator_kernel
 _MODULE_NAMES = (
     "config", "paths", "gitio", "probes", "presence", "instance", "launch",
     "session_state", "provenance", "supervisor_records", "breakers", "exits",
-    "preamble", "supervisor", "supervisor_control", "trace", "claims",
+    "preamble", "supervisor", "supervisor_control", "evidence", "claims",
     "snapshot", "process_identity", "mux", "console", "sqlite_store",
     "version", "mandate",
 )
 
+#: Names the tests were written against, mapped to what the kernel calls them
+#: now. A rename during extraction is exactly the sort of thing a test should
+#: not have to know about -- but the mapping has to be RIGHT, and one of these
+#: was not. `operator_trace` pointed at `"trace"`, which is not a kernel module
+#: at all: there is no `operator_kernel/trace.py`, so `__import__("trace")`
+#: returned the STANDARD LIBRARY's tracing module and bound its contents into
+#: this namespace. `op.operator_trace.trace_path` was an AttributeError on
+#: Python's coverage tracer, `op.main` silently resolved to `trace.main`, and
+#: every public name in stdlib `trace` was registered as a write target, so
+#: `monkeypatch.setattr(op, "time", ...)` reached into it. The behaviour those
+#: tests want is in `evidence.py` -- `trace_path` and `ancestry` are both
+#: defined there. `_bind` now refuses a non-kernel module outright, so the next
+#: wrong entry here is an error at import rather than a wrong answer later.
 _ALIASES = {
     "operator_liveness": "process_identity",
     "install_manifest": "presence",
-    "operator_trace": "trace",
+    "operator_trace": "evidence",
     "work_claims": "claims",
 }
+
+
+KERNEL = Path(__file__).resolve().parent.parent / "operator_kernel"
+
+
+def is_kernel_module(module) -> bool:
+    """Does ``module`` actually live in this repository's kernel?
+
+    A separate, callable predicate rather than an inline check inside
+    :meth:`_KernelNamespace._bind`, so that a test can hand it the module that
+    got through -- the standard library's ``trace`` -- and watch it be refused.
+    Inline, the only available control was "stdlib ``trace`` is not under
+    ``operator_kernel/``", which is a true statement about the filesystem that
+    holds whether or not the predicate exists at all.
+    """
+    origin = getattr(module, "__file__", None)
+    if origin is None:
+        return False
+    try:
+        return KERNEL in Path(origin).resolve().parents
+    except OSError:
+        return False
 
 
 class _KernelNamespace(types.ModuleType):
@@ -51,6 +86,20 @@ class _KernelNamespace(types.ModuleType):
         holders = self.__dict__["_owner"]
         for mod_name in _MODULE_NAMES:
             module = __import__(mod_name)
+            # A name in `_MODULE_NAMES` that is not a kernel module does not
+            # fail -- it imports something ELSE and binds its contents here
+            # under kernel-looking names. `"trace"` did precisely that for the
+            # life of the extraction. Resolving to the wrong file is the
+            # failure this repository has now hit four times, so it is checked
+            # rather than assumed.
+            if not is_kernel_module(module):
+                raise ImportError(
+                    f"tests/op.py names {mod_name!r} as a kernel module, but it "
+                    f"resolves to {getattr(module, '__file__', None)!r}, which "
+                    f"is not under {KERNEL}. Binding it would put another "
+                    f"package's names into the kernel namespace under kernel "
+                    f"spellings."
+                )
             self.__dict__[mod_name] = module
             for key, value in vars(module).items():
                 if key.startswith("__"):
@@ -85,6 +134,8 @@ class _KernelNamespace(types.ModuleType):
 _ns = _KernelNamespace(__name__)
 _ns.__dict__["_MODULE_NAMES"] = _MODULE_NAMES
 _ns.__dict__["_ALIASES"] = _ALIASES
+_ns.__dict__["KERNEL"] = KERNEL
+_ns.__dict__["is_kernel_module"] = is_kernel_module
 _ns.__dict__["Path"] = Path
 _ns.__dict__["sys"] = sys
 _ns._bind()

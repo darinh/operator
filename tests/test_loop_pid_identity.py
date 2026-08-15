@@ -25,7 +25,17 @@ from pathlib import Path
 import pytest
 
 import op
-import operator_liveness as ol
+
+#: The kernel's `process_identity`, under the name these tests were written
+#: against. **Not** a bare `import operator_liveness`, and the difference is not
+#: cosmetic: `copilot-tools` -- the repository this kernel was extracted from --
+#: is installed on the extracting developer's machine as an editable package, so
+#: the bare spelling resolves to `<...>/copilot-tools/operator_liveness.py` and
+#: these nine assertions graded the OLD module while sitting in the new
+#: repository's suite. They passed, which is the problem: a suite that imports
+#: its subject from somewhere else reports on somewhere else, and the port it
+#: was moved here to verify was never once executed by them.
+ol = op.operator_liveness
 
 ROOT = Path(__file__).resolve().parent.parent
 

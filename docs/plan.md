@@ -591,8 +591,13 @@ prevent:
   can write the mandate, the gate code and the ledger. Making it real means a
   separate OS account and ACLs. **This is the one open question that changes
   what the design can honestly claim.**
-- **`tests/pending/`** — two migrated suites awaiting a FakeMux fixture and the
-  board. Not weakened to pass.
+- **`tests/pending/`** — one migrated suite left, awaiting the board and the
+  CLI dispatch. Not weakened to pass. The other moved back on 2026-08-15: it
+  was never waiting on a port. The FakeMux fixture it wanted existed and was
+  *inert* — it substituted into `copilot_operator.MUX`, an attribute in the
+  repository this kernel was extracted from — and the two other things it was
+  recorded as needing, `show_run_summary` and project-keyed handoff discovery,
+  were both present all along. 289 → 384 tests.
 - **The intent layer** — proof-of-change makes manufactured work look *stronger*
   (0014 with evidence attached), so it needs something above it.
 - Sandboxed counterfactual test execution; patch-sensitivity spec; harness-native
@@ -606,3 +611,13 @@ prevent:
   re-exhausts it.
 - The kernel budget went 7000 → 7500 once, after looking for fat and not finding
   it. The next cut is named in the test rather than left to judgement.
+- Three of this repository's own guards were found pointed at the repository it
+  was extracted from, and none of them could fail: the multiplexer substitution
+  wrote to `copilot_operator.MUX`, `test_loop_pid_identity.py` graded
+  `operator_liveness` from that checkout, and `op.py` aliased `operator_trace`
+  to the *standard library's* `trace`. `copilot-tools` is installed editable
+  here, so all three resolved; on a fresh clone the suite died at collection and
+  ran nothing. The boundary scan now covers `tests/` as well as the kernel.
+  This is the same failure `test_no_module_name_collisions.py` already records
+  three instances of, which is the argument for checking a guard's *target*
+  rather than its presence.
