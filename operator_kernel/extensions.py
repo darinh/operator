@@ -4,10 +4,10 @@ A plugin system is how this stops being one person's tool. It is also the most
 direct route back to every failure this kernel was extracted to prevent, so the
 shape matters more than the mechanism.
 
-**Plugins load at runtime, never by import.** `tests/test_kernel_boundary.py`
+**extensions load at runtime, never by import.** `tests/test_kernel_boundary.py`
 forbids the kernel importing anything outside the standard library and itself,
 and that is not an obstacle to work around — it is what keeps the kernel a
-kernel. So nothing here is imported by kernel code; plugins are discovered,
+kernel. So nothing here is imported by kernel code; extensions are discovered,
 loaded through this module, and called through narrow interfaces.
 
 **Two prohibitions, enforced rather than documented.**
@@ -46,7 +46,7 @@ import importlib.metadata
 import traceback
 from typing import Any, Callable, Iterable
 
-#: The entry-point group plugins register under.
+#: The entry-point group extensions register under.
 ENTRY_POINT_GROUP = "operator_kernel.plugins"
 
 #: Hooks a plugin may implement. Deliberately a closed set: an open registry
@@ -96,12 +96,12 @@ class LoadFailure:
 
 
 def discover(entry_points: Iterable | None = None) -> tuple[dict, list[LoadFailure]]:
-    """Load every registered plugin. Returns ``(plugins, failures)``.
+    """Load every registered plugin. Returns ``(extensions, failures)``.
 
     Never raises. A plugin that explodes on import is a failure recorded
     against its own name, not an outage for the fleet.
     """
-    plugins: dict[str, Any] = {}
+    extensions: dict[str, Any] = {}
     failures: list[LoadFailure] = []
     if entry_points is None:
         try:
@@ -110,16 +110,16 @@ def discover(entry_points: Iterable | None = None) -> tuple[dict, list[LoadFailu
             return {}, [LoadFailure("<discovery>", type(exc).__name__, str(exc))]
     for ep in entry_points:
         try:
-            plugins[ep.name] = ep.load()
+            extensions[ep.name] = ep.load()
         except Exception as exc:
             failures.append(
                 LoadFailure(ep.name, type(exc).__name__,
                             traceback.format_exc(limit=3))
             )
-    return plugins, failures
+    return extensions, failures
 
 
-def collect(plugins: dict, hook: str, /, **kwargs) -> tuple[list[Contribution],
+def collect(extensions: dict, hook: str, /, **kwargs) -> tuple[list[Contribution],
                                                             list[LoadFailure]]:
     """Call ``hook`` on every plugin that implements it.
 
@@ -135,7 +135,7 @@ def collect(plugins: dict, hook: str, /, **kwargs) -> tuple[list[Contribution],
         )
     out: list[Contribution] = []
     failures: list[LoadFailure] = []
-    for name, plugin in sorted(plugins.items()):
+    for name, plugin in sorted(extensions.items()):
         fn: Callable | None = getattr(plugin, hook, None)
         if fn is None:
             continue
