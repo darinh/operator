@@ -32,8 +32,16 @@ wearing three faces, and none of them was a missing port:
   guard's *other* half -- the spawn poison -- caught them on the way to the
   developer's real multiplexer. It now writes through `op`, which forwards to
   every module binding the name, and `tests/test_mux_isolation.py` grades it.
-- **`show_run_summary`.** Also not missing: it is in `operator_kernel/paths.py`.
-  This entry was written from the extraction plan rather than from the tree.
+- **`show_run_summary`.** Not missing either, but not working: it was in
+  `operator_kernel/paths.py` with a body referring to seven globals nothing in
+  the kernel defines (`_query`, `_table`, `METRICS_DB` and four more), so every
+  call was a `NameError`. Nothing in the kernel called it, and the fourteen
+  tests that patched it were patching a function that could not have run. It is
+  the metrics summary, which `test_kernel_boundary.FORBIDDEN` names as one of
+  the concerns the kernel is defined as *not* having, so it was deleted rather
+  than repaired. This entry originally said it was "deliberately not in the
+  kernel"; then a correction said it was present after all. Both were reading
+  the plan instead of the tree, from opposite ends.
 - **Project-keyed handoff discovery.** Present too, in `exits.py`
   (`handoff_state`, `crash_recovery_verdict`).
 

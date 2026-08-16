@@ -406,6 +406,133 @@ def test_the_dynamic_scan_does_not_invent_names(source):
     assert "module_for" not in names
 
 
+def undefined_globals(source: str, filename: str) -> set[str]:
+    """Global names a module reads that nothing in it binds.
+
+    `symtable` rather than a hand-rolled AST walk, because the question is
+    genuinely about *scope*: a name assigned in one function and read in
+    another is undefined, a name assigned at module level and read anywhere is
+    fine, and a comprehension has its own scope. The compiler already knows all
+    of this and answering it again by hand is how the answer drifts.
+
+    Builtins are excluded, and so is anything bound at module level by any
+    means -- import, assignment, `def`, `class`, `global`.
+    """
+    import builtins
+    import symtable
+
+    #: Names the interpreter injects into every module namespace. They are
+    #: never bound by the source, so a scan that does not know them reports
+    #: `__file__` against five kernel modules -- and a guard whose first run is
+    #: mostly false positives is a guard somebody deletes.
+    module_dunders = {
+        "__file__", "__name__", "__doc__", "__package__", "__spec__",
+        "__loader__", "__builtins__", "__debug__", "__path__",
+    }
+
+    top = symtable.symtable(source, filename, "exec")
+    bound = {name for name in top.get_identifiers()
+             if top.lookup(name).is_assigned()
+             or top.lookup(name).is_imported()
+             or top.lookup(name).is_namespace()}
+    known = bound | set(dir(builtins)) | module_dunders
+
+    missing: set[str] = set()
+
+    def walk(table):
+        for symbol in table.get_symbols():
+            name = symbol.get_name()
+            if name in known:
+                continue
+            if table.get_type() == "module":
+                # At module level every read of an unbound, non-builtin name
+                # is undefined; `is_assigned` already excluded the bound ones.
+                if symbol.is_referenced() and not symbol.is_assigned():
+                    missing.add(name)
+            elif symbol.is_global() and symbol.is_referenced():
+                missing.add(name)
+        for child in table.get_children():
+            walk(child)
+
+    walk(top)
+    return missing
+
+
+def test_the_kernel_reads_no_global_it_never_binds():
+    """A name used but never bound is a `NameError` waiting for its branch.
+
+    This has now happened twice in the same subsystem, and both times the
+    branch was cold enough that no test reached it while `except Exception`
+    stood ready to turn it into a plausible answer:
+
+    * `preamble.py` and `supervisor.py` called `operator_session`, which is on
+      FORBIDDEN and imported by neither -- caught by
+      `test_the_kernel_does_not_use_forbidden_modules_it_never_imported`, but
+      only because the name happened to be on that list.
+    * `supervisor.py` called `catalog_guid`, which was on no list and defined
+      nowhere in the repository. `_loop_work_db` guards it behind
+      `if store is None: return`, and nothing injects a store yet, so the
+      `NameError` was unreachable until work assignment is switched on -- at
+      which point `except Exception` would have logged it and answered `None`,
+      which reaches the agent as "you have no assignment".
+
+    The FORBIDDEN scan cannot catch the second: it grades a hand-written list,
+    and a list is the thing a new name is absent from. This grades every
+    global, so the next one fails here on the day it is written rather than on
+    the day the feature is switched on.
+    """
+    offenders: list[str] = []
+    for path in kernel_modules():
+        for name in sorted(undefined_globals(
+                path.read_text(encoding="utf-8"), str(path))):
+            offenders.append(f"{path.name}: {name}")
+    assert offenders == [], (
+        "the kernel reads globals nothing binds, so every one of these is a "
+        "NameError waiting for its branch to be taken:\n  "
+        + "\n  ".join(offenders)
+        + "\n\nAn `except Exception` around one of these turns it into a "
+        "plausible wrong answer rather than a crash, which is how the last "
+        "two survived."
+    )
+
+
+def test_the_undefined_global_detector_fires():
+    """Positive control, on synthetic source rather than the tree.
+
+    The first spelling is exactly what `supervisor.py` contained: a bare call
+    to a name nothing defines, inside a function, under a `try`.
+    """
+    source = (
+        "def _loop_work_db(workdir):\n"
+        "    try:\n"
+        "        return catalog_guid(workdir).guid\n"
+        "    except Exception:\n"
+        "        return None\n"
+    )
+    assert "catalog_guid" in undefined_globals(source, "<synthetic>")
+
+
+@pytest.mark.parametrize("source", [
+    "import catalog\ndef f():\n    return catalog.guid()\n",
+    "from paths import catalog_guid\ndef f():\n    return catalog_guid(1)\n",
+    "catalog_guid = None\ndef f():\n    return catalog_guid\n",
+    "def catalog_guid():\n    pass\ndef f():\n    return catalog_guid()\n",
+    "def f(catalog_guid):\n    return catalog_guid\n",
+    "def f():\n    catalog_guid = 1\n    return catalog_guid\n",
+    "def f():\n    return [x for x in range(3)]\n",
+    "def f():\n    return len('x')\n",
+])
+def test_the_undefined_global_detector_accepts_bound_names(source):
+    """Negative controls: a detector that reports everything also 'passes'.
+
+    Every binding form the kernel actually uses is here -- import, from-import,
+    assignment, `def`, parameter, local, comprehension variable, builtin --
+    because a false positive in this guard is worse than a miss: it fires on
+    correct code, and the cheapest way to make it stop is to delete it.
+    """
+    assert undefined_globals(source, "<synthetic>") == set()
+
+
 def test_the_kernel_does_not_use_forbidden_modules_it_never_imported():
     """A forbidden name used without importing it is invisible to an import scan.
 

@@ -29,7 +29,7 @@ _MODULE_NAMES = (
     "session_state", "provenance", "supervisor_records", "breakers", "exits",
     "preamble", "supervisor", "supervisor_control", "evidence", "claims",
     "snapshot", "process_identity", "mux", "console", "sqlite_store",
-    "version", "mandate",
+    "version", "mandate", "work_seam",
 )
 
 #: Names the tests were written against, mapped to what the kernel calls them

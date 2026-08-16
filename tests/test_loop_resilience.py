@@ -52,7 +52,6 @@ def test_launch_failure_retries_then_succeeds(monkeypatch):
         instance.stop_marker.touch()
 
     monkeypatch.setattr(op, "start_session", flaky)
-    monkeypatch.setattr(op, "show_run_summary", lambda run_started: None)
 
     inst = op.Instance("retry")
     rc = op.run_loop_mode(inst, ["--agent", "test:agent"], is_fresh=True)
@@ -70,7 +69,6 @@ def test_persistent_launch_failure_eventually_gives_up(monkeypatch):
         raise MuxSessionError("always fails")
 
     monkeypatch.setattr(op, "start_session", always_fail)
-    monkeypatch.setattr(op, "show_run_summary", lambda run_started: None)
 
     inst = op.Instance("giveup")
     with pytest.raises(MuxSessionError):
@@ -90,7 +88,6 @@ def test_resume_id_is_restored_when_launch_fails(monkeypatch):
         instance.stop_marker.touch()
 
     monkeypatch.setattr(op, "start_session", capture)
-    monkeypatch.setattr(op, "show_run_summary", lambda run_started: None)
 
     inst = op.Instance("resume")
     sid = "3f2a9c1e-1111-2222-3333-444455556666"
@@ -114,7 +111,6 @@ def test_resume_without_handoff_file_gets_crash_note(monkeypatch, tmp_path):
         instance.stop_marker.touch()
 
     monkeypatch.setattr(op, "start_session", capture)
-    monkeypatch.setattr(op, "show_run_summary", lambda run_started: None)
     monkeypatch.setattr(op, "project_handoff_file", lambda cwd, instance_id="": None)
 
     inst = op.Instance("crashy")
@@ -140,7 +136,6 @@ def test_resume_with_handoff_file_present_has_no_crash_note(monkeypatch, tmp_pat
     handoff.write_text("# handoff", encoding="utf-8")
 
     monkeypatch.setattr(op, "start_session", capture)
-    monkeypatch.setattr(op, "show_run_summary", lambda run_started: None)
     monkeypatch.setattr(op, "project_handoff_file", lambda cwd, instance_id="": handoff)
 
     inst = op.Instance("tidy")
@@ -163,7 +158,6 @@ def test_fresh_run_has_no_crash_note(monkeypatch):
         instance.stop_marker.touch()
 
     monkeypatch.setattr(op, "start_session", capture)
-    monkeypatch.setattr(op, "show_run_summary", lambda run_started: None)
 
     inst = op.Instance("fresh-run")
     op.run_loop_mode(inst, ["--agent", "test:agent"], is_fresh=True)
@@ -190,7 +184,6 @@ def _loop_with_handoff(monkeypatch, handoff: Path, script):
         script(len(seen), instance)
 
     monkeypatch.setattr(op, "start_session", capture)
-    monkeypatch.setattr(op, "show_run_summary", lambda run_started: None)
     monkeypatch.setattr(op, "stop_session_gracefully", lambda instance: None)
     monkeypatch.setattr(op, "project_handoff_file", lambda cwd, instance_id="": handoff)
     return seen
@@ -540,7 +533,6 @@ def test_unexpected_exit_without_marker_is_relaunched(monkeypatch):
             instance.stop_marker.touch()
 
     monkeypatch.setattr(op, "start_session", flaky_session)
-    monkeypatch.setattr(op, "show_run_summary", lambda run_started: None)
 
     inst = op.Instance("relaunch-me")
     rc = op.run_loop_mode(inst, ["--agent", "test:agent"], is_fresh=True)
@@ -559,7 +551,6 @@ def test_repeated_unexpected_exits_eventually_give_up(monkeypatch):
         instance.exit_file.write_text("0", encoding="utf-8")
 
     monkeypatch.setattr(op, "start_session", always_crashes)
-    monkeypatch.setattr(op, "show_run_summary", lambda run_started: None)
 
     inst = op.Instance("doomed")
     rc = op.run_loop_mode(inst, ["--agent", "test:agent"], is_fresh=True)
@@ -613,7 +604,6 @@ def test_a_session_that_ran_for_minutes_does_not_count_toward_the_give_up_limit(
 
     monkeypatch.setattr(op, "start_session", dies)
     monkeypatch.setattr(op, "is_copilot_running", aged)
-    monkeypatch.setattr(op, "show_run_summary", lambda run_started: None)
     monkeypatch.setattr(op, "stop_session_gracefully", lambda instance: None)
 
     inst = op.Instance("long-lived")
@@ -643,7 +633,6 @@ def test_detach_marker_leaves_session_running(monkeypatch):
 
     monkeypatch.setattr(op, "start_session", start)
     monkeypatch.setattr(op, "stop_session_gracefully", fake_stop_gracefully)
-    monkeypatch.setattr(op, "show_run_summary", lambda run_started: None)
     monkeypatch.setattr(op.MUX, "has_session", lambda session: session_live["v"])
     monkeypatch.setattr(op.MUX, "pane_dead", lambda session: False)
 
@@ -673,7 +662,6 @@ def test_stop_marker_stops_session_and_supervisor(monkeypatch):
 
     monkeypatch.setattr(op, "start_session", start)
     monkeypatch.setattr(op, "stop_session_gracefully", fake_stop_gracefully)
-    monkeypatch.setattr(op, "show_run_summary", lambda run_started: None)
     monkeypatch.setattr(op.MUX, "has_session", lambda session: session_live["v"])
     monkeypatch.setattr(op.MUX, "kill_session", lambda session: calls.__setitem__(
         "kill_session", calls["kill_session"] + 1) or True)
@@ -711,7 +699,6 @@ def test_an_unexplained_exit_is_traced_with_its_real_exit_code(monkeypatch):
         instance.exit_file.write_text("0", encoding="utf-8")
 
     monkeypatch.setattr(op, "start_session", clean_exit_no_marker)
-    monkeypatch.setattr(op, "show_run_summary", lambda run_started: None)
 
     inst = op.Instance("tracer")
     rc = op.run_loop_mode(inst, ["--agent", "test:agent"], is_fresh=True)

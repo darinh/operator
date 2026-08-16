@@ -644,6 +644,12 @@ What is enforced rather than documented:
   were both present all along. 289 → 384 tests.
 - **The intent layer** — proof-of-change makes manufactured work look *stronger*
   (0014 with evidence attached), so it needs something above it.
+- **The extension host is built and unwired.** `extensions.Host` and
+  `extension_worker.py` are complete and tested; nothing in `supervisor.py`
+  calls them. Wiring `admit_launch` onto the launch path is the next step, and
+  it was blocked until 2026-08-15 by `supervisor.py` sitting at exactly
+  `MAX_MODULE_LINES`. The work-assignment seam moved to `work_seam.py` to make
+  room; there are 103 lines of headroom now.
 - Sandboxed counterfactual test execution; patch-sensitivity spec; harness-native
   resume for the crash case; reading `cli-agent-runner`'s 13 defenses.
 
@@ -665,3 +671,11 @@ What is enforced rather than documented:
   This is the same failure `test_no_module_name_collisions.py` already records
   three instances of, which is the argument for checking a guard's *target*
   rather than its presence.
+- The kernel read three globals nothing bound. `operator_session` was caught by
+  the FORBIDDEN scan because it happened to be on that list; `catalog_guid` and
+  the seven `show_run_summary` depends on were on no list, and the first would
+  have answered "you have no assignment" the day work assignment was switched
+  on. A hand-written list is the thing a new name is absent from, so the guard
+  is now `symtable` over every global in the kernel rather than a membership
+  test. `show_run_summary` was deleted: uncalled, unrunnable, and a metrics
+  concern the kernel is defined as not having.

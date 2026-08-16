@@ -411,7 +411,6 @@ def _run_one_loop(monkeypatch, tmp_path, handoff_file):
     monkeypatch.setattr(op, "RESTART_DIR", tmp_path / "restart")
     monkeypatch.setattr(op, "OPERATOR_HOME", tmp_path / "home")
     monkeypatch.setattr(op, "start_session", capture)
-    monkeypatch.setattr(op, "show_run_summary", lambda run_started: None)
     monkeypatch.setattr(op, "project_handoff_file",
                         lambda cwd, instance_id="": handoff_file)
 
