@@ -12,10 +12,36 @@ saved — and is recorded in the ledger as a `claim.*` per invariant 5, once per
 state change rather than once per pause. `gate_change` and `detect_repo` still
 have no call site: there is no kernel merge gate to hang the first on, and
 nothing yet asks the second. **The fleet host of §D-2 — `on_fact`, `on_tick`,
-`propose_work` — is not built**, and when it is it goes outside
-`operator_kernel/`: it is never on a critical path, and a supervision kernel
-that grows a ledger tailer has stopped being one. The open items of §8 are
-still open, and the last of them is still the one most likely to be fatal.
+`propose_work` — is built**, in `operator_fleet/fleet_host.py` with
+`tests/test_fleet_host.py`, outside `operator_kernel/` as §D-2 required: it is
+never on a critical path, and a supervision kernel that grows a ledger tailer
+has stopped being one. Its closed hook set is the *host's* rather than the
+module's and is disjoint from the in-loop three, so neither host can be handed
+the other's questions. Nothing starts the process yet; that is a CLI decision,
+the same shape as `launch_gate` being called by the supervisor rather than by
+`extensions.py`. The open items of §8 are still open, and the last of them is
+still the one most likely to be fatal.
+
+**Three things the fleet host settled that §D-2 did not.** Departures and
+omissions, recorded here rather than left for a reader to find in the code.
+
+*Facts are delivered in bounded batches, not one call per record.* The same
+trade as *one worker per extension* becoming one worker per call, in the other
+direction: a process per ledger record is five hundred interpreter starts to
+drain one poll, which on a busy fleet is a tail that falls permanently behind.
+Order and at-least-once — what §8 actually assumed — are preserved.
+
+*What an `on_fact` hook returns is read and dropped, so R6 is not built.* An
+answer written back into the ledger arrives at `on_fact` on the next poll, and
+an extension that emits on every fact emits on its own emission, forever. R6
+needs a channel the tail does not read, and that is a decision rather than an
+oversight. Proposals go to `proposals.jsonl` for the same reason.
+
+*R5 is satisfied at tick granularity, not by declaration.* An extension is told
+the wall-clock time on every tick and decides whether its 08:00 has passed. It
+does not poll — it holds no process between ticks — but nothing in the closed
+hook set asks an extension when it wants waking, and adding a fourth hook is a
+decision the set is closed to prevent anyone making casually.
 
 One departure from §1.7 worth naming, because it reads as a contradiction and
 is not: *one worker per extension* is implemented as one worker per **call**.
@@ -324,8 +350,12 @@ What it got wrong:
 - The ledger is genuinely append-only and cheap to tail, and delivery to
   `on_fact` is at-least-once and per-seat ordered. If tailing is lossy the
   observe-off-thread story weakens.
-- There is a NEEDS-HUMAN queue to route to. Several containments depend on it
-  and it is not built.
+- There is a NEEDS-HUMAN queue to route to. Several containments depend on it.
+  It now exists as far as *writing* goes — `operator_fleet/fleet_host.py`
+  appends every proposal to `proposals.jsonl`, attributed, vetted and with no
+  field that can spell approval — and not at all as far as *draining* goes.
+  Nothing reads it, so the assumption has moved rather than closed: it is now
+  the last bullet in this list, one file over.
 - **Human provenance is unforgeable by an extension.** It is not, today: a seat
   shares the owner's filesystem identity. So INV-AUTH is a convention backed by
   a ledger record rather than a guarantee, exactly as `mandate.py` says of

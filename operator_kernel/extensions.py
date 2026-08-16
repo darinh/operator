@@ -339,12 +339,21 @@ class Host:
     """
 
     def __init__(self, extensions: "Iterable[Extension]", *,
+                 hooks: "Iterable[str]" = HOOKS,
                  deadline: float = DEFAULT_DEADLINE,
                  call_deadline: float = DEFAULT_CALL_DEADLINE,
                  python: "str | None" = None,
                  worker: "Path | None" = None,
                  cwd: "str | None" = None) -> None:
         self.extensions = sorted(extensions, key=lambda e: e.name)
+        # The closed set belongs to the *host*, not to the module, because
+        # §D-2 resolved on two hosts asking disjoint questions: a per-seat
+        # supervisor asks `HOOKS`, and the fleet host asks `on_fact`,
+        # `on_tick`, `propose_work` — which is why that trio is not in `HOOKS`
+        # and why a supervisor cannot be made to ask one by naming it. One
+        # union would have been laxer than either: it would let the launch path
+        # be handed a hook whose whole premise is that nothing waits for it.
+        self.hooks = tuple(hooks)
         self.deadline = deadline
         self.call_deadline = call_deadline
         self.python = python or sys.executable
@@ -383,11 +392,11 @@ class Host:
         supervisor's exposure is the number of installed entry points times the
         per-worker deadline, and nobody here decides how many those are.
         """
-        if hook not in HOOKS:
+        if hook not in self.hooks:
             raise ExtensionError(
-                f"{hook!r} is not a hook. The set is closed "
-                f"({', '.join(HOOKS)}) so that an extension cannot name its "
-                f"way into a call site the kernel grows later."
+                f"{hook!r} is not a hook this host asks. The set is closed "
+                f"({', '.join(self.hooks)}) so that an extension cannot name "
+                f"its way into a call site the kernel grows later."
             )
         # Before serialising, not after. `json.dumps` on a large or awkward
         # payload is real time spent on the launch path, and a budget that

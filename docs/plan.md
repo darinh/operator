@@ -580,12 +580,14 @@ is up and the supervisor loop is per-seat:
 
 - **In-loop hooks** — `admit_launch`, `gate_change`, `detect_repo`, in
   `operator_kernel/extensions.py`. Deadline-bounded, additive, fail-open.
-- **The fleet host** — `on_fact`, `on_tick`, `propose_work`. Never on a
-  critical path, and deliberately **outside `operator_kernel/`**: tailing a
-  ledger to send a digest is not supervision. Not built yet, but the package it
-  belongs in now exists — `operator_fleet/`, opened by moving `snapshot.py`
-  there when the kernel ran out of budget, and held to its own boundary by
-  `tests/test_fleet_boundary.py`.
+- **The fleet host** — `on_fact`, `on_tick`, `propose_work`, in
+  `operator_fleet/fleet_host.py`. Never on a critical path, and deliberately
+  **outside `operator_kernel/`**: tailing a ledger to send a digest is not
+  supervision. Built, with the ledger tail, the wall-clock wake and the
+  NEEDS-HUMAN proposal queue (`proposals.jsonl`) that INV-WORK routes to.
+  Nothing starts the process yet — that is a CLI decision, like `launch_gate`
+  being called by the supervisor rather than by `extensions.py`. The package it
+  lives in is held to its own boundary by `tests/test_fleet_boundary.py`.
 
 What is enforced rather than documented:
 
@@ -647,13 +649,15 @@ What is enforced rather than documented:
   were both present all along. 289 → 384 tests.
 - **The intent layer** — proof-of-change makes manufactured work look *stronger*
   (0014 with evidence attached), so it needs something above it.
-- **The extension host is wired at one call site of three.** `admit_launch` is
-  asked before every launch, through `operator_kernel/extension_seam.py`; a
-  refusal holds the seat without burning a session number, and the answer is a
-  `claim.*` in the ledger. `gate_change` and `detect_repo` still have none:
-  there is no kernel merge gate to hang the first on. The fleet host
-  (`on_fact`, `on_tick`, `propose_work`) is still unbuilt, and it now has a
-  package to be unbuilt in: `operator_fleet/`, created by the cut below.
+- **The extension host is wired at one call site of three, and the fleet host
+  is built.** `admit_launch` is asked before every launch, through
+  `operator_kernel/extension_seam.py`; a refusal holds the seat without burning
+  a session number, and the answer is a `claim.*` in the ledger. `gate_change`
+  and `detect_repo` still have none: there is no kernel merge gate to hang the
+  first on. The fleet host (`on_fact`, `on_tick`, `propose_work`) now exists in
+  `operator_fleet/fleet_host.py` with `tests/test_fleet_host.py`, and no
+  process starts it yet — the hook set it asks is its own, disjoint from the
+  kernel's, so a supervisor cannot be handed a question nothing is waiting on.
 - **The budget stopped everything, and was answered with a cut rather than a
   bigger constant.** The kernel reached 4,091 of 4,100 code lines and exactly
   9,000 of 9,000 total, so the next line of anything failed
