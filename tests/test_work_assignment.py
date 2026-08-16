@@ -117,5 +117,151 @@ def test_the_catalog_lookup_the_seam_depends_on_exists():
     """
     assert callable(op.catalog_guid)
     assert op.catalog_guid.__module__ == "paths"
-    assert op.CatalogLookup(None).guid is None
-    assert op.CatalogLookup("g").guid == "g"
+
+
+# ── the real lookup, not a stub of it ───────────────────────────
+#
+# The tests above stub `catalog_guid`, so they grade the seam and say nothing
+# about the lookup it now shares with `project_handoff_file`. That function
+# decides whether a restarting session is told its handoff is waiting, missing,
+# or unknowable, and the three answers must not collapse into each other. These
+# call the real thing against a real catalog file.
+@pytest.fixture
+def catalog(tmp_path, monkeypatch):
+    """A projects root with a writable catalog, isolated from the machine."""
+    root = tmp_path / "projects"
+    root.mkdir(parents=True)
+    monkeypatch.setattr(op, "projects_root", lambda: root)
+    monkeypatch.setattr(op, "project_catalog_path", lambda: root / "catalog.csv")
+    return root / "catalog.csv"
+
+
+def test_an_absent_catalog_is_not_registered_rather_than_unreadable(catalog):
+    found = op.catalog_guid(Path.cwd())
+    assert found.guid is None
+    assert found.undecided is False, (
+        "an absent catalog is a settled answer: the project is not registered"
+    )
+
+
+def test_a_registered_checkout_resolves_to_its_guid(catalog, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch_free_root = str(repo.resolve())
+    catalog.write_text(f'"{monkeypatch_free_root}",a-guid\n', encoding="utf-8")
+    assert op.catalog_guid(repo).guid == "a-guid"
+
+
+def test_a_row_that_cannot_be_compared_leaves_the_verdict_undecided(
+        catalog, tmp_path, monkeypatch):
+    """"No row matched" is only an answer if every row was actually compared.
+
+    Without this, one malformed row turns "I could not tell" into "not
+    registered" -- and `handoff_state` turns that into "no handoff is expected
+    here" for a session that may well have one waiting.
+    """
+    catalog.write_text('"\x00not-a-path",a-guid\n', encoding="utf-8")
+    found = op.catalog_guid(tmp_path / "repo")
+    assert found.guid is None
+    assert found.undecided is True, (
+        "a row that could not be resolved was counted as a row that did not "
+        "match"
+    )
+
+
+def test_an_unreadable_catalog_is_undecided_not_unregistered(
+        catalog, tmp_path, monkeypatch):
+    catalog.write_text('"/somewhere",a-guid\n', encoding="utf-8")
+
+    def refuse(*args, **kwargs):
+        raise OSError(13, "Permission denied")
+
+    monkeypatch.setattr("builtins.open", refuse)
+    found = op.catalog_guid(tmp_path / "repo")
+    assert found.guid is None
+    assert found.undecided is True
+
+
+def test_the_handoff_path_keeps_the_three_answers_apart(catalog, tmp_path):
+    """The wrapper's contract, through the real lookup rather than a stub.
+
+    `project_handoff_file` deliberately makes **no presence probe of its own**.
+    It used to, and splitting the lookup out left that probe in place beside
+    the one inside `catalog_guid` -- two stats of a file that gets rewritten,
+    which disagree in the ordinary `unlink`-then-`replace` window. When they
+    disagreed the answer was `None`, and `None` reaches a restarting session as
+    "no handoff is expected here".
+    """
+    assert op.project_handoff_file(tmp_path / "repo") is None
+
+    repo = tmp_path / "repo2"
+    repo.mkdir()
+    catalog.write_text(f'"{repo.resolve()}",a-guid\n', encoding="utf-8")
+    got = op.project_handoff_file(repo, "seat-one")
+    assert got is not None and got.name == "seat-one.md"
+    assert got.parent.name == "handoff"
+
+
+def test_an_undecided_catalog_reaches_the_caller_as_unreadable(
+        catalog, tmp_path, monkeypatch):
+    catalog.write_text('"/somewhere",a-guid\n', encoding="utf-8")
+    monkeypatch.setattr(op, "catalog_guid",
+                        lambda cwd: op.CatalogLookup(None, undecided=True))
+    assert op.project_handoff_file(tmp_path / "repo") is op.CATALOG_UNREADABLE
+
+
+def test_the_handoff_path_probes_the_catalog_exactly_once(
+        catalog, tmp_path, monkeypatch):
+    """The race, made deterministic.
+
+    Two probes of a file that can be rewritten can disagree, and when they did
+    the answer was `None` -- which `handoff_state` turns into "no handoff is
+    expected here" for a session that may have one waiting. Rather than test a
+    timing window, this hands the code a probe that answers `True` and then
+    `False`, which is what a catalog being replaced looks like from inside.
+
+    One probe cannot disagree with itself, so the count is half the assertion:
+    without it, a future second probe that happens to agree in this test would
+    pass while reintroducing the window.
+    """
+    catalog.write_text('"/somewhere",a-guid\n', encoding="utf-8")
+    answers = iter([True, False, False, False])
+    calls = []
+
+    def flapping(path):
+        calls.append(path)
+        return next(answers, False)
+
+    monkeypatch.setattr(op, "file_present", flapping)
+    # The file is gone by the time `open` runs, which is the second half of the
+    # same window: a probe that said "there" and a read that finds nothing.
+    catalog.unlink()
+
+    got = op.project_handoff_file(tmp_path / "repo", "seat-one")
+    assert got is op.CATALOG_UNREADABLE, (
+        "a catalog that vanished mid-lookup was reported as 'not registered', "
+        "which reaches a restarting session as 'no handoff is expected here'"
+    )
+    assert len(calls) == 1, (
+        f"the catalog was probed {len(calls)} times; two probes of a file that "
+        f"gets rewritten can disagree, and this path must not guess"
+    )
+
+
+def test_an_undecided_lookup_is_not_reported_as_having_no_work(
+        tmp_path, monkeypatch, said):
+    """The seam's half of the same distinction.
+
+    An unreadable catalog must not reach the agent as "you have no assignment",
+    which is exactly what an empty queue looks like.
+    """
+    class Store:
+        def db_path(self, project):  # pragma: no cover - must not be reached
+            raise AssertionError("opened a database for an unsettled project")
+
+    monkeypatch.setattr(op, "_SESSION_STORE", Store())
+    monkeypatch.setattr(op, "catalog_guid",
+                        lambda cwd: op.CatalogLookup(None, undecided=True))
+    assert op._loop_work_db(tmp_path) is None
+    assert any("not the same as having no work" in line for line in said), (
+        f"an unsettled catalog was reported as an absence of work: {said!r}")

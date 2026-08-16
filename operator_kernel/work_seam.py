@@ -77,6 +77,16 @@ def _loop_work_db(workdir: Path):
         # entry either way and only one of the two spellings says where that
         # decision lives.
         found = catalog_guid(workdir)
+        if found.undecided:
+            # "Could not settle it" is not "not registered", and this whole
+            # subsystem's failure mode is answering the second when it means
+            # the first. An unreadable catalog, a working directory that will
+            # not resolve, or a row that could not be compared all land here,
+            # and every one of them would otherwise reach the agent as "you
+            # have no assignment" -- indistinguishable from an empty queue.
+            log("  Could not settle which project this is, so no work database "
+                "was opened -- which is not the same as having no work.")
+            return None
         if found.guid is None:
             return None
         return store.db_path(project_dir(found.guid))

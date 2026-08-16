@@ -157,9 +157,18 @@ def project_handoff_file(cwd: Path,
     finds the project's real entry instead of reporting it unregistered. It is
     :func:`catalog_guid`'s, shared with the work-assignment seam rather than
     written twice.
+
+    There is deliberately **no presence probe here**. This function used to
+    make one and then open the file, which is one probe; splitting the lookup
+    out and leaving the probe behind made it two, and two probes of a file that
+    can be rewritten can disagree. A catalog that is present for the first and
+    gone for the second -- an ordinary `unlink`-then-`replace` window -- came
+    back as `None`, and `handoff_state` turns `None` into "no handoff is
+    expected here" while `CATALOG_UNREADABLE` becomes "could not tell". Telling
+    a restarting session its project has no handoff on the strength of a race
+    is the one thing this path must never do, and `exits.py` says as much:
+    asking twice invites the two answers to disagree.
     """
-    if file_present(project_catalog_path()) is False:
-        return None
     found = catalog_guid(cwd)
     if found.undecided:
         return CATALOG_UNREADABLE

@@ -415,31 +415,62 @@ def undefined_globals(source: str, filename: str) -> set[str]:
     fine, and a comprehension has its own scope. The compiler already knows all
     of this and answering it again by hand is how the answer drifts.
 
-    Builtins are excluded, and so is anything bound at module level by any
-    means -- import, assignment, `def`, `class`, `global`.
+    **What this does not do**, said plainly so nobody reads more into a pass
+    than is there: it is a binding check, not a definite-assignment one. A name
+    bound only on a branch that did not run (`if False: x = 1`), bound after
+    its own use (`class C: token = token`, a decorator defined further down),
+    or deleted before a read is *bound* as far as this is concerned and will
+    not be reported. Ordering analysis is a different and much larger tool. The
+    two defects this exists for -- `operator_session` and `catalog_guid` -- were
+    both names bound nowhere at all, which is the case it settles completely.
+
+    `exec`, `eval` and attribute access on a bound name are outside it too, for
+    the same reason: nothing static can see through them.
     """
     import builtins
     import symtable
 
-    #: Names the interpreter injects into every module namespace. They are
-    #: never bound by the source, so a scan that does not know them reports
-    #: `__file__` against five kernel modules -- and a guard whose first run is
-    #: mostly false positives is a guard somebody deletes.
+    #: Names the interpreter injects into every module namespace. `__path__` is
+    #: deliberately absent: only packages get one, and the kernel is flat
+    #: modules, so excluding it would hide a real unbound read.
     module_dunders = {
         "__file__", "__name__", "__doc__", "__package__", "__spec__",
-        "__loader__", "__builtins__", "__debug__", "__path__",
+        "__loader__", "__builtins__", "__debug__",
     }
 
+    # A star import binds names this analysis cannot enumerate, so anything it
+    # said afterwards would be a guess. Rather than guess generously -- which
+    # would quietly switch the guard off for that module -- it reports nothing
+    # and `test_the_kernel_does_not_use_star_imports` refuses the construct
+    # outright, so the escape hatch cannot be reached without failing there.
+    for node in ast.walk(ast.parse(source, filename)):
+        if isinstance(node, ast.ImportFrom):
+            if any(alias.name == "*" for alias in node.names):
+                return set()
+
     top = symtable.symtable(source, filename, "exec")
+
+    def tables(table):
+        yield table
+        for child in table.get_children():
+            yield from tables(child)
+
     bound = {name for name in top.get_identifiers()
              if top.lookup(name).is_assigned()
              or top.lookup(name).is_imported()
              or top.lookup(name).is_namespace()}
+    # A `global x` in a function, and a walrus inside a module-level
+    # comprehension, both bind at module scope from a CHILD table. Reading only
+    # the top table reports them missing -- a false positive on correct code,
+    # which is how a guard earns its deletion.
+    for table in tables(top):
+        for symbol in table.get_symbols():
+            if symbol.is_global() and symbol.is_assigned():
+                bound.add(symbol.get_name())
     known = bound | set(dir(builtins)) | module_dunders
 
     missing: set[str] = set()
-
-    def walk(table):
+    for table in tables(top):
         for symbol in table.get_symbols():
             name = symbol.get_name()
             if name in known:
@@ -451,11 +482,29 @@ def undefined_globals(source: str, filename: str) -> set[str]:
                     missing.add(name)
             elif symbol.is_global() and symbol.is_referenced():
                 missing.add(name)
-        for child in table.get_children():
-            walk(child)
-
-    walk(top)
     return missing
+
+
+def test_the_kernel_does_not_use_star_imports():
+    """`from x import *` is the one construct that blinds the guard above.
+
+    It binds names nothing static can enumerate, so `undefined_globals` reports
+    nothing for a module containing one. That escape hatch has to be closed
+    somewhere or the guard is optional: any module could switch it off by
+    accident. It is closed here rather than by making the analysis guess.
+    """
+    offenders = []
+    for path in kernel_modules():
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.ImportFrom):
+                if any(alias.name == "*" for alias in node.names):
+                    offenders.append(f"{path.name}: from {node.module} import *")
+    assert offenders == [], (
+        "star imports blind the undefined-global scan:\n  "
+        + "\n  ".join(offenders)
+        + "\n\nName what is imported, or the scan silently stops grading this "
+        "module."
+    )
 
 
 def test_the_kernel_reads_no_global_it_never_binds():
@@ -521,16 +570,48 @@ def test_the_undefined_global_detector_fires():
     "def f():\n    catalog_guid = 1\n    return catalog_guid\n",
     "def f():\n    return [x for x in range(3)]\n",
     "def f():\n    return len('x')\n",
+    # The forms a reviewer found this reporting as undefined while they run
+    # perfectly well. Every one of these is a false positive, and a false
+    # positive is worse than a miss: it fires on correct code, and the cheapest
+    # way to make it stop is to delete the guard.
+    "def f():\n    global seen\n    seen = 1\ndef g():\n    return seen\n",
+    "from math import *\ndef f():\n    return sin(1)\n",
+    "vals = [y := 2]\ndef f():\n    return y\n",
+    "class C:\n    x = 1\ndef f():\n    return C.x\n",
+    "import functools\n@functools.cache\ndef f():\n    return 1\n",
+    "def f(a: int) -> str:\n    return str(a)\n",
+    "try:\n    import json\nexcept ImportError:\n    json = None\ndef f():\n    return json\n",
+    "def outer():\n    v = 1\n    def inner():\n        nonlocal v\n        v = 2\n    return inner\n",
 ])
 def test_the_undefined_global_detector_accepts_bound_names(source):
     """Negative controls: a detector that reports everything also 'passes'.
 
     Every binding form the kernel actually uses is here -- import, from-import,
-    assignment, `def`, parameter, local, comprehension variable, builtin --
-    because a false positive in this guard is worse than a miss: it fires on
-    correct code, and the cheapest way to make it stop is to delete it.
+    assignment, `def`, `class`, parameter, local, comprehension variable,
+    builtin, `global`, `nonlocal`, walrus, decorator, annotation and a
+    `try/except ImportError` fallback.
     """
     assert undefined_globals(source, "<synthetic>") == set()
+
+
+def test_a_star_import_makes_the_detector_say_nothing_rather_than_guess():
+    """It cannot enumerate what a star import bound, so it declines to answer.
+
+    Reported as a pass here and refused outright by
+    `test_the_kernel_does_not_use_star_imports`, which is the pairing that
+    keeps "cannot analyse" from quietly becoming "analysed and clean".
+    """
+    assert undefined_globals(
+        "from math import *\ndef f():\n    return definitely_not_bound\n",
+        "<synthetic>") == set()
+
+
+def test_the_star_import_refusal_fires_on_synthetic_source():
+    """Positive control for the construct the guard above cannot see through."""
+    tree = ast.parse("from math import *\n")
+    starred = [n for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
+               and any(a.name == "*" for a in n.names)]
+    assert len(starred) == 1
 
 
 def test_the_kernel_does_not_use_forbidden_modules_it_never_imported():
