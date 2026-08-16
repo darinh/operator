@@ -12,8 +12,9 @@ saved — and is recorded in the ledger as a `claim.*` per invariant 5, once per
 state change rather than once per pause. `gate_change` and `detect_repo` still
 have no call site: there is no kernel merge gate to hang the first on, and
 nothing yet asks the second. **The fleet host of §D-2 — `on_fact`, `on_tick`,
-`propose_work` — is built**, in `operator_fleet/fleet_host.py` with
-`tests/test_fleet_host.py`, outside `operator_kernel/` as §D-2 required: it is
+`propose_work` — is built**, in `operator_fleet/fleet_host.py` (with the
+ledger tail in `operator_fleet/ledger_tail.py`) and `tests/test_fleet_host.py`,
+outside `operator_kernel/` as §D-2 required: it is
 never on a critical path, and a supervision kernel that grows a ledger tailer
 has stopped being one. Its closed hook set is the *host's* rather than the
 module's and is disjoint from the in-loop three, so neither host can be handed
@@ -35,13 +36,28 @@ Order and at-least-once — what §8 actually assumed — are preserved.
 answer written back into the ledger arrives at `on_fact` on the next poll, and
 an extension that emits on every fact emits on its own emission, forever. R6
 needs a channel the tail does not read, and that is a decision rather than an
-oversight. Proposals go to `proposals.jsonl` for the same reason.
+oversight. Proposals go to `proposals.jsonl` and extension failures to
+`fleet-failures.jsonl` for the same reason: neither is a file the tail reads.
 
 *R5 is satisfied at tick granularity, not by declaration.* An extension is told
 the wall-clock time on every tick and decides whether its 08:00 has passed. It
 does not poll — it holds no process between ticks — but nothing in the closed
 hook set asks an extension when it wants waking, and adding a fourth hook is a
 decision the set is closed to prevent anyone making casually.
+
+**What two review rounds cost, recorded because the number is the argument for
+running them.** Three model families reviewed the first version and *all three*
+found the same defect — a rotated ledger drained in one bounded read and then
+abandoned, losing thousands of records while reporting a clean read. Two of
+them found the residual half of it after the fix, which was that a tail sitting
+at offset zero could not see a rotation at all. Between them the two rounds
+also produced: a batch that reached no worker being lost in-process, a `NaN` in
+one ledger line making five hundred records undeliverable, a proposal queue
+that deleted pending entries when it rotated, gap counters nothing read, a
+`stat`-then-`open` substitution, and an extension's traceback written into a
+human-facing file raw and marked verified. Every one of those is a *silent*
+failure — the class this project is organised around — and none was found by
+the tests, which were green throughout.
 
 One departure from §1.7 worth naming, because it reads as a contradiction and
 is not: *one worker per extension* is implemented as one worker per **call**.
@@ -349,13 +365,21 @@ What it got wrong:
 
 - The ledger is genuinely append-only and cheap to tail, and delivery to
   `on_fact` is at-least-once and per-seat ordered. If tailing is lossy the
-  observe-off-thread story weakens.
+  observe-off-thread story weakens. `operator_fleet/ledger_tail.py` is where
+  that assumption is now *load-bearing code* rather than a sentence, and what
+  it cannot promise is written on it: a rotation this tail was more than one
+  file behind, or a state file torn by a crash, is a counted `gap` rather than
+  a recovered record. It is at-least-once with the losses named, which is a
+  weaker claim than the one this bullet makes and is deliberately not dressed
+  up as the same one.
 - There is a NEEDS-HUMAN queue to route to. Several containments depend on it.
   It now exists as far as *writing* goes — `operator_fleet/fleet_host.py`
   appends every proposal to `proposals.jsonl`, attributed, vetted and with no
   field that can spell approval — and not at all as far as *draining* goes.
   Nothing reads it, so the assumption has moved rather than closed: it is now
-  the last bullet in this list, one file over.
+  the last bullet in this list, one file over. The queue *refuses* an append
+  past 4 MB rather than rotating, because a queue nobody drains that also
+  deletes its own oldest entries is worse than one that says it is full.
 - **Human provenance is unforgeable by an extension.** It is not, today: a seat
   shares the owner's filesystem identity. So INV-AUTH is a convention backed by
   a ledger record rather than a guarantee, exactly as `mandate.py` says of
