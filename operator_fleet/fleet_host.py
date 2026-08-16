@@ -115,10 +115,28 @@ KERNEL_FAULT = "<kernel>"
 MAX_QUEUE_BYTES = 4 * 1024 * 1024
 
 
-#: Characters of a failure's detail kept in the failure record. It is a
-#: package's prose with a traceback in it, and unbounded third-party text in a
-#: file a human opens is what this design keeps refusing.
+#: Characters of a failure's prose kept in the failure record. It is a
+#: package's words with a traceback in them, and unbounded third-party text in
+#: a file a human opens is what this design keeps refusing. Truncated before
+#: `claim_text` sees it, for the same reason a proposal is: cutting the
+#: rendered text could take a line's attribution label off with it.
 FAILURE_DETAIL_CHARS = 400
+
+#: The failure kinds this host and the kernel's produce. Anything else is the
+#: name an extension gave its own exception class, and that is prose: it
+#: reaches the operator log, which is a file an agent can open, and
+#: `discover` refuses a *name* that grants authority precisely because names
+#: get repeated. An unrecognised kind is reported as one and its real spelling
+#: goes in the vetted detail instead.
+HOST_ERRORS = frozenset({
+    "Quarantined", "BudgetExhausted", "HostError", "Deadline",
+    "WorkerUnavailable", "ProtocolViolation", "NotSerializable",
+    "MalformedEntryPoint", "GrantingName", "BadProposal",
+    "TooManyProposals", "QueueUnwritable",
+})
+
+#: What an error kind outside `HOST_ERRORS` is called in the log and the record.
+UNRECOGNISED_ERROR = "ExtensionNamedError"
 
 
 def proposals_path(home) -> Path:
@@ -460,33 +478,48 @@ class FleetHost:
         """Record that an extension could not answer, and say so without saying
         who.
 
-        Two halves, and both are needed. The *log* omits the name: it is a file
-        an agent can open, an extension's name is third-party content that
-        `discover` already refuses when it grants authority, and repeating it
-        there would undo that refusal one module later. The *record* keeps the
-        name, because an extension quarantined for the life of the host is
+        Three things, and each was got wrong once. The *log* omits the name: it
+        is a file an agent can open, an extension's name is third-party content
+        that `discover` already refuses when it grants authority, and repeating
+        it there would undo that refusal one module later. The *record* keeps
+        the name, because an extension quarantined for the life of the host is
         otherwise invisible forever — a reviewer pointed out that the log line
         promised an attribution nothing was writing, which is worse than
         silence.
+
+        And the extension's own words — the error kind, which is whatever it
+        named its exception class, and the detail, which is its traceback — go
+        through `claim_text` before they land in a file a human reads. INV-AUTH
+        is not only about the preamble: an unattributed line asserting
+        authority is as dangerous in a queue somebody pastes from as it is in a
+        session's context, and a reviewer found this one written raw and marked
+        `verified`. The error *kind* is additionally reduced to a name this
+        host produced unless it is one, because that field is read as a
+        category rather than as prose.
         """
         for failure in failures:
+            kind = str(failure.error)
+            named = kind if kind in HOST_ERRORS else UNRECOGNISED_ERROR
             log(f"  A fleet extension could not answer {failure.hook} "
-                f"({failure.error}) — recorded, not named here")
+                f"({named}) — recorded, not named here")
+            text, withheld = extensions.claim_text([extensions.Claim(
+                str(failure.extension), str(failure.hook),
+                f"{kind}: {failure.detail}"[:FAILURE_DETAIL_CHARS])])
             evidence._append(failures_path(self.home), {
                 "ts": utcnow(),
                 "event": "fleet_extension_failed",
-                "kind": "fact",
                 # A fact, unlike everything else this file writes: the host
                 # observed that it asked and did not get an answer. What the
-                # extension would have *said* is the claim, and there isn't one.
+                # extension *said about it* is the claim inside, and `detail`
+                # is labelled line by line as exactly that.
+                "kind": "fact",
                 "verified": True,
                 "extension": str(failure.extension),
                 "hook": str(failure.hook),
-                "error": str(failure.error),
-                # Truncated: a detail is a package's prose with a traceback in
-                # it, and unbounded third-party text in a file a human opens is
-                # the thing this whole design keeps refusing.
-                "detail": str(failure.detail)[:FAILURE_DETAIL_CHARS],
+                "error": named,
+                "detail": text,
+                "withheld": [str(phrase) for _, phrases in withheld
+                             for phrase in phrases],
             })
 
 
@@ -502,12 +535,19 @@ def fleet_host(home, **kwargs) -> FleetHost:
     except Exception as exc:                                # noqa: BLE001
         found, failures = [], [extensions.Failure(
             "<discovery>", "discover", type(exc).__name__, str(exc))]
-    for failure in failures:
-        log(f"  An extension registration cannot be asked about the fleet "
-            f"({failure.error}) — named in the ledger, not here")
     if found:
+        # Names, and only here: these came through `discover`, which refuses a
+        # name that grants authority, so this is the one line in this file that
+        # may repeat one. A *failed* registration's name has passed no such
+        # check, which is why the failures below go through `_report`.
         log(f"  Extensions watching the fleet: "
             f"{', '.join(e.name for e in found)}")
     host = extensions.Host(found, hooks=FLEET_HOOKS, deadline=FLEET_DEADLINE,
                            call_deadline=FLEET_CALL_DEADLINE) if found else None
-    return FleetHost(host, home=home, **kwargs)
+    fleet = FleetHost(host, home=home, **kwargs)
+    # Built first, then told: a discovery failure used to be logged and
+    # nowhere else, under a line claiming it was named in the ledger. An
+    # extension that could never be asked at all is exactly the one nobody
+    # will otherwise notice is missing.
+    fleet._report(failures)
+    return fleet

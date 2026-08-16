@@ -83,37 +83,52 @@ class LedgerTail:
 
         `self.identity` is the file this tail is *positioned in*, which after a
         rotation is the file now called `trace.jsonl.1` — not necessarily the
-        one at `self.path`. The distinction is the fix for a defect two
+        one at `self.path`. The distinction is the fix for a defect three
         reviewers found independently: draining the rotated file in a single
         bounded read and then switching regardless abandons everything past
         `limit`, which on a rotation with a backlog is thousands of records
         lost while the read reports success.
+
+        The live file is **opened before it is identified**, and identified
+        from that handle. `stat` then `open` is two looks at a name, and a
+        rotation landing between them reads the replacement at the previous
+        file's offset while recording that this tail is positioned in a file it
+        never read — the same substitution this class exists to catch, one
+        layer below where it was being caught.
         """
         lines: list[str] = []
-        current = self._identity(self.path)
-        if self.offset and self.identity is not None \
-                and current != self.identity:
-            lines, drained = self._rotated_remainder(limit)
-            if not drained:
-                # The rotated file had more than this batch could carry. Stay
-                # positioned in it -- `self.identity` still names it -- and
-                # take the rest next poll.
-                return self._records(lines)
-            self.offset = 0
-        elif self._size(self.path) < self.offset:
-            # Same file, fewer bytes: somebody truncated the ledger in place.
-            # Nothing renamed it, so there is no copy to finish and the records
-            # between here and there are gone. Counted rather than passed over,
-            # because the whole point of this class is that a gap in the
-            # evidence is itself evidence.
-            self.gaps += 1
-            self.offset = 0
-        self.identity = current
-        remaining = limit - len(lines)
-        if remaining > 0:
-            fresh, self.offset = self._read_from(self.path, self.offset,
-                                                 remaining)
-            lines.extend(fresh)
+        handle, current = self._open_identified(self.path)
+        try:
+            if self.identity is not None and current != self.identity:
+                # No `self.offset and` guard here, and its absence is a fix
+                # rather than a simplification: a tail that had just drained a
+                # rotated file sits at offset zero, so the guard made a
+                # rotation *at that moment* invisible and threw away the whole
+                # 8 MB with `gaps` reading zero.
+                lines, drained = self._rotated_remainder(limit)
+                if not drained:
+                    # The rotated file had more than this batch could carry.
+                    # Stay positioned in it -- `self.identity` still names it
+                    # -- and take the rest next poll.
+                    return self._records(lines)
+                self.offset = 0
+            elif self._handle_size(handle) < self.offset:
+                # Same file, fewer bytes: somebody truncated the ledger in
+                # place. Nothing renamed it, so there is no copy to finish and
+                # the records between here and there are gone. Counted rather
+                # than passed over, because the whole point of this class is
+                # that a gap in the evidence is itself evidence.
+                self.gaps += 1
+                self.offset = 0
+            self.identity = current
+            remaining = limit - len(lines)
+            if remaining > 0 and handle is not None:
+                fresh, self.offset = self._read_handle(handle, self.offset,
+                                                       remaining)
+                lines.extend(fresh)
+        finally:
+            if handle is not None:
+                handle.close()
         return self._records(lines)
 
     def _records(self, lines) -> "list[dict]":
@@ -121,8 +136,16 @@ class LedgerTail:
                 if r is not None]
 
     def position(self) -> tuple:
-        """Where this tail is, in a form `rewind` accepts."""
-        return (self.offset, self.identity)
+        """Where this tail is, and what it has noticed, for `rewind`.
+
+        The counters travel with the cursor. Two reviewers found the same thing
+        when they were left out: a batch that reaches nobody rewinds and is
+        re-read, so the malformed line or the torn rotated tail inside it is
+        counted again on every retry, and `_report_tail` announces a fresh loss
+        every fifteen seconds forever. A counter that inflates on retry is a
+        gap report nobody can believe.
+        """
+        return (self.offset, self.identity, self.gaps, self.unreadable)
 
     def rewind(self, position: tuple) -> None:
         """Put the tail back where it was before a read that reached nobody.
@@ -133,7 +156,7 @@ class LedgerTail:
         one does. At-least-once that only holds across restarts is not the
         property §8 assumed.
         """
-        self.offset, self.identity = position
+        self.offset, self.identity, self.gaps, self.unreadable = position
 
     def note_gap(self) -> None:
         """Record that records were lost somewhere other than in this class.
@@ -227,39 +250,79 @@ class LedgerTail:
         """What was still unread in the file that rotated away, and whether
         that file is now finished with.
 
-        The second value is the correction two reviewers found independently.
-        Reading `limit` lines and reporting success made a rotation with more
-        than one batch of backlog drop everything past the first batch --
-        silently, and reported as a clean read, which is the exact failure this
-        class exists to refuse.
+        The second value is the correction all three reviewers found. Reading
+        `limit` lines and reporting success made a rotation with more than one
+        batch of backlog drop everything past the first batch -- silently, and
+        reported as a clean read, which is the exact failure this class exists
+        to refuse.
         """
-        if self._identity(self.rotated) != self.identity:
-            # Two rotations between polls, or a rename to somewhere this does
-            # not look. Either way records existed that this tail will never
-            # see, and a counter is the difference between a gap and a silence.
-            self.gaps += 1
-            return [], True
-        lines, moved = self._read_from(self.rotated, self.offset, limit)
-        progressed = moved > self.offset
-        self.offset = moved
-        if self.offset >= self._size(self.rotated):
-            return lines, True
-        if not progressed:
-            # Bytes remain that will never become a line: the rotated file is
-            # not written to any more, so a torn tail there is permanent.
-            # Draining forever is the alternative, and it is a tail that never
-            # reaches the live ledger again.
-            self.gaps += 1
-            return lines, True
-        return lines, False
+        handle, identity = self._open_identified(self.rotated)
+        try:
+            if identity != self.identity:
+                # Two rotations between polls, or a rename to somewhere this
+                # does not look. Either way records existed that this tail will
+                # never see, and a counter is the difference between a gap and
+                # a silence.
+                self.gaps += 1
+                return [], True
+            lines, moved = self._read_handle(handle, self.offset, limit)
+            progressed = moved > self.offset
+            self.offset = moved
+            if self.offset >= self._handle_size(handle):
+                return lines, True
+            if not progressed:
+                # Bytes remain that will never become a line: the rotated file
+                # is not written to any more, so a torn tail there is
+                # permanent. Draining forever is the alternative, and it is a
+                # tail that never reaches the live ledger again.
+                self.gaps += 1
+                return lines, True
+            return lines, False
+        finally:
+            if handle is not None:
+                handle.close()
+
+    @staticmethod
+    def _open_identified(path: Path) -> "tuple":
+        """Open `path` and identify the handle that was actually opened.
+
+        `(handle, identity)`, either of which is `None` when there is nothing
+        there. Never `stat` then `open`: those are two separate looks at a
+        *name*, and a rotation between them hands back the replacement file's
+        bytes with the previous file's identity. Identity comes from `fstat` on
+        the descriptor, so the file this tail believes it is positioned in is
+        the file the bytes came out of.
+
+        `st_ino` is populated on Windows as well as POSIX — it is filled from
+        the file index there — which matters because that is the platform the
+        rest of this project is most careful about.
+
+        On Windows a held handle also makes the rename *fail* rather than
+        succeed behind this reader's back: `Path.replace` on the ledger raises
+        `PermissionError` while a poll has it open. That is not a hazard here
+        and is worth naming so nobody "fixes" it — `evidence._rotate_if_needed`
+        catches `OSError` and passes, so the rotation it wanted simply happens
+        on the next append, a few hundred microseconds later. The handle is
+        held for one read and closed in a `finally`.
+        """
+        try:
+            handle = open(path, "rb")
+        except OSError:
+            return None, None
+        try:
+            info = os.fstat(handle.fileno())
+        except OSError:                                 # pragma: no cover
+            handle.close()
+            return None, None
+        return handle, (info.st_dev, info.st_ino)
 
     @staticmethod
     def _identity(path: Path) -> "tuple | None":
-        """`(device, inode)`, or `None` when there is no file to identify.
+        """`(device, inode)` by name, for the one caller that reads no bytes.
 
-        Populated on Windows as well as POSIX — `os.stat` fills `st_ino` from
-        the file index there — which matters because this is the platform the
-        rest of this project is most careful about.
+        `_resume` needs the identity of a file it is not about to read, so
+        there is nothing to `fstat`. Everything that reads uses
+        `_open_identified` instead, for the reason recorded there.
         """
         try:
             info = path.stat()
@@ -268,16 +331,23 @@ class LedgerTail:
         return (info.st_dev, info.st_ino)
 
     @staticmethod
-    def _size(path: Path) -> int:
+    def _handle_size(handle) -> int:
+        if handle is None:
+            return 0
         try:
-            return path.stat().st_size
-        except OSError:
+            return os.fstat(handle.fileno()).st_size
+        except OSError:                                 # pragma: no cover
             return 0
 
     @staticmethod
-    def _read_from(path: Path, offset: int, limit: int
-                   ) -> "tuple[list[str], int]":
-        """Whole lines from `offset`, and the offset just past the last of them.
+    def _read_handle(handle, offset: int, limit: int
+                     ) -> "tuple[list[str], int]":
+        """Whole lines from `offset` of an already-open, already-identified
+        file, and the offset just past the last of them.
+
+        A handle rather than a path, so that the bytes and the identity in
+        `read` come from the same file even if the name is rotated underneath
+        mid-poll.
 
         Bytes rather than text, and `errors="replace"` rather than `strict`.
         The ledger is written `ensure_ascii=False`, so it carries real UTF-8,
@@ -285,11 +355,12 @@ class LedgerTail:
         exactly the record most worth reading. It is the same correction the
         worker's reader already carries one package over.
         """
+        if handle is None:
+            return [], offset
         try:
-            with open(path, "rb") as fh:
-                fh.seek(offset)
-                data = fh.read()
-        except OSError:
+            handle.seek(offset)
+            data = handle.read()
+        except (OSError, ValueError):
             return [], offset
         if not data:
             return [], offset
