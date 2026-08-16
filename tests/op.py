@@ -27,8 +27,16 @@ import sys
 import types
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "operator_kernel"))
+#: Both source packages, in the order `pyproject.toml`'s `pythonpath` lists
+#: them. `insert(0, ...)` reverses what it is given, so the fleet goes down
+#: first and the kernel ends up ahead of it -- matching the precedence pytest
+#: sets natively. A stem in both packages is refused by
+#: `test_fleet_boundary.py`, so nothing should turn on this order; a shim that
+#: resolved imports differently from the suite that loads it would make that
+#: refusal the only thing standing between two answers, and it is cheaper to
+#: agree than to rely on it.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "operator_fleet"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "operator_kernel"))
 
 _MODULE_NAMES = (
     "config", "paths", "gitio", "probes", "presence", "instance", "launch",

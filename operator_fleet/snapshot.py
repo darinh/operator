@@ -21,11 +21,7 @@ which only counts if the lines are not simply free on this side of the line, so
 from __future__ import annotations
 
 import json
-import os
-import time
-from pathlib import Path
 from presence import path_present
-import instance
 from config import MUX, OPERATOR_HOME
 from instance import Instance
 from provenance import loop_record_facts

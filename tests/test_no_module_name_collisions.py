@@ -74,13 +74,36 @@ def test_every_package_contributes_names_to_the_scan():
 
     `kernel_module_names()` folds two directories into one sorted list, so a
     package dropped from `PACKAGES` -- or a glob that stops matching -- leaves
-    a shorter list and every assertion below still passes. This names each
-    package's own contribution instead.
+    a shorter list and every assertion below still passes: `>= 10` is true of
+    the kernel alone, and `snapshot` simply stops being asked about.
+
+    The roots are therefore pinned by name, independently of the tuple that
+    everything else here iterates. Checking `PACKAGES` by looping over
+    `PACKAGES` is unfalsifiable by its input -- a dropped entry is not reported
+    as unchecked, it stops being examined -- and the moved module is named
+    outright, because it is the one whose scanning coverage this commit put at
+    risk by moving it out of the directory that had it.
     """
+    assert set(PACKAGES) == {KERNEL, FLEET}, (
+        "a source package left `PACKAGES`. Everything in this file scans that "
+        "tuple, so a package removed from it is not reported as unchecked -- "
+        "it stops being asked about."
+    )
+    names = kernel_module_names()
+    assert "snapshot" in names, (
+        "`snapshot` is the module this package boundary was created by moving. "
+        "If it is absent from the scan, the scan is not covering "
+        "operator_fleet/ and this file is silently back to one package."
+    )
     for package in PACKAGES:
-        found = [p.stem for p in package.glob("*.py") if p.stem != "__init__"]
+        found = {p.stem for p in package.glob("*.py") if p.stem != "__init__"}
         assert found, f"{package.name} contributes no module names to the scan"
-        assert set(found) <= set(kernel_module_names())
+        missing = found - set(names)
+        assert not missing, (
+            f"{package.name} holds {sorted(missing)}, which the scan does not "
+            f"see -- `kernel_module_names()` is dropping a package rather than "
+            f"unioning them"
+        )
 
 
 def test_no_kernel_module_name_is_importable_from_anywhere_else():

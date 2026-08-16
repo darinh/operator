@@ -582,7 +582,10 @@ is up and the supervisor loop is per-seat:
   `operator_kernel/extensions.py`. Deadline-bounded, additive, fail-open.
 - **The fleet host** — `on_fact`, `on_tick`, `propose_work`. Never on a
   critical path, and deliberately **outside `operator_kernel/`**: tailing a
-  ledger to send a digest is not supervision. Not built yet.
+  ledger to send a digest is not supervision. Not built yet, but the package it
+  belongs in now exists — `operator_fleet/`, opened by moving `snapshot.py`
+  there when the kernel ran out of budget, and held to its own boundary by
+  `tests/test_fleet_boundary.py`.
 
 What is enforced rather than documented:
 
@@ -649,11 +652,24 @@ What is enforced rather than documented:
   refusal holds the seat without burning a session number, and the answer is a
   `claim.*` in the ledger. `gate_change` and `detect_repo` still have none:
   there is no kernel merge gate to hang the first on. The fleet host
-  (`on_fact`, `on_tick`, `propose_work`) is still unbuilt and still belongs
-  outside `operator_kernel/`. **The budget that blocked this is now the binding
-  constraint on what comes next**: 4,078 of 4,100 code lines and 8,975 of 9,000
-  total. The next addition needs the cut the test already names — the project
-  catalogue, once continuity moves to the ledger — not a bigger constant.
+  (`on_fact`, `on_tick`, `propose_work`) is still unbuilt, and it now has a
+  package to be unbuilt in: `operator_fleet/`, created by the cut below.
+- **The budget stopped everything, and was answered with a cut rather than a
+  bigger constant.** The kernel reached 4,091 of 4,100 code lines and exactly
+  9,000 of 9,000 total, so the next line of anything failed
+  `test_kernel_boundary`. `snapshot.py` — the board's read of one instance —
+  moved to `operator_fleet/`, on the argument the arrow already made: no kernel
+  module imported it, while it imports five of them, and describing a fleet is
+  not supervising one. The kernel is now **4,031 of 4,100 code lines and 8,894
+  of 9,000 total**. The next cut is still the one the test names: the project
+  catalogue, once continuity moves to the ledger.
+
+  A cut into an unguarded directory is not a cut, so `operator_fleet/` arrived
+  with `tests/test_fleet_boundary.py`: its own budgets (600 code / 1,200 total
+  — not the kernel's numbers, since this package supervises nothing), the same
+  import rule, and the stem collision that putting a second directory on
+  `pythonpath` newly makes possible. The kernel's import scan now names a fleet
+  import as its own offence: the arrow between the two packages points one way.
 - Sandboxed counterfactual test execution; patch-sensitivity spec; harness-native
   resume for the crash case; reading `cli-agent-runner`'s 13 defenses.
 
