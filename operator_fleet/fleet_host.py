@@ -6,7 +6,10 @@ here is. That is the whole distinction §D-2 of `docs/extensions.md` settled on,
 and it is why this file is in `operator_fleet/` rather than in the kernel: a
 supervision kernel that grows a ledger tailer to send a digest at 08:00 has
 stopped being one, and the arrow says the same thing more plainly — this
-imports four kernel modules and no kernel module imports it.
+imports three kernel modules and no kernel module imports it. The reading of
+the ledger itself is one file over, in `ledger_tail.py`, cut out when this one
+crossed `MAX_MODULE_LINES`: asking extensions questions and knowing where a
+byte offset is are two jobs.
 
 **The three hooks, and why each needs a host that is not a supervisor.**
 
@@ -51,12 +54,12 @@ afford deadlines an order of magnitude longer than the launch path's.
 from __future__ import annotations
 
 import dataclasses
-import json
 import time
 from pathlib import Path
 
 import evidence
 import extensions
+from ledger_tail import MAX_FACTS_PER_POLL, LedgerTail, tail_state_path
 from probes import log, marker_set, utcnow
 
 #: The questions this host asks. Closed, and *disjoint* from the kernel's
@@ -76,11 +79,6 @@ FLEET_DEADLINE = 60.0
 #: file's to bound, so without a total the worst case is that number times the
 #: per-worker deadline.
 FLEET_CALL_DEADLINE = 300.0
-
-#: How many ledger records one `on_fact` delivery may carry. A bound on the
-#: payload rather than on the tail: what is left over is delivered by the next
-#: poll, because the offset advances only past records that were handed over.
-MAX_FACTS_PER_POLL = 500
 
 #: Proposals accepted from one extension in one call. INV-WORK's arithmetic
 #: half: backlog 0014 was work being manufactured faster than it was refused,
@@ -102,6 +100,27 @@ FLEET_TICK_INTERVAL = 300.0
 FLEET_POLL_INTERVAL = 15.0
 
 
+#: The name `extensions.Host` attributes a failure to when *it* refused the
+#: call rather than a worker failing it -- an argument object that would not
+#: serialise. Matched here because the two are answered differently: a worker's
+#: failure is fail-open's business and the tail moves on, while a payload the
+#: host refused is deterministic and would stall the tail forever if retried.
+KERNEL_FAULT = "<kernel>"
+
+#: Bytes of proposal queue kept before appends are refused. Deliberately below
+#: `evidence._MAX_BYTES`, which is where that appender starts *rotating* --
+#: rotation replaces `proposals.jsonl.1`, and since nothing drains this queue
+#: yet, a second rotation would delete pending proposals a human never saw. A
+#: refused append is visible as a failure; a deleted queue entry is not.
+MAX_QUEUE_BYTES = 4 * 1024 * 1024
+
+
+#: Characters of a failure's detail kept in the failure record. It is a
+#: package's prose with a traceback in it, and unbounded third-party text in a
+#: file a human opens is what this design keeps refusing.
+FAILURE_DETAIL_CHARS = 400
+
+
 def proposals_path(home) -> Path:
     """The NEEDS-HUMAN queue. Append-only, and nothing here ever reads it back.
 
@@ -112,15 +131,19 @@ def proposals_path(home) -> Path:
     return Path(home) / "proposals.jsonl"
 
 
-def tail_state_path(home) -> Path:
-    """Where the tail remembers how far it read, so a restart is not a choice
-    between replaying the whole ledger and skipping what arrived while it was
-    down."""
-    return Path(home) / "fleet-tail.json"
-
-
 def fleet_stop_marker(home) -> Path:
     return Path(home) / "fleet.stop"
+
+
+def failures_path(home) -> Path:
+    """Where an extension that could not answer is named.
+
+    Not the ledger: a failure record written there arrives at `on_fact` on the
+    next poll, and an extension that fails on every batch would then be
+    failing on the record of its own failure. Not the operator log either --
+    that names nobody, on purpose.
+    """
+    return Path(home) / "fleet-failures.jsonl"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -148,195 +171,6 @@ class Poll:
     failures: tuple = ()
 
 
-class LedgerTail:
-    """An incremental reader over `trace.jsonl`, written not to raise.
-
-    Three properties, and each is one of §8's assumptions made true rather than
-    assumed:
-
-    **At-least-once.** The persisted offset advances only after the records it
-    covers have been handed to `deliver`'s caller. A crash mid-delivery
-    redelivers; it never skips.
-
-    **Whole records only.** `evidence._append` writes a line with one `write`,
-    but "one write" is not "atomic" — so a read that ends mid-line stops at the
-    last newline and leaves the remainder for the next poll. Without that, one
-    torn read is a permanently corrupted offset.
-
-    **Rotation is a rename, and a rename is not a shrink.** The ledger rotates
-    at 8 MB by renaming itself to `trace.jsonl.1`, so the file at this path is
-    then a *different file* that happens to have the same name. Detecting that
-    by `size < offset` — which is what the first version of this class did, and
-    what the obvious tailer does — misses the case the rotation test was
-    written for: a new ledger can be *longer* than the old tail's offset within
-    one poll, and the read then starts partway into an unrelated file and
-    reports nothing wrong. So the file is identified by `(st_dev, st_ino)`, and
-    a changed identity is the rotation. The remainder of the file that rotated
-    away is delivered first; a tailer that reset to zero would drop everything
-    between its offset and 8 MB, silently, which is the lossy tail §8 says
-    weakens the whole observe-off-thread story.
-    """
-
-    def __init__(self, path, state=None) -> None:
-        self.path = Path(path)
-        #: `with_suffix` and not `+ ".1"` on the string, so this tracks
-        #: `evidence._rotate_if_needed` exactly rather than approximately.
-        self.rotated = self.path.with_suffix(self.path.suffix + ".1")
-        self.state = None if state is None else Path(state)
-        self.unreadable = 0
-        self.gaps = 0
-        self.offset, self.identity = self._resume()
-
-    def read(self, limit: int = MAX_FACTS_PER_POLL) -> "list[dict]":
-        """Every record appended since the last read, oldest first."""
-        lines: list[str] = []
-        current = self._identity(self.path)
-        if self.offset and self.identity is not None \
-                and current != self.identity:
-            lines.extend(self._rotated_remainder(limit))
-            self.offset = 0
-        elif self._size(self.path) < self.offset:
-            # Same file, fewer bytes: somebody truncated the ledger in place.
-            # Nothing renamed it, so there is no copy to finish and the records
-            # between here and there are gone. Counted rather than passed over,
-            # because the whole point of this class is that a gap in the
-            # evidence is itself evidence.
-            self.gaps += 1
-            self.offset = 0
-        self.identity = current
-        remaining = limit - len(lines)
-        if remaining > 0:
-            fresh, self.offset = self._read_from(self.path, self.offset,
-                                                 remaining)
-            lines.extend(fresh)
-        return [r for r in (self._parse(line) for line in lines)
-                if r is not None]
-
-    def remember(self) -> bool:
-        """Persist the offset. Returns whether it was written.
-
-        Called by `deliver` after the batch is out, never by `read`, because
-        the gap between those two calls is exactly where at-least-once lives.
-
-        The file's identity is persisted with it. Without that, a rotation
-        while this process was *down* is invisible on the next start: the
-        offset would be applied to whatever file now holds the name.
-        """
-        if self.state is None:
-            return False
-        try:
-            self.state.parent.mkdir(parents=True, exist_ok=True)
-            self.state.write_text(json.dumps(
-                {"path": str(self.path), "offset": int(self.offset),
-                 "identity": list(self.identity or ())}), encoding="utf-8")
-            return True
-        except (OSError, TypeError, ValueError):
-            return False
-
-    def _resume(self) -> "tuple[int, tuple | None]":
-        """The remembered position, or the beginning — and the beginning on any
-        doubt.
-
-        The recorded path is checked against the one being followed. A state
-        file left by a tail of a *different* ledger would otherwise seek this
-        one to an offset that means nothing in it, and the read would begin in
-        the middle of a record. Re-reading is at-least-once; seeking into the
-        wrong file is neither.
-        """
-        if self.state is None:
-            return 0, self._identity(self.path)
-        try:
-            saved = json.loads(self.state.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            saved = None
-        if not isinstance(saved, dict) or saved.get("path") != str(self.path):
-            return 0, self._identity(self.path)
-        try:
-            offset = max(0, int(saved.get("offset", 0)))
-        except (TypeError, ValueError):
-            return 0, self._identity(self.path)
-        identity = saved.get("identity")
-        if not isinstance(identity, list) or len(identity) != 2:
-            # No identity to compare, so a rotation that happened while this
-            # process was down cannot be detected. Start over rather than seek
-            # a file that may not be the one the offset was measured in.
-            return 0, self._identity(self.path)
-        return offset, tuple(identity)
-
-    def _rotated_remainder(self, limit: int) -> "list[str]":
-        """What was still unread in the file that has just been rotated away."""
-        if self._identity(self.rotated) != self.identity:
-            # Two rotations between polls, or a rename to somewhere this does
-            # not look. Either way records existed that this tail will never
-            # see, and a counter is the difference between a gap and a silence.
-            self.gaps += 1
-            return []
-        lines, _ = self._read_from(self.rotated, self.offset, limit)
-        return lines
-
-    @staticmethod
-    def _identity(path: Path) -> "tuple | None":
-        """`(device, inode)`, or `None` when there is no file to identify.
-
-        Populated on Windows as well as POSIX — `os.stat` fills `st_ino` from
-        the file index there — which matters because this is the platform the
-        rest of this project is most careful about.
-        """
-        try:
-            info = path.stat()
-        except OSError:
-            return None
-        return (info.st_dev, info.st_ino)
-
-    @staticmethod
-    def _size(path: Path) -> int:
-        try:
-            return path.stat().st_size
-        except OSError:
-            return 0
-
-    @staticmethod
-    def _read_from(path: Path, offset: int, limit: int
-                   ) -> "tuple[list[str], int]":
-        """Whole lines from `offset`, and the offset just past the last of them.
-
-        Bytes rather than text, and `errors="replace"` rather than `strict`.
-        The ledger is written `ensure_ascii=False`, so it carries real UTF-8,
-        and a decode error while *reading evidence* would stop the tail on
-        exactly the record most worth reading. It is the same correction the
-        worker's reader already carries one package over.
-        """
-        try:
-            with open(path, "rb") as fh:
-                fh.seek(offset)
-                data = fh.read()
-        except OSError:
-            return [], offset
-        if not data:
-            return [], offset
-        complete = data.split(b"\n")[:-1]
-        if len(complete) > limit:
-            complete = complete[:limit]
-        consumed = sum(len(chunk) + 1 for chunk in complete)
-        return ([chunk.decode("utf-8", "replace") for chunk in complete],
-                offset + consumed)
-
-    def _parse(self, line: str) -> "dict | None":
-        try:
-            record = json.loads(line)
-        except ValueError:
-            self.unreadable += 1
-            return None
-        if not isinstance(record, dict):
-            self.unreadable += 1
-            return None
-        # Invariant 5 travels with the record. The ledger marks a claim; a
-        # record with no `kind` is one the supervisor observed, and an
-        # extension reading these must be able to tell the two apart without
-        # knowing which events happen to be which.
-        record.setdefault("kind", "fact")
-        return record
-
 
 class FleetHost:
     """Tails, wakes and collects — and disposes of nothing.
@@ -358,6 +192,7 @@ class FleetHost:
         self.tick_interval = tick_interval
         self.clock = clock
         self._last_tick = None
+        self._reported: dict[str, int] = {}
 
     # ── the three hooks ─────────────────────────────────────────
 
@@ -372,19 +207,33 @@ class FleetHost:
         five hundred interpreter starts to drain one poll, which on a busy
         fleet is a tail that falls permanently behind. Order is preserved and
         delivery is still at-least-once, which is what §8 actually assumed.
+
+        The cursor advances on a call that *happened*, not on one that
+        succeeded. An extension that crashed on this batch is fail-open's
+        business and gets the next one; holding the tail until it succeeds
+        would let one poison record stop every later fact from being observed.
         """
+        before = self.tail.position()
         records = self.tail.read(limit)
         if not records:
             return 0, []
         _, failures, asked = self._ask("on_fact", facts=records)
-        if asked:
-            # Advanced on a call that *happened*, not on one that succeeded. An
-            # extension that crashed on this batch is fail-open's business and
-            # gets the next one; holding the tail until it succeeds would make
-            # one poison record stop every later fact from being observed. A
-            # call that reached nobody is the other case, and is the one
-            # at-least-once exists for.
-            self.tail.remember()
+        if not asked:
+            # Nobody saw this batch, and `read` has already moved the cursor
+            # past it. Skipping `remember` alone would only recover it on a
+            # *restart*: an at-least-once guarantee that holds across restarts
+            # and not across polls is not the one §8 assumed, and a reviewer
+            # found exactly that gap here.
+            self.tail.rewind(before)
+            return len(records), failures
+        if any(f.extension == KERNEL_FAULT for f in failures):
+            # The host refused the payload rather than a worker failing on it —
+            # `Host.call` attributes that to `<kernel>` and spawns nothing. It
+            # is deterministic, so a retry returns the same answer forever and
+            # the tail would never advance again. Skipped, and counted: a batch
+            # nobody could be shown is a gap in the evidence like any other.
+            self.tail.note_gap()
+        self.tail.remember()
         return len(records), failures
 
     def tick(self, force: bool = False) -> "tuple[bool, list]":
@@ -435,7 +284,27 @@ class FleetHost:
             proposals, propose_failures = self.propose()
             failures.extend(propose_failures)
         self._report(failures)
+        self._report_tail()
         return Poll(delivered, ticked, tuple(proposals), tuple(failures))
+
+    def _report_tail(self) -> None:
+        """Say out loud when the tail lost or could not read something.
+
+        `LedgerTail` counts both, and a counter nobody reads is this project's
+        signature failure with a number attached: the whole reason the tail
+        distinguishes a gap from a clean read is so that somebody finds out. It
+        is announced on the *change*, not on the count, so a fleet host that
+        saw one gap on Tuesday does not say so every fifteen seconds until
+        Friday.
+        """
+        for name, message in (
+                ("gaps", "records the fleet host will never see — the ledger "
+                         "rotated or was truncated past its position"),
+                ("unreadable", "ledger lines that are not records")):
+            count = getattr(self.tail, name, 0)
+            if count > self._reported.get(name, 0):
+                log(f"  {count - self._reported.get(name, 0)} {message}")
+                self._reported[name] = count
 
     def run(self, *, rounds: "int | None" = None,
             interval: float = FLEET_POLL_INTERVAL, sleep=time.sleep,
@@ -550,13 +419,23 @@ class FleetHost:
         """Append one proposal to the queue. Returns whether it was written.
 
         `evidence._append` rather than a local `open(..., "a")`, and the
-        underscore is deliberate: rotation, the parent `mkdir` and the
-        never-raises contract are exactly what a queue file needs, and a second
+        underscore is deliberate: the parent `mkdir` and the never-raises
+        contract are exactly what a queue file needs, and a second
         implementation of them would drift from the first — the same argument
         `test_fleet_boundary.py` makes for importing the kernel's scanners
         instead of copying them.
+
+        What that appender does at 8 MB is *not* wanted here, which is why the
+        size is checked first. It rotates, and rotation replaces the previous
+        `.1` — fine for a ledger whose purpose is the recent past, wrong for a
+        queue nothing drains yet, where it silently deletes proposals no human
+        ever saw. A refused append is a `QueueUnwritable` a caller reports; a
+        deleted queue entry is nothing at all.
         """
-        return evidence._append(proposals_path(self.home), {
+        path = proposals_path(self.home)
+        if self._queue_bytes(path) >= MAX_QUEUE_BYTES:
+            return False
+        return evidence._append(path, {
             "ts": utcnow(),
             "event": "work_proposed",
             "kind": "claim",
@@ -571,17 +450,44 @@ class FleetHost:
         })
 
     @staticmethod
-    def _report(failures) -> None:
-        """Say that an extension could not answer, without saying who.
+    def _queue_bytes(path: Path) -> int:
+        try:
+            return path.stat().st_size
+        except OSError:
+            return 0
 
-        The same refusal `extension_seam.launch_gate` makes: the operator log
-        is a file an agent can open, and an extension's *name* is third-party
-        content that `discover` already refuses when it grants authority.
-        Repeating it into that file one module later would undo the refusal.
+    def _report(self, failures) -> None:
+        """Record that an extension could not answer, and say so without saying
+        who.
+
+        Two halves, and both are needed. The *log* omits the name: it is a file
+        an agent can open, an extension's name is third-party content that
+        `discover` already refuses when it grants authority, and repeating it
+        there would undo that refusal one module later. The *record* keeps the
+        name, because an extension quarantined for the life of the host is
+        otherwise invisible forever — a reviewer pointed out that the log line
+        promised an attribution nothing was writing, which is worse than
+        silence.
         """
         for failure in failures:
             log(f"  A fleet extension could not answer {failure.hook} "
-                f"({failure.error}) — named in the queue, not here")
+                f"({failure.error}) — recorded, not named here")
+            evidence._append(failures_path(self.home), {
+                "ts": utcnow(),
+                "event": "fleet_extension_failed",
+                "kind": "fact",
+                # A fact, unlike everything else this file writes: the host
+                # observed that it asked and did not get an answer. What the
+                # extension would have *said* is the claim, and there isn't one.
+                "verified": True,
+                "extension": str(failure.extension),
+                "hook": str(failure.hook),
+                "error": str(failure.error),
+                # Truncated: a detail is a package's prose with a traceback in
+                # it, and unbounded third-party text in a file a human opens is
+                # the thing this whole design keeps refusing.
+                "detail": str(failure.detail)[:FAILURE_DETAIL_CHARS],
+            })
 
 
 def fleet_host(home, **kwargs) -> FleetHost:

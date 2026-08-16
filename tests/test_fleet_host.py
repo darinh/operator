@@ -208,6 +208,126 @@ def test_a_longer_new_ledger_does_not_hide_the_rotation(home, ledger):
     assert reader.gaps == 0
 
 
+def test_a_rotated_file_larger_than_one_batch_is_drained_across_polls(home, ledger):
+    """The defect all three reviewers found, and the reason `read` tracks the
+    file it is *positioned in* rather than the file at the path.
+
+    Draining the rotated copy in one bounded read and switching regardless
+    abandons everything past `limit`. That is not a toy interaction: a rotation
+    is 8 MB and a record is a few hundred bytes, so a rotated file holds tens of
+    thousands of records and one batch is five hundred. The tail need only be
+    behind -- because the host was down, or because a hook held its deadline
+    while the kernel kept appending -- and the rest is lost, with `gaps` at zero
+    and a persisted position in a file that never held those records.
+    """
+    reader = tail(home)
+    for n in range(10):
+        append(ledger, event=f"old-{n}")
+    assert [r["event"] for r in reader.read(limit=2)] == ["old-0", "old-1"]
+    ledger.replace(ledger.with_suffix(ledger.suffix + ".1"))
+    append(ledger, event="new-a")
+    append(ledger, event="new-b")
+
+    got: list[str] = []
+    for _ in range(6):
+        got.extend(r["event"] for r in reader.read(limit=3))
+    assert got == [f"old-{n}" for n in range(2, 10)] + ["new-a", "new-b"]
+    assert reader.gaps == 0
+
+
+def test_a_position_inside_a_rotated_file_survives_a_restart(home, ledger):
+    """The persisted half of the same defect: a position remembered while the
+    tail is partway through the rotated copy has to resume there, not at byte
+    zero of the file that replaced it."""
+    reader = tail(home)
+    for n in range(10):
+        append(ledger, event=f"old-{n}")
+    reader.read(limit=2)
+    ledger.replace(ledger.with_suffix(ledger.suffix + ".1"))
+    append(ledger, event="new-a")
+    reader.read(limit=3)
+    assert reader.remember() is True
+
+    resumed = tail(home)
+    got: list[str] = []
+    for _ in range(6):
+        got.extend(r["event"] for r in resumed.read(limit=3))
+    assert got == [f"old-{n}" for n in range(5, 10)] + ["new-a"]
+    assert resumed.gaps == 0
+
+
+def test_a_torn_tail_in_a_rotated_file_does_not_stall_the_tail_forever(home,
+                                                                      ledger):
+    """A rotated file is never written to again, so a half-line at its end will
+    never be completed. Waiting for it is a tail that never reaches the live
+    ledger again."""
+    reader = tail(home)
+    ledger.write_text('{"event": "whole"}\n{"event": "tor', encoding="utf-8")
+    assert [r["event"] for r in reader.read()] == ["whole"]
+    ledger.replace(ledger.with_suffix(ledger.suffix + ".1"))
+    append(ledger, event="after")
+    assert [r["event"] for r in reader.read()] == ["after"]
+    assert reader.gaps == 1
+
+
+def test_a_state_file_torn_by_a_crash_counts_what_it_cannot_recover(home, ledger):
+    """Starting over is the safe direction and it is not a free one: whatever
+    was still unread in the rotated copy is gone. Counted, so the loss is
+    visible rather than inferred from a quiet log."""
+    ledger.with_suffix(ledger.suffix + ".1").write_text(
+        '{"event": "unreachable"}\n', encoding="utf-8")
+    append(ledger, event="live")
+    fleet_host.tail_state_path(home).write_text('{"path": "', encoding="utf-8")
+    reader = tail(home)
+    assert [r["event"] for r in reader.read()] == ["live"]
+    assert reader.gaps == 1
+
+
+def test_the_position_is_written_atomically(home, ledger):
+    """A half-written state file is exactly the input the reader answers by
+    starting over and counting a gap -- so a non-atomic write here manufactures
+    the loss it then reports."""
+    reader = tail(home)
+    append(ledger, event="one")
+    reader.read()
+    assert reader.remember() is True
+    leftovers = sorted(p.name for p in Path(home).glob("fleet-tail.json*"))
+    assert leftovers == ["fleet-tail.json"], leftovers
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_a_record_carrying_a_non_finite_number_is_not_a_record(home, ledger,
+                                                               constant):
+    """`json.loads` accepts these; `extensions.Host.call` serialises the payload
+    with `allow_nan=False` and refuses it. One such line would otherwise make
+    the whole batch it lands in undeliverable to every extension."""
+    reader = tail(home)
+    ledger.write_text(f'{{"event": "bad", "n": {constant}}}\n'
+                      f'{{"event": "good"}}\n', encoding="utf-8")
+    assert [r["event"] for r in reader.read()] == ["good"]
+    assert reader.unreadable == 1
+
+
+def test_a_batch_the_host_could_not_encode_is_skipped_and_counted(home, ledger):
+    """`Host.call` attributes its own refusal to `<kernel>` and spawns nothing.
+    It is deterministic, so retrying it forever is a tail that never advances
+    again -- and skipping it quietly is a batch nobody knows was lost."""
+    host = FakeHost({"on_fact": ([], [extensions.Failure(
+        fleet_host.KERNEL_FAULT, "on_fact", "NotSerializable", "Out of range")])})
+    fleet = fleet_host.FleetHost(host, home=home)
+    append(ledger, event="one")
+    delivered, failures = fleet.deliver()
+    assert delivered == 1 and [f.error for f in failures] == ["NotSerializable"]
+    assert fleet.tail.gaps == 1
+    append(ledger, event="two")
+    before = len(host.calls)
+    fleet.deliver()
+    handed = [f["event"] for _, kwargs in host.calls[before:]
+              for f in kwargs["facts"]]
+    assert handed == ["two"], (
+        "the undeliverable batch was retried instead of skipped")
+
+
 # ── the offset survives the process ─────────────────────────────
 
 def test_the_tail_resumes_where_the_last_process_left_off(home, ledger):
@@ -289,15 +409,27 @@ def test_an_empty_ledger_costs_no_interpreter_start(home):
 
 
 def test_a_batch_that_was_not_delivered_is_delivered_again(home, ledger):
-    """At-least-once, which is the property §8 assumed. The persisted offset
-    advances after the call, so a crash mid-delivery redelivers and never
-    skips."""
-    fleet = fleet_host.FleetHost(FakeHost(boom=RuntimeError("worker gone")),
-                                 home=home)
+    """At-least-once, which is the property §8 assumed. A batch that reached no
+    worker is redelivered by *this* process on the next poll -- not only by a
+    restart, which is what skipping `remember` alone would have bought."""
+    host = FakeHost(boom=RuntimeError("worker gone"))
+    fleet = fleet_host.FleetHost(host, home=home)
     append(ledger, event="important")
     delivered, failures = fleet.deliver()
     assert delivered == 1 and [f.error for f in failures] == ["HostError"]
     assert fleet_host.tail_state_path(home).exists() is False
+
+    host.boom = None
+    assert fleet.deliver()[0] == 1, "the undelivered batch was lost in-process"
+    hook, kwargs = host.calls[-1]
+    assert [f["event"] for f in kwargs["facts"]] == ["important"]
+
+
+def test_a_batch_that_was_not_delivered_survives_a_restart_too(home, ledger):
+    """The persisted half of the same property."""
+    fleet = fleet_host.FleetHost(FakeHost(boom=RuntimeError("gone")), home=home)
+    append(ledger, event="important")
+    assert fleet.deliver()[0] == 1
     fresh = fleet_host.FleetHost(FakeHost(), home=home)
     assert fresh.deliver()[0] == 1, "the undelivered batch was lost"
 
@@ -527,6 +659,29 @@ def test_nothing_on_this_path_can_claim_or_approve_work():
         "above is grading an empty set")
 
 
+def test_a_full_queue_refuses_the_append_rather_than_deleting_what_is_in_it(home):
+    """`evidence._append` rotates at 8 MB, and rotation replaces the previous
+    `.1`. Nothing drains this queue yet, so a second rotation would delete
+    proposals no human ever saw. A refused append is a reported failure; a
+    deleted queue entry is nothing at all."""
+    fleet_host.proposals_path(home).write_text(
+        "x" * (fleet_host.MAX_QUEUE_BYTES + 1), encoding="utf-8")
+    before = fleet_host.proposals_path(home).stat().st_size
+    host = FakeHost({"propose_work": ([claim(
+        "acme", "propose_work", [{"title": "one more"}])], [])})
+    fleet = fleet_host.FleetHost(host, home=home)
+    _, failures = fleet.propose()
+    assert [f.error for f in failures] == ["QueueUnwritable"]
+    assert fleet_host.proposals_path(home).stat().st_size == before
+
+
+def test_the_queue_stops_short_of_the_size_that_would_rotate_it():
+    """Pinned against the appender's own constant, not against a number written
+    twice. If `evidence._MAX_BYTES` ever drops below this, the queue starts
+    rotating again and the guard above becomes decorative."""
+    assert fleet_host.MAX_QUEUE_BYTES < evidence._MAX_BYTES
+
+
 # ── the two hosts ask disjoint questions ────────────────────────
 
 def test_the_fleet_hooks_are_not_the_kernels():
@@ -628,11 +783,63 @@ def test_the_log_does_not_repeat_an_extensions_name(home, monkeypatch):
     refusal one module later."""
     lines: list[str] = []
     monkeypatch.setattr(fleet_host, "log", lines.append)
-    fleet_host.FleetHost._report([extensions.Failure(
+    fleet = fleet_host.FleetHost(FakeHost(), home=home)
+    fleet._report([extensions.Failure(
         "acme.pre-approved", "on_tick", "Deadline", "took too long")])
     assert lines, "nothing was reported at all"
     assert not any("acme" in line for line in lines)
     assert any("on_tick" in line and "Deadline" in line for line in lines)
+
+
+def test_a_failure_is_named_somewhere_a_human_can_find_it(home, monkeypatch):
+    """The other half. An extension quarantined for the life of the host is
+    invisible forever if the only record of it is a log line that refuses to
+    name anybody -- and a log line promising an attribution nothing writes is
+    worse than one that promises nothing."""
+    monkeypatch.setattr(fleet_host, "log", lambda *_: None)
+    fleet = fleet_host.FleetHost(FakeHost(), home=home)
+    fleet._report([extensions.Failure(
+        "acme.triage", "on_tick", "Deadline", "x" * 5000)])
+    recorded = [json.loads(line) for line in
+                fleet_host.failures_path(home).read_text(
+                    encoding="utf-8").splitlines() if line]
+    assert len(recorded) == 1
+    assert recorded[0]["extension"] == "acme.triage"
+    assert recorded[0]["hook"] == "on_tick"
+    assert recorded[0]["error"] == "Deadline"
+    assert len(recorded[0]["detail"]) == fleet_host.FAILURE_DETAIL_CHARS
+
+
+def test_a_failure_record_is_not_written_where_it_would_be_tailed(home, ledger,
+                                                                  monkeypatch):
+    """An extension that fails on every batch would otherwise be failing on the
+    record of its own failure."""
+    monkeypatch.setattr(fleet_host, "log", lambda *_: None)
+    fleet = fleet_host.FleetHost(FakeHost(), home=home)
+    fleet._report([extensions.Failure("acme", "on_fact", "Deadline", "slow")])
+    assert fleet_host.failures_path(home).exists()
+    assert ledger.exists() is False
+
+
+def test_a_lost_record_is_said_out_loud_once(home, ledger, monkeypatch):
+    """A counter nobody reads is this project's signature failure with a number
+    attached. Announced on the change, so one Tuesday gap is not reported every
+    fifteen seconds until Friday."""
+    lines: list[str] = []
+    monkeypatch.setattr(fleet_host, "log", lines.append)
+    fleet = fleet_host.FleetHost(FakeHost(), home=home, tick_interval=1e6,
+                                 clock=lambda: 0.0)
+    for n in range(20):
+        append(ledger, event=f"old-{n}")
+    fleet.poll_once()
+    assert not any("never see" in line for line in lines)
+    ledger.write_text('{"event": "new"}\nnot a record\n', encoding="utf-8")
+    fleet.poll_once()
+    assert len([line for line in lines if "never see" in line]) == 1
+    assert len([line for line in lines if "not records" in line]) == 1
+    fleet.poll_once()
+    assert len([line for line in lines if "never see" in line]) == 1, (
+        "the same gap was announced twice")
 
 
 # ── discovery ───────────────────────────────────────────────────
