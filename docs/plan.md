@@ -644,12 +644,16 @@ What is enforced rather than documented:
   were both present all along. 289 → 384 tests.
 - **The intent layer** — proof-of-change makes manufactured work look *stronger*
   (0014 with evidence attached), so it needs something above it.
-- **The extension host is built and unwired.** `extensions.Host` and
-  `extension_worker.py` are complete and tested; nothing in `supervisor.py`
-  calls them. Wiring `admit_launch` onto the launch path is the next step, and
-  it was blocked until 2026-08-15 by `supervisor.py` sitting at exactly
-  `MAX_MODULE_LINES`. The work-assignment seam moved to `work_seam.py` to make
-  room; there are 103 lines of headroom now.
+- **The extension host is wired at one call site of three.** `admit_launch` is
+  asked before every launch, through `operator_kernel/extension_seam.py`; a
+  refusal holds the seat without burning a session number, and the answer is a
+  `claim.*` in the ledger. `gate_change` and `detect_repo` still have none:
+  there is no kernel merge gate to hang the first on. The fleet host
+  (`on_fact`, `on_tick`, `propose_work`) is still unbuilt and still belongs
+  outside `operator_kernel/`. **The budget that blocked this is now the binding
+  constraint on what comes next**: 4,078 of 4,100 code lines and 8,975 of 9,000
+  total. The next addition needs the cut the test already names — the project
+  catalogue, once continuity moves to the ledger — not a bigger constant.
 - Sandboxed counterfactual test execution; patch-sensitivity spec; harness-native
   resume for the crash case; reading `cli-agent-runner`'s 13 defenses.
 

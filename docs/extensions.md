@@ -3,14 +3,19 @@
 **Status.** The in-loop half is built: `operator_kernel/extensions.py` and
 `operator_kernel/extension_worker.py`, with `tests/test_extensions.py`. §1
 through §5 are implemented or refused as written, except that the closed hook
-set is the three in-loop questions only. **Nothing calls it yet** — no
-supervisor path discovers extensions or asks a hook, so admission, gates and
-repository detection are inert until they are wired in. **The fleet host of
-§D-2 — `on_fact`, `on_tick`, `propose_work` — is not built**, and when it is it
-goes outside `operator_kernel/`: it is never on a critical path, and a
-supervision kernel that grows a ledger tailer has stopped being one. The open
-items of §8 are still open, and the last of them is still the one most likely
-to be fatal.
+set is the three in-loop questions only. **One of the three is wired in**:
+`admit_launch` is asked on the supervisor's launch path through
+`operator_kernel/extension_seam.py`, and `tests/test_launch_admission.py` is
+the test of the wiring rather than of the mechanism. A refusal holds the
+launch — same session number, no launch failure counted, nothing claimed or
+saved — and is recorded in the ledger as a `claim.*` per invariant 5, once per
+state change rather than once per pause. `gate_change` and `detect_repo` still
+have no call site: there is no kernel merge gate to hang the first on, and
+nothing yet asks the second. **The fleet host of §D-2 — `on_fact`, `on_tick`,
+`propose_work` — is not built**, and when it is it goes outside
+`operator_kernel/`: it is never on a critical path, and a supervision kernel
+that grows a ledger tailer has stopped being one. The open items of §8 are
+still open, and the last of them is still the one most likely to be fatal.
 
 One departure from §1.7 worth naming, because it reads as a contradiction and
 is not: *one worker per extension* is implemented as one worker per **call**.

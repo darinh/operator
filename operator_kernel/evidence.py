@@ -321,29 +321,27 @@ def record_handoff_state(operator_home: Path, *, instance: str, session: int,
 
 
 def record_launch_admission(operator_home: Path, *, instance: str, session: int,
-                            admit: bool, refusals=(), blind=()) -> None:
+                            admit: bool, refusals=(), blind=()) -> bool:
     """Record what installed extensions said about launching. Never raises.
 
     A `claim.*` and never a `fact.*` — invariant 5 of `docs/extensions.md`. The
-    supervisor observed only that it asked and what came back; the content is a
-    third party's assertion, so it is attributed and marked unverified, which
-    is the treatment an agent's assertion gets and for the same reason. `kind`
-    and `verified` are fields rather than something implied by the event name,
-    so a reader filtering the ledger for claims need not know which events
-    happen to be one.
+    supervisor observed only that it asked and what came back, so `kind` and
+    `verified` say that as fields rather than leave it implied by the event.
+
+    Returns whether the line was appended, which no other recorder here does
+    and this one must: its caller deduplicates on state, so reading a silent
+    failure as a write would suppress every later record of the same state and
+    turn deduplication into concealment.
 
     This is the only place a refusal's *reason* is kept — not the operator log,
-    which is a file an agent can open, and INV-AUTH is about extension prose
-    reaching an agent. A human asking *why is this seat not launching* reads it
-    here.
-
-    `blind` is the half that is easy to drop. Two extensions asked and neither
-    able to answer is a materially different launch from two that agreed, even
-    though the kernel launches in both -- and without this field the ledger
-    would say the same thing about each.
+    which is a file an agent can open. `blind` is the half that is easy to
+    drop: two extensions asked and neither able to answer is a different launch
+    from two that agreed, though the kernel launches in both. Each entry
+    carries its error kind, because a name alone cannot say whether that
+    extension will ever be asked again.
     """
     try:
-        _append(trace_path(Path(operator_home)), {
+        return _append(trace_path(Path(operator_home)), {
             "ts": _utcnow(),
             "event": "launch_admission",
             "kind": "claim",
@@ -354,10 +352,11 @@ def record_launch_admission(operator_home: Path, *, instance: str, session: int,
             "admit": bool(admit),
             "refusals": [{"extension": str(name), "reason": str(reason)}
                          for name, reason in refusals],
-            "blind": [str(name) for name in blind],
+            "blind": [{"extension": str(name), "error": str(error)}
+                      for name, error in blind],
         })
     except Exception:
-        return
+        return False
 
 
 def record_withheld_clause(operator_home: Path, *, instance: str, session: int,

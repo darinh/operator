@@ -26,7 +26,7 @@ import atexit
 
 from breakers import (evaluate_progress, evaluate_unaccounted, workspace_fingerprint)
 from config import (EXIT_NO_PROGRESS, EXIT_UNACCOUNTED, HEALTHY_SESSION_SECONDS, HEARTBEAT_INTERVAL, IS_WINDOWS, LAUNCH_BACKOFF_BASE, MAX_LAUNCH_FAILURES, MAX_NOCHANGE_SESSIONS, MAX_SESSIONS, MAX_UNACCOUNTED_SESSIONS, MUX, OPERATOR_HOME, POLL_INTERVAL, RESTART_PAUSE_SECONDS, SESSION_ID_WAIT, TAB_LOOPING, UUID_RE)
-from extension_seam import launch_gate
+from extension_seam import held_pause, launch_gate
 from exits import (_record_session_exit, crash_recovery_verdict, ending_was_observed,
                    handoff_state, HANDOFF_MISSING, HANDOFF_UNKNOWN, HANDOFF_WAITING)
 from instance import Instance
@@ -158,14 +158,18 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
         signal.signal(signal.SIGTERM, _on_signal)
 
     def _sleep(total: float) -> None:
-        """Sleep in slices so a shutdown request is noticed promptly.
+        """Sleep in slices so a stop request is noticed promptly.
 
         The handler sets a flag rather than raising, so a single long sleep
-        would delay Ctrl+C by up to a full poll interval.
+        would delay Ctrl+C by up to a full poll interval. Both markers end the
+        sleep too: every caller re-reads them straight after, so a sleep that
+        ignored them was a human waiting for nothing -- up to `HELD_PAUSE_CAP`
+        of it once an extension could hold a launch.
         """
         end = time.time() + total
         while time.time() < end:
-            if shutdown["requested"]:
+            if (shutdown["requested"] or marker_set(instance.stop_marker)
+                    or marker_set(instance.detach_marker)):
                 return
             time.sleep(min(0.25, max(0.0, end - time.time())))
 
@@ -240,11 +244,13 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
             f"(currently {'unknown' if unaccounted is None else unaccounted})")
     work_db = None
     last_heartbeat = 0.0
-    # Built once for the whole run, never per launch. `Host` quarantines an
-    # extension that overran its deadline for the life of the host, and a hook
-    # that hangs once hangs again -- so a gate rebuilt per session forgets that
-    # and pays a full deadline on every launch for the rest of the run.
+    # Built once for the whole run, never per launch: `Host` quarantines an
+    # extension that overran its deadline for the life of the host, and a gate
+    # rebuilt per session forgets that and pays a full deadline every time.
     gate = launch_gate()
+    # Consecutive refusals, so the wait between re-asks can grow. Cleared as
+    # soon as the gate lets a launch through.
+    held = 0
     try:
         try:
             while session_num <= MAX_SESSIONS:
@@ -293,12 +299,11 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                         log(f"Session #{session_num}: detach requested before "
                             f"launch — supervisor exiting")
                         return 0
-                    # Asked here: after the two markers, so a human who has
-                    # said stop is not made to wait out an extension's
-                    # deadline, and before anything is claimed, composed or
-                    # saved, so a refused launch leaves no work item leased and
-                    # no state written. Facts only -- everything passed is
-                    # serialised before a process exists to receive it.
+                    # Asked after the two markers, so a human who said stop is
+                    # not made to wait out an extension's deadline, and before
+                    # anything is claimed, composed or saved, so a refused
+                    # launch leaves no lease and no state behind. Facts only:
+                    # serialised before a process exists to receive them.
                     admission = gate.admits(
                         instance=instance.id, session=session_num,
                         agent=agent, workdir=str(workdir),
@@ -306,23 +311,32 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                     if not admission.admit:
                         # Wait and ask again: same session number, no launch
                         # failure counted. A refusal is "not now" -- a quiet
-                        # hours window, a cost ceiling -- and burning a session
-                        # number on it would walk the run into MAX_SESSIONS
-                        # having launched nothing. Ctrl+C, `operator stop` and
-                        # `stop-loop` all still land: `_sleep` returns on the
-                        # flag, and the next pass re-reads both markers before
-                        # asking again.
-                        #
-                        # Who refused, never why: the reason is an extension's
-                        # prose, it is in the ledger, and this log is a file an
-                        # agent can open (INV-AUTH).
+                        # hours window, a cost ceiling -- and spending a
+                        # session number on one would walk an unattended run
+                        # into MAX_SESSIONS having launched nothing. Who
+                        # refused, never why: the reason is an extension's
+                        # prose, it is in the ledger, and this log is a file
+                        # an agent can open (INV-AUTH).
+                        held += 1
+                        pause = held_pause(held)
                         log(f"Session #{session_num}: launch refused by "
                             f"{', '.join(n for n, _ in admission.refusals)} "
-                            f"— waiting {RESTART_PAUSE_SECONDS}s before asking "
-                            f"again")
-                        _sleep(RESTART_PAUSE_SECONDS)
+                            f"— waiting {pause}s before asking again")
+                        _sleep(pause)
                         if shutdown["requested"]:
                             raise KeyboardInterrupt
+                        continue
+                    held = 0
+                    # Both stop channels, re-read because asking took time --
+                    # up to `DEFAULT_CALL_DEADLINE` of somebody else's code. A
+                    # handler sets the flag and a human touches the markers, so
+                    # neither sees the other's request, and checking one leaves
+                    # a window for the very thing the pre-launch check exists
+                    # to prevent: a new session under someone who said stop.
+                    if shutdown["requested"]:
+                        raise KeyboardInterrupt
+                    if (marker_set(instance.stop_marker)
+                            or marker_set(instance.detach_marker)):
                         continue
                     launch_args = list(copilot_args)
                     if resume_id:
@@ -667,10 +681,14 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
             stop_session_gracefully(instance)
             # Record the last session actually launched, not one that never
             # started, and keep whichever resume id is still pending so an
-            # interrupted retry does not lose it or skip a number.
+            # interrupted retry does not lose it or skip a number. Zero when
+            # nothing has ever launched: the loader adds one, so 0 means
+            # "start at #1 next time". The `or 1` that used to be here spent
+            # #1 on a session that never existed -- rare when only a failing
+            # backend could hold a launch, ordinary now an extension can.
             discovered = instance.read_session_id()
             instance.save_state(
-                last_launched or start_session_num - 1 or 1,
+                last_launched or start_session_num - 1,
                 run_started,
                 discovered or resume_id or resume_id_used,
             )
