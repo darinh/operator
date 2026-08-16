@@ -12,12 +12,12 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["operator_kernel"]
+packages = ["operator_kernel", "operator_fleet"]
 
 [tool.setuptools.dynamic]
 version = { attr = "operator_kernel.version.__version__" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["operator_kernel", "tests"]
+pythonpath = ["operator_kernel", "operator_fleet", "tests"]
 norecursedirs = ["tests/pending"]

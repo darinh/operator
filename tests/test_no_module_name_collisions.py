@@ -1,4 +1,4 @@
-"""No kernel module may share a name with something already importable.
+"""No module of this repository may share a name with something importable.
 
 This exists because the same failure happened three times in one afternoon, and
 the third time it produced a green test suite that was testing the wrong code.
@@ -30,19 +30,31 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 KERNEL = REPO / "operator_kernel"
+FLEET = REPO / "operator_fleet"
+
+#: Every directory this repository puts on `pythonpath`. `operator_fleet/`
+#: joined the day `snapshot.py` was cut out of the kernel, and it had to join
+#: *this* list rather than only the budget's: the question here is whether a
+#: name of ours is also importable from somewhere else, and moving a file from
+#: a scanned directory to an unscanned one answers it by not asking. `snapshot`
+#: is a far more ordinary word than `supervisor_records`, so the package that
+#: gained it is exactly the one that needed the check.
+PACKAGES = (KERNEL, FLEET)
 
 
 def kernel_module_names() -> list[str]:
-    return sorted(p.stem for p in KERNEL.glob("*.py") if p.stem != "__init__")
+    return sorted(p.stem for package in PACKAGES
+                  for p in package.glob("*.py") if p.stem != "__init__")
 
 
 def resolves_outside_kernel(name: str) -> str | None:
-    """Where ``name`` would import from if the kernel were not on the path."""
-    kernel = str(KERNEL)
+    """Where ``name`` would import from if this repository were not on the path."""
+    ours = {str(package) for package in PACKAGES}
     saved = sys.path[:]
     saved_mod = sys.modules.pop(name, None)
     try:
-        sys.path = [p for p in sys.path if str(Path(p or ".").resolve()) != kernel]
+        sys.path = [p for p in sys.path
+                    if str(Path(p or ".").resolve()) not in ours]
         spec = importlib.util.find_spec(name)
         return getattr(spec, "origin", None) if spec else None
     except (ImportError, ValueError):
@@ -57,17 +69,32 @@ def test_there_are_modules_to_check():
     assert len(kernel_module_names()) >= 10
 
 
+def test_every_package_contributes_names_to_the_scan():
+    """The scan reads a list, and a list can quietly lose an entry.
+
+    `kernel_module_names()` folds two directories into one sorted list, so a
+    package dropped from `PACKAGES` -- or a glob that stops matching -- leaves
+    a shorter list and every assertion below still passes. This names each
+    package's own contribution instead.
+    """
+    for package in PACKAGES:
+        found = [p.stem for p in package.glob("*.py") if p.stem != "__init__"]
+        assert found, f"{package.name} contributes no module names to the scan"
+        assert set(found) <= set(kernel_module_names())
+
+
 def test_no_kernel_module_name_is_importable_from_anywhere_else():
     clashes = []
     for name in kernel_module_names():
         origin = resolves_outside_kernel(name)
-        if origin and str(KERNEL) not in str(origin):
+        if origin and not any(str(package) in str(origin)
+                              for package in PACKAGES):
             clashes.append(f"{name} -> {origin}")
     assert clashes == [], (
-        "these kernel module names also exist outside the kernel:\n  "
+        "these module names also exist outside this repository:\n  "
         + "\n  ".join(clashes)
         + "\n\nWhichever one wins depends on how the suite was invoked. Rename "
-        "the kernel module. This exact collision made 70 tests pass against the "
+        "the module. This exact collision made 70 tests pass against the "
         "system being replaced."
     )
 

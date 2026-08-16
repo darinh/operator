@@ -22,6 +22,13 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 KERNEL = REPO / "operator_kernel"
 
+#: The second source package. It is not the kernel and is deliberately not
+#: held to the kernel's budget, but it is this repository's code and the suite
+#: may import it -- so the scan below has to know the name exists. Its own
+#: rules live in `test_fleet_boundary.py`; see that file for why an extraction
+#: that made lines free on the far side of a boundary would be a fiction.
+FLEET = REPO / "operator_fleet"
+
 #: What the kernel may import beyond the standard library and itself. Empty on
 #: purpose: a supervision kernel that needs a third-party package has stopped
 #: being a kernel. Adding a name here is a decision somebody has to defend in
@@ -87,6 +94,14 @@ MAX_MODULE_LINES = 800
 #: `guid_is_usable`) exists to resolve one handoff path and one working
 #: directory. Both become arguments the caller passes once continuity moves to
 #: the ledger, and roughly 250 lines leave with them.
+#:
+#: That rule has been followed once already, and the headroom below the two
+#: numbers is what it bought rather than slack anyone left. The kernel stood at
+#: 4,091 and exactly 9,000 with nothing further able to land; `snapshot.py`
+#: moved to `operator_fleet/` (60 code, 106 total) because describing a fleet
+#: is not supervising one and no kernel module imported it. A cut only counts
+#: if the lines are not free where they land, so `test_fleet_boundary.py`
+#: charges for them there.
 MAX_KERNEL_CODE_LINES = 4100
 
 #: The kernel-wide *total*-line ceiling, for navigability rather than
@@ -172,8 +187,16 @@ def kernel_modules() -> list[Path]:
     return sorted(KERNEL.glob("*.py"))
 
 
+def fleet_modules() -> list[Path]:
+    return sorted(FLEET.glob("*.py"))
+
+
 def _module_names() -> set[str]:
     return {p.stem for p in kernel_modules()}
+
+
+def _fleet_module_names() -> set[str]:
+    return {p.stem for p in fleet_modules()}
 
 
 def imported_names(source: str) -> set[str]:
@@ -237,11 +260,20 @@ def test_the_kernel_imports_nothing_it_is_defined_as_not_being():
 
     stdlib = sys.stdlib_module_names
     ours = _module_names()
+    fleet = _fleet_module_names()
     offenders: list[str] = []
     for path in kernel_modules():
         for name in imported_names(path.read_text(encoding="utf-8")):
             if name in FORBIDDEN:
                 offenders.append(f"{path.name}: {name} (forbidden)")
+            elif name in fleet:
+                # Named separately because "undeclared" would read as an
+                # oversight in this list. It is not: the arrow between these
+                # two packages points one way on purpose, and `snapshot` left
+                # the kernel precisely because nothing in it imported that
+                # file. A kernel module importing one now would make the
+                # extraction a rename.
+                offenders.append(f"{path.name}: {name} (fleet, not kernel)")
             elif name not in stdlib and name not in ours and name not in ALLOWED_THIRD_PARTY:
                 offenders.append(f"{path.name}: {name} (undeclared)")
     assert offenders == [], (
@@ -307,6 +339,7 @@ def test_the_test_suite_imports_nothing_from_outside_this_repository():
 
     stdlib = sys.stdlib_module_names
     kernel = _module_names()
+    fleet = _fleet_module_names()
     local = _importable_suite_names()
     offenders: list[str] = []
     for path in suite_modules():
@@ -315,6 +348,7 @@ def test_the_test_suite_imports_nothing_from_outside_this_repository():
                 offenders.append(
                     f"{path.relative_to(REPO)}: {name} (forbidden)")
             elif (name not in stdlib and name not in kernel
+                    and name not in fleet
                     and name not in local
                     and name not in ALLOWED_TEST_THIRD_PARTY):
                 offenders.append(

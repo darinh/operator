@@ -1,4 +1,4 @@
-"""`op` for ported tests: the kernel presented as one namespace.
+"""`op` for ported tests: this repository presented as one namespace.
 
 The tests being migrated were written against a single 9,120-line module and
 reference it as `op`. Rewriting several thousand assertions to chase the new
@@ -6,6 +6,11 @@ module boundaries would be a large, silent, error-prone edit of the exact
 artifacts that encode *why* the behaviour is what it is -- so the boundaries are
 presented rather than rewritten. The tests move unmodified, which is precisely
 what makes them evidence that the behaviour survived the move.
+
+That module held the kernel and the board alike, so as pieces leave the kernel
+for `operator_fleet/` they stay in here. What must never enter is a module from
+*outside* this repository; see `SOURCE_ROOTS` below for why the distinction is
+drawn there and not at the kernel's edge.
 
 **This forwards writes, and that is the whole design.** A namespace that merely
 copied names in would let `monkeypatch.setattr(op, "RESTART_DIR", tmp)` succeed
@@ -23,6 +28,7 @@ import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "operator_kernel"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "operator_fleet"))
 
 _MODULE_NAMES = (
     "config", "paths", "gitio", "probes", "presence", "instance", "launch",
@@ -54,10 +60,31 @@ _ALIASES = {
 
 
 KERNEL = Path(__file__).resolve().parent.parent / "operator_kernel"
+FLEET = Path(__file__).resolve().parent.parent / "operator_fleet"
+
+#: Every source package in this repository. `snapshot` left the kernel for
+#: `operator_fleet/` -- describing a fleet is not supervising one -- and it has
+#: to stay in this namespace, which is a safety property and not a convenience.
+#: `conftest`'s autouse multiplexer guard substitutes its fake by writing
+#: `op.MUX`, and that write only reaches a module this shim binds. Drop
+#: `snapshot` and its `from config import MUX` keeps the REAL multiplexer,
+#: so `instance_snapshot` starts asking the developer's live tmux server
+#: whether a session exists -- which is the precise shape of the inert
+#: substitution recorded at the top of this file, reintroduced by an
+#: extraction rather than by a typo.
+#:
+#: Widening the root check to the repository is therefore deliberate, and it
+#: does not weaken what the check was for: the failure it caught was the
+#: standard library's `trace` being bound under a kernel spelling, and a
+#: module from outside this repository is refused exactly as before. The
+#: boundary that keeps the kernel a kernel is `test_kernel_boundary.py`'s
+#: import scan, which got *stronger* with this move -- `snapshot` is no longer
+#: a name any kernel module is allowed to import.
+SOURCE_ROOTS = (KERNEL, FLEET)
 
 
-def is_kernel_module(module) -> bool:
-    """Does ``module`` actually live in this repository's kernel?
+def is_repo_module(module) -> bool:
+    """Does ``module`` actually live in one of this repository's packages?
 
     A separate, callable predicate rather than an inline check inside
     :meth:`_KernelNamespace._bind`, so that a test can hand it the module that
@@ -70,9 +97,10 @@ def is_kernel_module(module) -> bool:
     if origin is None:
         return False
     try:
-        return KERNEL in Path(origin).resolve().parents
+        resolved = Path(origin).resolve().parents
     except OSError:
         return False
+    return any(root in resolved for root in SOURCE_ROOTS)
 
 
 class _KernelNamespace(types.ModuleType):
@@ -86,19 +114,20 @@ class _KernelNamespace(types.ModuleType):
         holders = self.__dict__["_owner"]
         for mod_name in _MODULE_NAMES:
             module = __import__(mod_name)
-            # A name in `_MODULE_NAMES` that is not a kernel module does not
-            # fail -- it imports something ELSE and binds its contents here
-            # under kernel-looking names. `"trace"` did precisely that for the
-            # life of the extraction. Resolving to the wrong file is the
+            # A name in `_MODULE_NAMES` that is not a module of this repository
+            # does not fail -- it imports something ELSE and binds its contents
+            # here under kernel-looking names. `"trace"` did precisely that for
+            # the life of the extraction. Resolving to the wrong file is the
             # failure this repository has now hit four times, so it is checked
             # rather than assumed.
-            if not is_kernel_module(module):
+            if not is_repo_module(module):
                 raise ImportError(
-                    f"tests/op.py names {mod_name!r} as a kernel module, but it "
-                    f"resolves to {getattr(module, '__file__', None)!r}, which "
-                    f"is not under {KERNEL}. Binding it would put another "
-                    f"package's names into the kernel namespace under kernel "
-                    f"spellings."
+                    f"tests/op.py names {mod_name!r} as a module of this "
+                    f"repository, but it resolves to "
+                    f"{getattr(module, '__file__', None)!r}, which is under "
+                    f"none of {[str(root) for root in SOURCE_ROOTS]}. Binding "
+                    f"it would put another package's names into this "
+                    f"namespace under kernel spellings."
                 )
             self.__dict__[mod_name] = module
             for key, value in vars(module).items():
@@ -135,7 +164,9 @@ _ns = _KernelNamespace(__name__)
 _ns.__dict__["_MODULE_NAMES"] = _MODULE_NAMES
 _ns.__dict__["_ALIASES"] = _ALIASES
 _ns.__dict__["KERNEL"] = KERNEL
-_ns.__dict__["is_kernel_module"] = is_kernel_module
+_ns.__dict__["FLEET"] = FLEET
+_ns.__dict__["SOURCE_ROOTS"] = SOURCE_ROOTS
+_ns.__dict__["is_repo_module"] = is_repo_module
 _ns.__dict__["Path"] = Path
 _ns.__dict__["sys"] = sys
 _ns._bind()

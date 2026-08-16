@@ -2,6 +2,21 @@
 
 The board reads this. It is deliberately separate from the loop: a status
 read must never be able to change what it is reporting on.
+
+**This is why it is not in the kernel.** Describing a fleet is not supervising
+one, and the arrow proves it: no kernel module imports this file, while this
+file imports five of them. A leaf that only ever points inward is not part of
+what it points at. `docs/plan.md` already said the fleet host belongs outside
+`operator_kernel/`; the board's read of a single instance belongs there on the
+same argument, and it was inside only because the module both were extracted
+from made no distinction.
+
+The move was not free of a reason either: the kernel stood at 4,091 of 4,100
+code lines and exactly 9,000 of 9,000 total, so the next line of anything
+failed `test_kernel_boundary`. The budget names the cut to make when that
+happens, and the rule it encodes is *cut before you raise*. This is a cut --
+which only counts if the lines are not simply free on this side of the line, so
+`tests/test_fleet_boundary.py` charges for them here too.
 """
 from __future__ import annotations
 
