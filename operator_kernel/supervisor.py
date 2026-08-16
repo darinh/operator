@@ -26,6 +26,7 @@ import atexit
 
 from breakers import (evaluate_progress, evaluate_unaccounted, workspace_fingerprint)
 from config import (EXIT_NO_PROGRESS, EXIT_UNACCOUNTED, HEALTHY_SESSION_SECONDS, HEARTBEAT_INTERVAL, IS_WINDOWS, LAUNCH_BACKOFF_BASE, MAX_LAUNCH_FAILURES, MAX_NOCHANGE_SESSIONS, MAX_SESSIONS, MAX_UNACCOUNTED_SESSIONS, MUX, OPERATOR_HOME, POLL_INTERVAL, RESTART_PAUSE_SECONDS, SESSION_ID_WAIT, TAB_LOOPING, UUID_RE)
+from extension_seam import launch_gate
 from exits import (_record_session_exit, crash_recovery_verdict, ending_was_observed,
                    handoff_state, HANDOFF_MISSING, HANDOFF_UNKNOWN, HANDOFF_WAITING)
 from instance import Instance
@@ -239,6 +240,11 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
             f"(currently {'unknown' if unaccounted is None else unaccounted})")
     work_db = None
     last_heartbeat = 0.0
+    # Built once for the whole run, never per launch. `Host` quarantines an
+    # extension that overran its deadline for the life of the host, and a hook
+    # that hangs once hangs again -- so a gate rebuilt per session forgets that
+    # and pays a full deadline on every launch for the rest of the run.
+    gate = launch_gate()
     try:
         try:
             while session_num <= MAX_SESSIONS:
@@ -287,6 +293,37 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                         log(f"Session #{session_num}: detach requested before "
                             f"launch — supervisor exiting")
                         return 0
+                    # Asked here: after the two markers, so a human who has
+                    # said stop is not made to wait out an extension's
+                    # deadline, and before anything is claimed, composed or
+                    # saved, so a refused launch leaves no work item leased and
+                    # no state written. Facts only -- everything passed is
+                    # serialised before a process exists to receive it.
+                    admission = gate.admits(
+                        instance=instance.id, session=session_num,
+                        agent=agent, workdir=str(workdir),
+                        fresh=bool(is_fresh), run_started=str(run_started))
+                    if not admission.admit:
+                        # Wait and ask again: same session number, no launch
+                        # failure counted. A refusal is "not now" -- a quiet
+                        # hours window, a cost ceiling -- and burning a session
+                        # number on it would walk the run into MAX_SESSIONS
+                        # having launched nothing. Ctrl+C, `operator stop` and
+                        # `stop-loop` all still land: `_sleep` returns on the
+                        # flag, and the next pass re-reads both markers before
+                        # asking again.
+                        #
+                        # Who refused, never why: the reason is an extension's
+                        # prose, it is in the ledger, and this log is a file an
+                        # agent can open (INV-AUTH).
+                        log(f"Session #{session_num}: launch refused by "
+                            f"{', '.join(n for n, _ in admission.refusals)} "
+                            f"— waiting {RESTART_PAUSE_SECONDS}s before asking "
+                            f"again")
+                        _sleep(RESTART_PAUSE_SECONDS)
+                        if shutdown["requested"]:
+                            raise KeyboardInterrupt
+                        continue
                     launch_args = list(copilot_args)
                     if resume_id:
                         if args_have_explicit_session(launch_args):

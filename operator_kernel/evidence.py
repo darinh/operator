@@ -320,6 +320,46 @@ def record_handoff_state(operator_home: Path, *, instance: str, session: int,
         return
 
 
+def record_launch_admission(operator_home: Path, *, instance: str, session: int,
+                            admit: bool, refusals=(), blind=()) -> None:
+    """Record what installed extensions said about launching. Never raises.
+
+    A `claim.*` and never a `fact.*` — invariant 5 of `docs/extensions.md`. The
+    supervisor observed only that it asked and what came back; the content is a
+    third party's assertion, so it is attributed and marked unverified, which
+    is the treatment an agent's assertion gets and for the same reason. `kind`
+    and `verified` are fields rather than something implied by the event name,
+    so a reader filtering the ledger for claims need not know which events
+    happen to be one.
+
+    This is the only place a refusal's *reason* is kept — not the operator log,
+    which is a file an agent can open, and INV-AUTH is about extension prose
+    reaching an agent. A human asking *why is this seat not launching* reads it
+    here.
+
+    `blind` is the half that is easy to drop. Two extensions asked and neither
+    able to answer is a materially different launch from two that agreed, even
+    though the kernel launches in both -- and without this field the ledger
+    would say the same thing about each.
+    """
+    try:
+        _append(trace_path(Path(operator_home)), {
+            "ts": _utcnow(),
+            "event": "launch_admission",
+            "kind": "claim",
+            "verified": False,
+            "pid": os.getpid(),
+            "instance": str(instance),
+            "session": session,
+            "admit": bool(admit),
+            "refusals": [{"extension": str(name), "reason": str(reason)}
+                         for name, reason in refusals],
+            "blind": [str(name) for name in blind],
+        })
+    except Exception:
+        return
+
+
 def record_withheld_clause(operator_home: Path, *, instance: str, session: int,
                            source: str, phrases) -> None:
     """Record text that tried to grant authority and was withheld. Never raises.
