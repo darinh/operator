@@ -163,7 +163,7 @@ The preamble clause is the one kernel change: `paths.project_journal_file` and
 to `build_preamble`, and the clause itself. The kernel never reads an entry —
 entries are a seat's own prose, and a supervisor that read them would be putting
 unattributed agent text on the launch path, which is the whole of 0013. That
-change took the kernel to 8,980 of its 9,000-line ceiling, so **the next kernel
+change took the kernel to 8,989 of its 9,000-line ceiling, so **the next kernel
 addition has to make the cut the budget already names** (the project catalogue,
 ~250 lines in `paths.py`).
 

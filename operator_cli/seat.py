@@ -54,8 +54,9 @@ def _remember(args) -> int:
         # The three reasons are deliberately not distinguished in the exit
         # code: an agent that could not take a note should carry on working,
         # and the message is for the human reading the transcript afterwards.
-        print("nothing written — is this directory a registered project, and "
-              "is the journal under its size limit?", file=sys.stderr)
+        print("nothing written - is this directory a registered project, is "
+              "the seat name usable, and is the journal under its size limit?",
+              file=sys.stderr)
         return 1
     print(f"remembered {entry_id} ({args.kind}) for seat {seat}")
     return 0

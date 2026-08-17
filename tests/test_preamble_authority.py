@@ -297,19 +297,49 @@ def test_nothing_is_reported_when_nothing_is_withheld(seat):
 
 # --- the seat's own journal (docs/seat-identity.md) -------------------------
 
-def test_no_journal_clause_when_the_seat_has_recorded_nothing(seat):
-    """An always-present clause is paid for on every token of every session
-    that has nothing to recall -- the objection this module already makes
-    about the assignment line."""
+def test_a_seat_with_no_journal_is_still_told_how_to_start_one(seat):
+    """The chicken-and-egg a reviewer found, and the case that replaced it.
+
+    Both halves used to hang off `has_journal`, so a seat with an empty journal
+    was never told the command existed and could not write the first entry. The
+    old test asserted exactly that, which made it a test pinning the defect.
+    """
     text = _preamble(seat)
-    assert "operator-seat recall" not in text
-    assert "operator-seat remember" not in text
+    assert "operator-seat remember" in text, (
+        "a seat that cannot learn the write command can never start a journal")
+    assert "operator-seat recall" not in text, (
+        "there is nothing to recall, and an unconditional line is paid for on "
+        "every token of every session")
 
 
-def test_the_journal_clause_names_the_command_and_the_seat(seat):
+def test_the_journal_clause_names_the_command_and_the_seat_id(seat):
+    """The id, not the display name: `safe_instance_id` maps `a.b` elsewhere,
+    and the supervisor probed the id."""
     text = _preamble(seat, has_journal=True)
-    assert f"operator-seat recall --instance {seat.display_name}" in text
-    assert f"operator-seat remember --instance {seat.display_name}" in text
+    assert f"operator-seat recall --instance {seat.id}" in text
+    assert f"operator-seat remember --instance {seat.id}" in text
+
+
+def test_the_advertised_seat_is_the_one_the_supervisor_probed(tmp_path,
+                                                              monkeypatch):
+    """A display name that sanitises to something else must not be advertised.
+
+    `seat_has_journal` is asked about `instance.id`; a preamble naming
+    `instance.display_name` would send the agent to a different file, and it
+    would look like the journal had silently lost everything.
+    """
+    monkeypatch.setattr(op, "RESTART_DIR", tmp_path / "restart")
+    odd = op.Instance(display_name="a.b")
+    assert odd.id != odd.display_name, (
+        "this case needs a name sanitisation actually changes")
+    text = op.build_preamble("anvil:anvil", odd, has_journal=True)
+    parts = re.split(r"\s\(\d+\)\s", text)
+    clause = next((p for p in parts if p.startswith("Earlier sessions")), "")
+    assert clause, "the journal clause was not found to check"
+    assert f"--instance {odd.id}" in clause
+    assert odd.display_name not in clause, (
+        "the display name would send the agent to a different journal from "
+        "the one `seat_has_journal` was asked about")
 
 
 def test_the_journal_clause_frames_entries_as_claims_not_findings(seat):
@@ -332,14 +362,14 @@ def test_the_journal_clause_says_to_write_during_the_session(seat):
 
 
 def test_the_journal_clause_grants_nothing(seat):
-    """Scoped to the clause this change added, not to the whole preamble.
+    """A source-level guard on the literal, and honestly no more than that.
 
-    The kernel's own text legitimately contains "permission" and "granted" --
-    in refusals ("not a grant of permission", "nothing has granted you
-    authority") -- so scanning the whole string tests the wrong thing and
-    fails for the right reason. `build_preamble` asserts the global property
-    itself; what is worth pinning here is that a future rewording of *this*
-    clause cannot smuggle a phrase in.
+    A reviewer pointed out this is unfalsifiable by its *input*: the clause is
+    a hardcoded string, so no argument to `_preamble` can put a granting phrase
+    into it. That is true, and it is kept anyway for what it does catch -- a
+    future rewording that types one in. The dynamic path (an entry, or a seat
+    name, carrying a grant) is covered in `test_seat_journal.py`, which is
+    where the input actually varies.
     """
     parts = re.split(r"\s\(\d+\)\s", _preamble(seat, has_journal=True))
     clause = next((p for p in parts if p.startswith("Earlier sessions")), "")
