@@ -373,13 +373,20 @@ What it got wrong:
   weaker claim than the one this bullet makes and is deliberately not dressed
   up as the same one.
 - There is a NEEDS-HUMAN queue to route to. Several containments depend on it.
-  It now exists as far as *writing* goes — `operator_fleet/fleet_host.py`
-  appends every proposal to `proposals.jsonl`, attributed, vetted and with no
-  field that can spell approval — and not at all as far as *draining* goes.
-  Nothing reads it, so the assumption has moved rather than closed: it is now
-  the last bullet in this list, one file over. The queue *refuses* an append
-  past 4 MB rather than rotating, because a queue nobody drains that also
-  deletes its own oldest entries is worse than one that says it is full.
+  Writing was done first — `operator_fleet/fleet_host.py` appends every
+  proposal to `proposals.jsonl`, attributed, vetted and with no field that can
+  spell approval — and draining arrived afterwards: `operator-fleet proposals`
+  shows the queue and `--drain` archives it to `proposals.handled.jsonl`. The
+  4 MB refusal is therefore no longer a slow leak toward a queue that stops
+  accepting; it is a backstop behind a reader that exists.
+
+  **What is still assumed is that a human runs it.** That is a smaller and more
+  honest assumption than "something reads this", but it is not nothing: the
+  command has no schedule, no notification and no unread count, so a queue
+  nobody thinks to look at is still a queue nobody looked at. Draining is
+  archival and *not* approval — moving a line from one file to another cannot
+  mint a lease, which is INV-WORK holding in the shape of the command rather
+  than in a check somebody remembers.
 - **Human provenance is unforgeable by an extension.** It is not, today: a seat
   shares the owner's filesystem identity. So INV-AUTH is a convention backed by
   a ledger record rather than a guarantee, exactly as `mandate.py` says of
@@ -387,6 +394,45 @@ What it got wrong:
   introduced here, and it is the one most likely to be fatal.
 - A `required` gate that cannot run routes to NEEDS-HUMAN rather than blocking.
   In a repo with nobody draining the queue, that converges with silently
-  allowing — the secret ships because nobody looked. The reviewer who proposed
-  it flagged it as unresolved, and it still is. The alternative worth attacking
-  is stopping *that one seat* rather than the fleet.
+  allowing — the secret ships because nobody looked. There is now a drain
+  command, which moves this from "nothing can look" to "somebody has to
+  remember to", and that is an improvement rather than a resolution. The
+  reviewer who proposed it flagged it as unresolved, and the remaining half is
+  still unresolved. The alternative worth attacking is stopping *that one seat*
+  rather than the fleet.
+
+## 9. What is built, and what is still only designed
+
+Written down because the gap between the two was invisible for a while: every
+hook below existed and was tested, and three of the six had no caller in any
+process, which no test could report.
+
+| Hook | Asked by | State |
+| --- | --- | --- |
+| `admit_launch` | `extension_seam.LaunchGate`, per seat, before every launch | live |
+| `gate_change` | nothing | **no call site** — there is no kernel merge gate to hang it on |
+| `detect_repo` | nothing | **no call site** — nothing composes its answer into a preamble |
+| `on_fact` | `FleetHost.deliver` | live, once a fleet host is running |
+| `on_tick` | `FleetHost.tick` | live, once a fleet host is running |
+| `propose_work` | `FleetHost.propose` | live, once a fleet host is running |
+
+`operator-fleet run` is what makes the bottom three true; before it, `FleetHost`
+was complete and reachable only from its own tests. The top three are asked by
+the per-seat supervisor, which is started by the command-line interface this
+kernel was extracted from — and that interface is still in `copilot-tools`.
+**So `admit_launch` is live in the code and unreachable from this repository
+alone**, which is the honest statement of where the extraction has got to.
+
+`operator_extensions/` ships three reference extensions — `worktree-guard`
+(`admit_launch`), `worktree-janitor` (`propose_work`) and `seat-watch`
+(`on_fact`, `on_tick`, `propose_work`). They deliberately implement no hook
+that has no call site: an extension answering a question nobody asks is a demo
+that cannot fail, and this document is already long enough on the subject of
+signals indistinguishable from their absence.
+
+They are registered on install and **inert until a human writes
+`~/.operator/extensions.json`**. That split is not tidiness. Registering is
+enough to be asked a question on the launch path of every seat, and an
+`admit_launch` refusal is honoured — so an extension that went live on install
+would be one `pip install` away from holding a nine-seat fleet closed, with
+`operator.log` naming who refused and, by INV-AUTH, never why.
