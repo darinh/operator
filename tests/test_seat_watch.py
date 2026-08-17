@@ -103,6 +103,27 @@ def test_a_seat_over_the_threshold_is_proposed_exactly_once(home):
     assert seat_watch.propose_work() is None
 
 
+def test_a_seat_that_recovers_and_fails_again_is_reported_again(home):
+    """Otherwise the module does exactly what its docstring says it must not.
+
+    The supervisor writes `consecutive=0` on a healthy ending, so a seat that
+    recovers and then fails to the same depth as before was silently suppressed
+    by the remembered `told` -- reportable only if the new streak happened to
+    be worse.
+    """
+    turn_on(home, failures=3)
+    seat_watch.on_fact(facts=[exited(consecutive=3)])
+    assert seat_watch.propose_work()
+
+    seat_watch.on_fact(facts=[exited(consecutive=0)])
+    assert seat_watch.propose_work() is None
+
+    seat_watch.on_fact(facts=[exited(consecutive=3)])
+    again = seat_watch.propose_work()
+    assert again, "a recovered seat that fails again must be reported again"
+    assert "3 sessions" in again[0]["title"]
+
+
 def test_a_seat_that_gets_worse_is_proposed_again(home):
     turn_on(home, failures=3)
     seat_watch.on_fact(facts=[exited(consecutive=3)])

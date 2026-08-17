@@ -22,6 +22,7 @@ inherit. Setting it is how the test stands in for an install.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -132,6 +133,63 @@ def test_a_drain_that_cannot_take_the_queue_reports_failure(home, monkeypatch,
     assert len(queued(home)) == 1, "a failed drain must not lose the batch"
 
 
+def test_the_queue_is_taken_before_it_is_read(home):
+    """Anything the host appends after the claim belongs to the next drain.
+
+    The first version read the file and *then* renamed it, so a proposal
+    written in between was archived without ever being printed -- a human
+    filing away work they were never shown. Two reviewers found it
+    independently.
+    """
+    write_queue(home, {"ts": "t1", "extension": "x", "text": "before"})
+    path = fleet_host.proposals_path(home)
+    mine = path.with_name("proposals.draining.test.jsonl")
+
+    batches = cli._claim(path, mine)
+    assert not path.exists(), "the queue must be moved aside by the claim"
+
+    # The fleet host carries on while the archive is being written.
+    write_queue(home, {"ts": "t2", "extension": "y", "text": "after"})
+
+    taken = cli._read(batches[-1])
+    assert [r["text"] for r in taken] == ["before"]
+    assert [r["text"] for r in cli._read(path)] == ["after"]
+
+
+def test_a_batch_abandoned_by_a_crashed_drain_is_adopted_by_the_next(
+        home, capsys):
+    """The live queue has already been reset, so nothing else would find it."""
+    path = fleet_host.proposals_path(home)
+    orphan = path.with_name("proposals.draining.99999.jsonl")
+    orphan.write_text(json.dumps(
+        {"ts": "t0", "extension": "x", "text": "lost in a crash"}) + "\n",
+        encoding="utf-8")
+    write_queue(home, {"ts": "t1", "extension": "y", "text": "current"})
+
+    assert cli.main(["--home", str(home), "proposals", "--drain"]) == 0
+    out = capsys.readouterr().out
+    assert "recovered an abandoned batch" in out
+    assert "lost in a crash" in out, "the recovered batch must also be shown"
+
+    assert not orphan.exists()
+    archive = (home / "proposals.handled.jsonl").read_text(encoding="utf-8")
+    assert "lost in a crash" in archive and "current" in archive
+    assert cli.main(["--home", str(home), "proposals"]) == 0
+
+
+def test_an_orphan_is_recovered_even_when_the_queue_is_empty(home):
+    path = fleet_host.proposals_path(home)
+    orphan = path.with_name("proposals.draining.88888.jsonl")
+    orphan.write_text(json.dumps(
+        {"ts": "t0", "extension": "x", "text": "only orphan"}) + "\n",
+        encoding="utf-8")
+
+    assert cli.main(["--home", str(home), "proposals", "--drain"]) == 0
+    assert not orphan.exists()
+    assert "only orphan" in (
+        home / "proposals.handled.jsonl").read_text(encoding="utf-8")
+
+
 # ── run ─────────────────────────────────────────────────────────
 
 def test_run_polls_the_requested_number_of_rounds(home, monkeypatch, capsys):
@@ -157,17 +215,47 @@ def test_the_parser_requires_a_subcommand():
         cli.main([])
 
 
-def test_bootstrap_puts_the_flat_module_directories_on_the_path():
+def test_bootstrap_puts_the_flat_module_directories_on_the_path(monkeypatch):
+    """Falsifiable only if the directories are absent when it is called.
+
+    pytest already puts both on `sys.path` through `pythonpath`, so the first
+    version of this test passed whether or not `_bootstrap` did anything at
+    all -- a reviewer pointed out it would survive the function being replaced
+    by `pass`. They are removed first now.
+    """
+    import sys as _sys
+    kernel = str(REPO / "operator_kernel")
+    fleet = str(REPO / "operator_fleet")
+    monkeypatch.setattr(
+        _sys, "path", [p for p in _sys.path if p not in (kernel, fleet)])
+    assert kernel not in _sys.path and fleet not in _sys.path
+
     cli._bootstrap()
-    import sys
-    assert str(REPO / "operator_kernel") in sys.path
-    assert str(REPO / "operator_fleet") in sys.path
+    assert kernel in _sys.path, "the kernel directory was not restored"
+    assert fleet in _sys.path, "the fleet directory was not restored"
 
 
 def test_the_home_flag_beats_the_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("COPILOT_OPERATOR_HOME", str(tmp_path / "from-env"))
     assert cli._home(str(tmp_path / "from-flag")) == tmp_path / "from-flag"
     assert cli._home(None) == tmp_path / "from-env"
+
+
+def test_the_home_flag_is_exported_so_spawned_workers_agree(home, tmp_path,
+                                                            monkeypatch):
+    """Extensions run in workers that resolve the operator home themselves.
+
+    `--home` used to move the ledger and the queue and nothing else, so a
+    relocated fleet read its activation config and wrote its extension state
+    under the real `~/.operator`.
+    """
+    elsewhere = tmp_path / "relocated"
+    elsewhere.mkdir()
+    monkeypatch.setenv("COPILOT_OPERATOR_HOME", str(home))
+
+    assert cli.main(["--home", str(elsewhere), "proposals"]) == 0
+    assert os.environ["COPILOT_OPERATOR_HOME"] == str(elsewhere), (
+        "a worker spawned after this would read the wrong operator home")
 
 
 # ── the whole path, for real ────────────────────────────────────

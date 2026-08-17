@@ -31,6 +31,7 @@ with `-C` and nothing here depends on where the process happens to be standing.
 from __future__ import annotations
 
 import dataclasses
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -66,11 +67,19 @@ class Budget:
     A plain deadline rather than a token bucket: the question is only ever "is
     there time for one more repository?", and a caller that asks after the
     answer is no gets a bounded refusal instead of an unbounded scan.
+
+    `seconds` defaults to `None` and is resolved to `SCAN_BUDGET` *inside* the
+    constructor rather than in the signature. A module constant used as a
+    default argument is captured when the class is created, so
+    `monkeypatch.setattr(gitfacts, "SCAN_BUDGET", 0)` would not reach it -- the
+    exact shape of the defect this repository already has recorded against
+    `snapshot.TABS_FILE`, where three tests read the developer's real home
+    directory because a path was bound at import.
     """
 
-    def __init__(self, seconds: float = SCAN_BUDGET, clock=time.monotonic):
+    def __init__(self, seconds: "float | None" = None, clock=time.monotonic):
         self.clock = clock
-        self.expires = clock() + seconds
+        self.expires = clock() + (SCAN_BUDGET if seconds is None else seconds)
 
     def remaining(self) -> float:
         return max(0.0, self.expires - self.clock())
@@ -99,6 +108,36 @@ class Worktree:
     prunable: bool = False
 
 
+#: Environment variables that make git answer about a repository other than the
+#: one `-C` names. An absolute `GIT_DIR` simply overrides `-C`, so a supervisor
+#: started from a git hook -- or any parent that exported one -- would have
+#: every answer here describe the wrong tree: a reviewer demonstrated
+#: `status --porcelain` reporting one repository's index against another's
+#: files. The guard would then refuse a clean workdir because something else is
+#: mid-merge, which is a refusal nobody can explain from the message.
+GIT_OVERRIDES = (
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_QUARANTINE_PATH", "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES",
+)
+
+
+def _env() -> dict:
+    """The parent environment with git's redirection removed.
+
+    `GIT_TERMINAL_PROMPT=0` because a hook must never block on a credential
+    prompt -- there is no terminal to answer it and the worker would be killed
+    at its deadline, which quarantines the extension. `GIT_OPTIONAL_LOCKS=0`
+    because `git status` otherwise takes the index lock to refresh it, and a
+    read-only observer has no business blocking a human's commit.
+    """
+    env = {key: value for key, value in os.environ.items()
+           if key not in GIT_OVERRIDES}
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_OPTIONAL_LOCKS"] = "0"
+    return env
+
+
 def _run(root, args: "list[str]", timeout: float) -> "tuple[bool, str]":
     """One read-only git command against `root`. Never raises.
 
@@ -112,7 +151,7 @@ def _run(root, args: "list[str]", timeout: float) -> "tuple[bool, str]":
     try:
         done = subprocess.run(
             ["git", "-C", str(root), *args],
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True, text=True, timeout=timeout, env=_env(),
             # Never a shell. The arguments include branch names, which are
             # attacker-influenced in any repository that takes a pull request.
             shell=False,
@@ -228,6 +267,12 @@ def is_merged(root, branch: str, into: str,
     because the latter answers relative to whatever HEAD happens to be in the
     worktree this runs against.
 
+    The branch is passed as a **full ref** (`refs/heads/x`) rather than as its
+    short name. Git refuses to create a ref beginning with `-`, but this value
+    arrives from parsing another program's output, and a value that reaches an
+    argument list should not depend on a third party's validation for its
+    shape. `refs/heads/` in front makes an option-lookalike impossible.
+
     False when the question could not be asked -- an unknown integration
     branch, a repository that has gone away -- because this answer is the sole
     grounds on which the janitor proposes removing a checkout, and "could not
@@ -236,7 +281,8 @@ def is_merged(root, branch: str, into: str,
     if not branch or not into:
         return False
     ok, out = _run(root, ["branch", "--format=%(refname:short)",
-                          "--contains", branch, "--list", into],
+                          "--contains", f"refs/heads/{branch}",
+                          "--list", into],
                    _timeout(budget))
     return ok and into in out.split()
 
@@ -248,11 +294,56 @@ def has_changes(root, budget: "Budget | None" = None) -> "bool | None":
     collapse "no" into "could not tell". The janitor uses this as a *veto* on
     proposing a removal, so an unreadable repository has to be able to say
     "stop" rather than "nothing to see".
+
+    **A clean `status` is not sufficient, which two reviewers demonstrated in
+    two different ways.** `--untracked-files=all` is passed explicitly because
+    `status.showUntrackedFiles=no` -- a real and not uncommon setting, local or
+    global -- makes porcelain output empty while untracked work sits in the
+    tree; the default would have reported a worktree holding somebody's
+    unsaved afternoon as clean. And `git status` deliberately does not report a
+    tracked file marked `assume-unchanged` or `skip-worktree`, so those flags
+    are checked too, and their presence downgrades the answer to "unknown"
+    rather than to "dirty": the flag means this function cannot see the truth,
+    which is exactly what None is for. `git worktree remove` shares both blind
+    spots, so the human acting on the proposal would lose the work as well.
+
+    `ls-files -v` is run *only* on the clean path, because that is the only
+    branch where the answer could change, and its cost is proportional to the
+    index. A repository large enough for it to hit `COMMAND_TIMEOUT` returns
+    not-ok, which becomes None, which vetoes the proposal -- the expensive
+    case fails in the safe direction rather than needing a second bound.
     """
-    ok, out = _run(root, ["status", "--porcelain"], _timeout(budget))
+    ok, out = _run(root, ["status", "--porcelain", "--untracked-files=all"],
+                   _timeout(budget))
     if not ok:
         return None
-    return bool(out.strip())
+    if out.strip():
+        return True
+    return None if _index_is_masked(root, budget) else False
+
+
+def _index_is_masked(root, budget: "Budget | None") -> bool:
+    """True when the index carries a flag that hides changes from `status`.
+
+    `ls-files -v` tags each path with a letter: uppercase is ordinary,
+    **lowercase means `assume-unchanged`**, and `S` means `skip-worktree`.
+    Either one makes a clean `status` a statement about what git was told to
+    look at rather than about what is there.
+
+    True is also returned when the question could not be asked, because the
+    caller turns this into "unknown" and unknown is the answer that declines to
+    propose a deletion.
+    """
+    ok, out = _run(root, ["ls-files", "-v"], _timeout(budget))
+    if not ok:
+        return True
+    for line in out.splitlines():
+        if not line:
+            continue
+        tag = line[0]
+        if tag == "S" or (tag.isalpha() and tag.islower()):
+            return True
+    return False
 
 
 def _timeout(budget: "Budget | None") -> float:

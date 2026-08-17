@@ -53,33 +53,54 @@ MAX_PER_CALL = 5
 #: poll interval.
 SCAN_DEPTH = 1
 
+#: Caps on how much of a configured tree is examined at all. Discovery calls
+#: git once per candidate directory, so a root with four hundred children is
+#: four hundred subprocesses -- and a reviewer found that discovery ran with no
+#: budget at all, which made `roots: ["~/repos"]` on a cold filesystem a
+#: reliable way to overrun the worker deadline and quarantine this extension
+#: for the life of the fleet host. The budget is the real defence; these are
+#: the cheap one that stops the budget being spent before the scan starts.
+MAX_ROOTS = 20
+MAX_CHILDREN = 50
 
-def _repos(config) -> "list[Path]":
+
+def _repos(config, budget: gitfacts.Budget) -> "list[Path]":
     """Configured roots, expanded to the repositories under them.
 
     A root that is itself a repository is used directly; otherwise its
     immediate children are examined. Nothing recurses, and a root that is
     neither is silently skipped -- a hand-edited path that no longer exists is
     an ordinary thing to find in a config file and not worth a failure.
+
+    The budget is checked before every git call, including the ones that only
+    decide whether a directory is a repository. Discovery used to run outside
+    it entirely, which meant the scan could be over its deadline before the
+    first worktree was looked at.
     """
     found: list[Path] = []
-    for root in activation.roots(config):
+    for root in activation.roots(config)[:MAX_ROOTS]:
+        if budget.spent():
+            break
         try:
             if not root.is_dir():
                 continue
         except OSError:
             continue
-        if gitfacts.is_repo(root):
+        if gitfacts.is_repo(root, budget):
             found.append(root)
             continue
         if SCAN_DEPTH < 1:
             continue
         try:
             children = sorted(child for child in root.iterdir()
-                              if child.is_dir())
+                              if child.is_dir())[:MAX_CHILDREN]
         except OSError:
             continue
-        found.extend(child for child in children if gitfacts.is_repo(child))
+        for child in children:
+            if budget.spent():
+                break
+            if gitfacts.is_repo(child, budget):
+                found.append(child)
     return found
 
 
@@ -93,6 +114,26 @@ def _findings(repo: Path, integration: str,
     """
     out: list[tuple[str, str, str]] = []
     trees = gitfacts.worktrees(repo, budget)
+
+    # The primary checkout, which is never proposed for *removal* -- it is the
+    # repository -- but which is also the workdir a seat is usually pointed at.
+    # A reviewer found that skipping it entirely broke the pairing
+    # `worktree_guard` documents: the guard refuses a launch into a
+    # half-finished merge in the main checkout forever, and nothing put the
+    # reason on the queue a human drains, so the seat went quiet with no
+    # explanation anywhere a person looks. Asked of `repo` directly rather than
+    # of `trees[0]`, so a porcelain listing that failed to parse cannot take
+    # this check down with it.
+    state = gitfacts.unfinished(repo, budget)
+    if state:
+        out.append((
+            f"{repo.name}:{repo}:{state}",
+            f"{repo.name}: the main checkout has an unfinished {state}",
+            f"{repo} is part-way through a {state}. A seat pointed at it will "
+            f"not be admitted while that is true, so this needs a person to "
+            f"finish or abort it.",
+        ))
+
     for tree in trees[1:]:
         if budget.spent():
             break
@@ -137,8 +178,10 @@ def _findings(repo: Path, integration: str,
             f"{repo.name}: worktree {Path(tree.path).name} is merged into "
             f"{integration}",
             f"{tree.path} is on branch {tree.branch}, which {integration} "
-            f"already contains, and the tree has no uncommitted changes. "
-            f"Retiring it with `git worktree remove` would lose nothing.",
+            f"already contains, and git reports no uncommitted changes. "
+            f"`git worktree remove` would retire it. Check for ignored files "
+            f"first -- a .env or a build directory is invisible to the check "
+            f"behind this proposal and to the removal itself.",
         ))
     return out
 
@@ -160,7 +203,7 @@ def propose_work(**facts):
 
     budget = gitfacts.Budget()
     seen: list[tuple[str, str, str]] = []
-    for repo in _repos(config):
+    for repo in _repos(config, budget):
         if budget.spent():
             break
         seen.extend(_findings(repo, integration, budget))
@@ -169,13 +212,31 @@ def propose_work(**facts):
     already = state.get("proposed")
     already = set(already) if isinstance(already, list) else set()
     fresh = [item for item in seen if item[0] not in already]
+    returned = fresh[:MAX_PER_CALL]
 
-    # Remembered against what this scan *saw*, not against the union with what
-    # was remembered before. A finding that has been dealt with drops out of
-    # the scan and out of the memory with it, so the same worktree going bad
-    # again is proposed again rather than being suppressed forever by a record
-    # of the first time.
-    activation.write_state(NAME, {"proposed": sorted(key for key, _, _ in seen)})
+    # Remembered: what was still found *and* was already known, plus what is
+    # actually being handed back now. The first version remembered everything
+    # the scan saw, which silently buried findings six and beyond -- they were
+    # marked proposed by a call that never returned them, so they were never
+    # proposed at all. A reviewer found it by putting seven stale worktrees in
+    # front of it and getting five, then None.
+    #
+    # Dropping a key that has left the scan is the other half, and it is why
+    # this is not a union with `already`: a finding that has been dealt with
+    # falls out of the memory too, so the same worktree going bad again is
+    # proposed again rather than suppressed forever by a record of the first
+    # time.
+    #
+    # KNOWN LIMITATION, and two reviewers found it independently: this advances
+    # before `FleetHost` appends. An extension is one process per call with no
+    # acknowledgement channel, so a proposal returned into a queue that then
+    # refuses the append (`QueueUnwritable`, past 4 MB) is remembered as told
+    # and will not be repeated. The host reports that failure to
+    # `fleet-failures.jsonl`, which is where the loss is visible; closing it
+    # properly needs a reply the hook contract does not have.
+    still_seen = {key for key, _, _ in seen}
+    remembered = (already & still_seen) | {key for key, _, _ in returned}
+    activation.write_state(NAME, {"proposed": sorted(remembered)})
 
     return [{"title": title, "detail": detail}
-            for _, title, detail in fresh[:MAX_PER_CALL]] or None
+            for _, title, detail in returned] or None

@@ -32,6 +32,8 @@ from __future__ import annotations
 
 import ast
 import importlib
+import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -39,6 +41,7 @@ import pytest
 
 import extensions
 import fleet_host
+from operator_extensions import activation
 from test_kernel_boundary import (ALLOWED_THIRD_PARTY, FORBIDDEN,
                                   MAX_MODULE_CODE_LINES, MAX_MODULE_LINES,
                                   REPO, code_lines, imported_names)
@@ -71,7 +74,8 @@ ALL_HOOKS = frozenset(extensions.HOOKS) | frozenset(fleet_host.FLEET_HOOKS)
 #: The git verbs `gitfacts` may use. Everything absent from this set is either
 #: a mutation or a network call, and neither belongs in a hook that answers a
 #: question on the launch path.
-READ_ONLY_VERBS = frozenset({"rev-parse", "worktree", "branch", "status"})
+READ_ONLY_VERBS = frozenset({"rev-parse", "worktree", "branch", "status",
+                             "ls-files"})
 
 #: Tokens that mutate, in any position. `worktree` is read-only as `worktree
 #: list` and destructive as `worktree remove`, so the verb allowlist above is
@@ -254,7 +258,9 @@ def test_the_git_command_scan_finds_the_commands():
     commands = git_command_literals()
     assert len(commands) >= 5, (
         f"only found {commands!r}; the scan below is not reading gitfacts")
-    assert ["status", "--porcelain"] in commands
+    assert ["status", "--porcelain", "--untracked-files=all"] in commands, (
+        "the working-tree check must ask about untracked files explicitly; "
+        "`status.showUntrackedFiles=no` empties the default output")
 
 
 @pytest.mark.parametrize("argv", git_command_literals(),
@@ -280,11 +286,14 @@ def test_the_mutating_token_scan_would_catch_a_mutation():
 @pytest.mark.parametrize("name,target", sorted(declared_entry_points().items()))
 def test_every_hook_has_no_opinion_when_nothing_is_configured(
         name, target, tmp_path, monkeypatch):
-    """The property that makes installing this package safe.
+    """A sweep: no hook of any extension may answer with an empty home.
 
-    `None` is the answer that produces no claim at all: `Host._ask` drops a
-    reply whose value is null, so nothing reaches `launch_admission`,
-    `gate_outcome` or the proposal queue.
+    Necessary and *not sufficient*, which is why the paired test below exists.
+    A reviewer pointed out that this on its own is unfalsifiable for
+    `worktree-guard`: the `workdir` handed over is an empty temporary
+    directory, so the guard returns None because it is not a repository, and an
+    extension that had forgotten to consult `activation` entirely would pass
+    here unchanged.
     """
     monkeypatch.setenv("COPILOT_OPERATOR_HOME", str(tmp_path / "empty-home"))
     module = importlib.import_module(target)
@@ -298,6 +307,95 @@ def test_every_hook_has_no_opinion_when_nothing_is_configured(
                   facts=[], now="2026-08-17T12:00:00Z", elapsed=1.0) is None, (
             f"{name}.{hook} answered without being switched on")
     assert asked, f"{name} was not actually asked anything"
+
+
+def _git(root, *args):
+    done = subprocess.run(["git", "-C", str(root), *args],
+                          capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+
+
+def _repo(tmp_path, name):
+    root = tmp_path / name
+    root.mkdir()
+    _git(root, "init", "-b", "main")
+    _git(root, "config", "user.email", "t@example.invalid")
+    _git(root, "config", "user.name", "T")
+    _git(root, "config", "commit.gpgsign", "false")
+    (root / "f.txt").write_text("x\n", encoding="utf-8")
+    _git(root, "add", "f.txt")
+    _git(root, "commit", "-m", "base")
+    return root
+
+
+def _guard_scenario(tmp_path):
+    """A repository genuinely part-way through a merge."""
+    root = _repo(tmp_path, "guard")
+    marker = Path(subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--absolute-git-dir"],
+        capture_output=True, text=True, timeout=60).stdout.strip())
+    (marker / "MERGE_HEAD").write_text("x\n", encoding="utf-8")
+    return ({"enabled": True},
+            [("admit_launch", {"instance": "seat", "session": 1,
+                               "workdir": str(root)})])
+
+
+def _janitor_scenario(tmp_path):
+    """A repository with a linked worktree whose branch `main` contains."""
+    root = _repo(tmp_path, "janitor")
+    _git(root, "worktree", "add", "-b", "landed",
+         str(root / ".worktrees" / "landed"))
+    return ({"enabled": True, "roots": [str(root)], "integration": "main"},
+            [("propose_work", {})])
+
+
+def _seat_watch_scenario(tmp_path):
+    return ({"enabled": True, "failures": 1},
+            [("on_fact", {"facts": [{"ts": "2026-08-17T10:00:00Z",
+                                     "event": "session_exit",
+                                     "instance": "alpha", "consecutive": 4,
+                                     "giving_up": False}]}),
+             ("propose_work", {})])
+
+
+#: One scenario per registered extension, each of which *would* produce an
+#: answer if the extension were switched on. A `KeyError` here is the intended
+#: behaviour for a fourth extension: a new one must come with the inputs that
+#: prove it is inert, or this file cannot prove it for it.
+SCENARIOS = {
+    "worktree-guard": _guard_scenario,
+    "worktree-janitor": _janitor_scenario,
+    "seat-watch": _seat_watch_scenario,
+}
+
+
+@pytest.mark.parametrize("name", sorted(declared_entry_points()))
+def test_each_extension_is_inert_without_config_and_answers_with_it(
+        name, tmp_path, monkeypatch):
+    """The paired test, and the one that can actually fail.
+
+    The same inputs are put to the extension twice: once with no configuration
+    and once with it enabled. Inert-then-silent proves nothing, because a
+    scenario that never triggers the logic is silent either way. Inert-then-
+    *answering* proves the input reaches the logic, and therefore that the
+    silence in the first half was `activation` and not the scenario.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("COPILOT_OPERATOR_HOME", str(home))
+    config, calls = SCENARIOS[name](tmp_path)
+    module = importlib.import_module(declared_entry_points()[name])
+
+    for hook, kwargs in calls:
+        assert getattr(module, hook)(**kwargs) is None, (
+            f"{name}.{hook} answered with no configuration present")
+
+    (home / activation.CONFIG_NAME).write_text(
+        json.dumps({name: config}), encoding="utf-8")
+    answers = [getattr(module, hook)(**kwargs) for hook, kwargs in calls]
+    assert answers[-1] is not None, (
+        f"positive control failed: {name} did not answer even when enabled, "
+        f"so the first half of this test proved nothing about activation")
 
 
 @pytest.mark.parametrize("path", extension_modules() + cli_modules(),

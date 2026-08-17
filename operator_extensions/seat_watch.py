@@ -117,6 +117,16 @@ def on_fact(**facts):
         if not isinstance(consecutive, int) or isinstance(consecutive, bool):
             continue
         entry = dict(seats.get(instance) or {})
+        told = entry.get("told")
+        if isinstance(told, int) and consecutive < told:
+            # The seat recovered. Forget that it was ever reported, so a later
+            # streak of the same length is reported again. Without this the
+            # module did precisely what its own docstring says it must not:
+            # went quiet on a seat that recovered and then failed again, unless
+            # the new failure happened to be worse than the old one. The
+            # supervisor writes `consecutive=0` on a healthy ending, so this is
+            # the ordinary path rather than an edge case.
+            entry.pop("told", None)
         entry["consecutive"] = consecutive
         entry["giving_up"] = record.get("giving_up") is True
         entry["ts"] = str(record.get("ts", ""))
@@ -162,7 +172,16 @@ def on_tick(**facts):
 
 
 def propose_work(**facts):
-    """Name every seat that has crossed the threshold since it was last named."""
+    """Name every seat that has crossed the threshold since it was last named.
+
+    KNOWN LIMITATION, found independently by two reviewers: `told` advances
+    here, before `FleetHost` appends the proposal. An extension is one process
+    per call with no acknowledgement channel, so a seat named into a queue that
+    then refuses the append is recorded as told and is not named again until it
+    deteriorates further. The host reports that append failure to
+    `fleet-failures.jsonl`; closing the gap properly needs a reply the hook
+    contract does not currently have.
+    """
     config = activation.settings(NAME)
     if config is None:
         return None
