@@ -9,6 +9,7 @@ dev = ["pytest>=7.0"]
 
 [project.scripts]
 operator-fleet = "operator_cli.fleet:main"
+operator-seat = "operator_cli.seat:main"
 
 # The reference extensions ship registered but INERT. Registering is what makes
 # them discoverable; `operator_extensions/activation.py` is what makes them
@@ -26,7 +27,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["operator_kernel", "operator_fleet", "operator_extensions",
-            "operator_cli"]
+            "operator_cli", "operator_memory"]
 
 [tool.setuptools.dynamic]
 version = { attr = "operator_kernel.version.__version__" }

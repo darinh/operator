@@ -1,9 +1,10 @@
 # Seat identity — a design, not yet a decision
 
-**Status: proposal. Nothing here is built.** It exists to be attacked, the way
-`docs/extensions.md` was attacked before a line of the extension system was
-written. The work it describes is backlog **0037**, which is `proposed` and
-awaits the owner's approval.
+**Status: built, and the argument in §4 is still open.** `operator_memory/` is
+the substrate, `operator-seat` is the command, and `build_preamble` mentions it
+to a seat that has entries. What is *not* settled is whether a seat should
+remember at all — §4 is the case against, it was written before the code and it
+has not been answered by building it. Backlog **0037** tracks the question.
 
 The request, in the owner's words:
 
@@ -150,12 +151,21 @@ before it is allowed in.
 | (b) `operator recall` run by the session | one preamble clause | agents do not run commands nobody told them about — but the preamble already tells them to read the handoff, so this is one more clause |
 | (c) a `detect_repo` extension | none to the kernel | **`detect_repo` has no call site** — this is the piece that would have to be built |
 
-**(b) is the recommendation**, on the strength of one distinction: text the
-agent *fetched* is evidence it went and got, while text sitting in its
-instructions is posture. The distinction is not total — a determined reader can
-treat either as authority — but it is real, it is the same distinction the
-extension design draws between a claim and a clause, and it costs one sentence
-in the preamble instead of a kernel subsystem.
+**(b) is what was built**, on the strength of one distinction: text the agent
+*fetched* is evidence it went and got, while text sitting in its instructions is
+posture. The distinction is not total — a determined reader can treat either as
+authority — but it is real, it is the same distinction the extension design
+draws between a claim and a clause, and it costs one sentence in the preamble
+instead of a kernel subsystem.
+
+The preamble clause is the one kernel change: `paths.project_journal_file` and
+`paths.seat_has_journal` (one `stat`, never a parse), a `has_journal` argument
+to `build_preamble`, and the clause itself. The kernel never reads an entry —
+entries are a seat's own prose, and a supervisor that read them would be putting
+unattributed agent text on the launch path, which is the whole of 0013. That
+change took the kernel to 8,980 of its 9,000-line ceiling, so **the next kernel
+addition has to make the cut the budget already names** (the project catalogue,
+~250 lines in `paths.py`).
 
 **Bounding.** Recall must be bounded or session 500 inherits 499 notes and the
 context that was the scarce resource all along is gone. Proposed: most recent

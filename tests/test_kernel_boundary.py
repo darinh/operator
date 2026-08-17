@@ -43,6 +43,15 @@ FLEET = REPO / "operator_fleet"
 EXTENSIONS = REPO / "operator_extensions"
 CLI = REPO / "operator_cli"
 
+#: A seat's memory of itself (`docs/seat-identity.md`). It imports the kernel
+#: and the kernel does not import it -- the same arrow `operator_fleet` sits on
+#: -- but it is *not* on `pythonpath` as a directory, deliberately: its module
+#: is called `journal`, which is an ordinary enough word that putting it on the
+#: flat path is how `snapshot` nearly became the collision that made seventy
+#: tests grade the wrong repository. It is imported as `operator_memory.journal`
+#: and nothing else may spell it.
+MEMORY = REPO / "operator_memory"
+
 #: What the kernel may import beyond the standard library and itself. Empty on
 #: purpose: a supervision kernel that needs a third-party package has stopped
 #: being a kernel. Adding a name here is a decision somebody has to defend in
@@ -222,7 +231,7 @@ def _source_package_names() -> set[str]:
     does not count, which is what keeps a stray folder from silently widening
     what the suite may import.
     """
-    return {path.name for path in (EXTENSIONS, CLI)
+    return {path.name for path in (EXTENSIONS, CLI, MEMORY)
             if (path / "__init__.py").exists()}
 
 
@@ -406,7 +415,8 @@ def test_the_source_packages_the_suite_may_import_are_the_two_expected():
     tests grade the wrong repository. Naming them here means adding a third is
     an edit somebody makes on purpose.
     """
-    assert _source_package_names() == {"operator_extensions", "operator_cli"}
+    assert _source_package_names() == {"operator_extensions", "operator_cli",
+                                       "operator_memory"}
 
 
 def test_only_top_level_test_modules_count_as_importable():

@@ -180,6 +180,49 @@ def project_handoff_file(cwd: Path,
     return base / "next-session.md"
 
 
+def project_journal_file(cwd: Path, instance: str) -> "Path | None":
+    """Where this seat's journal lives, or None if it cannot be addressed.
+
+    A sibling of ``handoff/`` and deliberately not part of it: a handoff is a
+    baton one session consumes and deletes, while a journal accumulates.
+    ``docs/seat-identity.md`` has the measurement that forced them apart -- 997
+    of 1,110 recorded endings wrote no handoff.
+
+    Defined here although ``operator_memory`` is what reads and writes it:
+    both must agree on the path, the kernel may not import that package, and
+    two spellings of one location is the drift this module already refuses for
+    the catalog. One definition; the writer imports it.
+
+    The seat name reaches the filesystem, so it is checked the way
+    :func:`guid_is_usable` checks a project id -- a separator or ``..``
+    addresses another seat's memory, and on Windows ``prism.`` is ``prism``.
+    """
+    found = catalog_guid(cwd)
+    if found.guid is None or not instance:
+        return None
+    if instance != instance.strip() or instance.rstrip(". ") != instance:
+        return None
+    if instance == "." or any(bad in instance for bad in ("/", "\\", "..")):
+        return None
+    return project_dir(found.guid) / "journal" / f"{instance}.jsonl"
+
+
+def seat_has_journal(cwd: Path, instance: str) -> bool:
+    """One ``stat``, never a parse: is a recall clause worth spending?
+
+    An always-present clause is paid for on every token of every session that
+    has nothing to recall, which is the objection ``preamble.py`` already makes
+    about the assignment line.
+    """
+    path = project_journal_file(cwd, instance)
+    if path is None:
+        return False
+    try:
+        return path.stat().st_size > 0
+    except OSError:
+        return False
+
+
 
 
 
