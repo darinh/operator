@@ -69,6 +69,14 @@ Preconditions:
   `control_operator.py seat --run <run> --label no-instance -- recall`. Exit `2`
   and stderr names `OPERATOR_INSTANCE`. A missing seat is a usage error, not an
   empty result.
+- **Refuse outside a registered project.** Point the same command at a directory
+  that is not a project. Run
+  `control_operator.py seat --run <run> --label unregistered --cwd <some-temp-dir> -- --instance verify-seat remember --kind gotcha "should not land"`.
+  Exit `1`, and stderr is the single three-causes message: `nothing written - is
+  this directory a registered project, is the seat name usable, and is the journal
+  under its size limit?` Then run the identical command **without** `--cwd`: exit
+  `0` and an id is printed. The pair is the proof — the only thing that changed
+  was where the command was standing.
 - **Proof.** `artifacts/transcript.md` holds each command with its exit code and
   both streams; `artifacts/after-remember/` and `artifacts/after-forget/` hold the
   journal on either side of the supersession.

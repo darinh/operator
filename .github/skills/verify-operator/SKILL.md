@@ -113,10 +113,12 @@ Nothing in this table names an extension.
 | Write a memory | `control_operator.py seat --run <run> --label remember -- --instance verify-seat --session 1 remember --kind gotcha "text"` |
 | Read memories | `control_operator.py seat --run <run> --label recall -- --instance verify-seat recall` |
 | Supersede one | `control_operator.py seat --run <run> --label forget -- --instance verify-seat forget <id>` |
+| Drive from outside the project | `control_operator.py seat --run <run> --cwd <dir> -- --instance verify-seat recall` |
 | Run the fleet host | `control_operator.py fleet --run <run> --label round -- run --rounds 1 --interval 0.1` |
 | Show the queue | `control_operator.py fleet --run <run> --label queue -- proposals` |
 | Drain the queue | `control_operator.py fleet --run <run> --label drain -- proposals --drain` |
 | Seed a proposal (fixture) | `control_operator.py seed-queue --run <run> --extension verify-fixture` |
+| Seed an orphaned batch (fixture) | `control_operator.py seed-queue --run <run> --extension crashed --abandoned` |
 | Seed a ledger record (fixture) | `control_operator.py seed-ledger --run <run> --record '{"event":"...","instance":"..."}'` |
 | Enable any extension | `control_operator.py enable --run <run> --extension <name> --setting key=value` |
 
@@ -131,8 +133,10 @@ Drive by stable handles, not by output position: ledger records key on `event` a
 `remember` prints.
 
 **The ledger tail advances on every round and never redelivers.**
-`fleet-tail.json` holds a byte offset into `trace.jsonl`, and a round with nothing
-enabled consumes records just as thoroughly as one that acts on them. Seed again
+`fleet-tail.json` holds a byte offset into `trace.jsonl`. The cursor is rewound
+only when *nobody was asked*, and an installed extension is asked whether or not
+it is enabled — so on this checkout, where three are always installed, a round
+with nothing enabled spends the batch exactly like an active one. Seed again
 after enabling anything. This is the most common way to spend a run proving
 nothing.
 
@@ -190,10 +194,10 @@ knowledge. `python control_operator.py --help` lists every verb; each verb takes
 | --- | --- |
 | `up` | create the disposable home and register the repo |
 | `doctor` | read-only health check |
-| `seat` | run `operator-seat` from the registered checkout |
+| `seat` | run `operator-seat` from the registered checkout (`--cwd` to override) |
 | `fleet` | run `operator-fleet` against the run's home |
 | `seed-ledger` | append records of any shape to `trace.jsonl` (fixture) |
-| `seed-queue` | append proposals to `proposals.jsonl` (fixture) |
+| `seed-queue` | append proposals to `proposals.jsonl`, or `--abandoned` to leave an orphaned `proposals.draining.*` batch (fixture) |
 | `enable` | turn any extension on by name (fixture) |
 | `evidence` | snapshot home state under a label |
 | `down` | remove the instance, keep the artifacts |

@@ -170,10 +170,29 @@ def test_seeding_appends_rather_than_replacing(run):
 
 def test_a_seeded_proposal_is_attributed(run):
     control.cmd_seed_queue(SimpleNamespace(run=str(run), extension="fixture-x",
-                                           record=None))
+                                           record=None, abandoned=False))
     record = json.loads((run / "home" / "proposals.jsonl").read_text("utf-8").strip())
     assert record["extension"] == "fixture-x"
     assert record["ts"].endswith("Z")
+
+
+def test_an_abandoned_batch_is_not_written_to_the_live_queue(run):
+    """The orphan a crashed drain leaves behind, which the next drain adopts."""
+    control.cmd_seed_queue(SimpleNamespace(run=str(run), extension="fixture-x",
+                                           record=None, abandoned=True))
+    home = run / "home"
+    assert not (home / "proposals.jsonl").exists()
+    orphans = list(home.glob("proposals.draining.*.jsonl"))
+    assert len(orphans) == 1
+    assert json.loads(orphans[0].read_text("utf-8").strip())["extension"] == "fixture-x"
+
+
+def test_two_abandoned_batches_do_not_collide(run):
+    """`_claim` keys orphans on pid AND a nanosecond stamp; so must the fixture."""
+    for _ in range(2):
+        control.cmd_seed_queue(SimpleNamespace(run=str(run), extension="x",
+                                               record=None, abandoned=True))
+    assert len(list((run / "home").glob("proposals.draining.*.jsonl"))) == 2
 
 
 # ── evidence ─────────────────────────────────────────────────────────────
@@ -284,6 +303,23 @@ def test_seat_commands_run_from_the_registered_checkout(monkeypatch, run):
     control.main(["seat", "--run", str(run), "--", "recall"])
     meta = json.loads((run / "run.json").read_text("utf-8"))
     assert seen["cwd"] == Path(meta["repo"])
+
+
+def test_the_working_directory_can_be_overridden(monkeypatch, run, tmp_path):
+    """Needed to drive the refusal from a directory that is not a project."""
+    seen = {}
+
+    def fake(run_, label, argv, cwd):
+        seen["cwd"] = cwd
+        return 0
+
+    monkeypatch.setattr(control, "_invoke", fake)
+    monkeypatch.setattr(control, "_script", lambda name: name)
+    elsewhere = tmp_path / "not-a-project"
+    elsewhere.mkdir()
+    control.main(["seat", "--run", str(run), "--cwd", str(elsewhere),
+                  "--", "recall"])
+    assert seen["cwd"] == elsewhere.resolve()
 
 
 def test_addressing_a_run_that_was_never_created_is_refused(tmp_path):

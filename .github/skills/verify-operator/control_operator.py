@@ -42,6 +42,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -292,6 +293,12 @@ def cmd_seed_queue(args) -> int:
     the archive, the recovery of an abandoned batch -- would be unverifiable on
     an install with no extensions enabled. The behaviour under test is the
     draining, not the producing.
+
+    ``--abandoned`` writes the batch under a ``proposals.draining.*`` name
+    instead of the live queue, which is the state a drain that died between its
+    rename and its archive leaves behind. That batch is supposed to be adopted
+    by the next drain, and there is no other way to reach that path: it needs a
+    crash at a one-instruction window.
     """
     run = Path(args.run).expanduser().resolve()
     records = []
@@ -302,14 +309,20 @@ def cmd_seed_queue(args) -> int:
                     "text": f"[extension {args.extension}, unverified] "
                             f"seeded proposal for verification"}]
 
-    queue = _home(run) / "proposals.jsonl"
-    queue.parent.mkdir(parents=True, exist_ok=True)
-    with open(queue, "a", encoding="utf-8") as fh:
+    home = _home(run)
+    if args.abandoned:
+        # A pid and a nanosecond stamp, the same shape `_claim` writes, so the
+        # adopting drain treats it as a genuine orphan rather than a special case.
+        target = home / f"proposals.draining.{os.getpid()}.{time.time_ns()}.jsonl"
+    else:
+        target = home / "proposals.jsonl"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with open(target, "a", encoding="utf-8") as fh:
         for record in records:
             record.setdefault("ts", _utcnow())
             record.setdefault("extension", args.extension)
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-    print(f"seeded {len(records)} proposal(s) into {queue}")
+    print(f"seeded {len(records)} proposal(s) into {target}")
     return 0
 
 
@@ -324,9 +337,11 @@ def cmd_seat(args) -> int:
     run = Path(args.run).expanduser().resolve()
     meta = _meta(run)
     argv = [_script("operator-seat"), *args.rest]
-    # cwd is the registered checkout: the journal is resolved from it.
-    return _invoke(run, args.label or "seat " + " ".join(args.rest), argv,
-                   Path(meta["repo"]))
+    # cwd is the registered checkout: the journal is resolved from it. `--cwd`
+    # overrides it so the "this directory is not a registered project" refusal
+    # is drivable through the transcript rather than by a raw call beside it.
+    cwd = Path(args.cwd).expanduser().resolve() if args.cwd else Path(meta["repo"])
+    return _invoke(run, args.label or "seat " + " ".join(args.rest), argv, cwd)
 
 
 def cmd_evidence(args) -> int:
@@ -405,6 +420,9 @@ def build_parser() -> argparse.ArgumentParser:
                        help="attributed source (default: verify-fixture)")
     queue.add_argument("--record", action="append",
                        help="one JSON object (repeatable)")
+    queue.add_argument("--abandoned", action="store_true",
+                       help="write it as a proposals.draining.* batch, as a "
+                            "crashed drain would leave behind")
     queue.set_defaults(func=cmd_seed_queue)
 
     fleet = sub.add_parser("fleet", help="run operator-fleet against this run")
@@ -416,6 +434,8 @@ def build_parser() -> argparse.ArgumentParser:
     seat = sub.add_parser("seat", help="run operator-seat against this run")
     seat.add_argument("--run", required=True)
     seat.add_argument("--label")
+    seat.add_argument("--cwd", help="run from here instead of the registered "
+                                    "checkout (to drive the unregistered case)")
     seat.add_argument("rest", nargs=argparse.REMAINDER)
     seat.set_defaults(func=cmd_seat)
 

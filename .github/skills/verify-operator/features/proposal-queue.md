@@ -72,7 +72,16 @@ Preconditions:
   batches; it is append-only and never rotates.
 - **Prove a corrupt line is shown.** Append an unparseable line to
   `proposals.jsonl` and run `proposals`. It prints as
-  `! unparseable queue line:`. A corrupt tail must not make a queue look empty.
+  `! unparseable queue line: <text>`, and it is still counted in the total. A
+  corrupt tail must not make a queue look empty.
+- **Prove an abandoned batch is adopted.** Simulate a drain that died between its
+  rename and its archive. Run
+  `control_operator.py seed-queue --run <run> --extension crashed-drain --abandoned`,
+  which writes a `proposals.draining.<pid>.<ns>.jsonl` instead of the live queue.
+  Seed a normal proposal too, then drain. stdout opens with
+  `recovered an abandoned batch: proposals.draining.<pid>.<ns>.jsonl` and the
+  archive receives **both** — `archived 2 proposal(s)`. The orphan was not
+  stranded and the live queue was not lost to it.
 - **Proof.** `artifacts/transcript.md` carries each command with its exit code;
   `artifacts/before-drain/` and `artifacts/after-drain/` carry the queue and the
   archive on either side, which together are the proof.

@@ -52,28 +52,42 @@ Preconditions:
   lists `fleet-tail.json`; read it and note its `offset` equals the size of
   `trace.jsonl`. The inert round consumed the record. This is the single most
   important fact in this file.
+- **Prove why it advanced.** The cursor moves because at least one installed
+  extension was *asked*, not because a round happened. `deliver()` rewinds the
+  cursor only when nobody was asked at all; installed-but-disabled extensions are
+  still asked, answer nothing, and the batch is still spent. So the trap applies
+  whenever any extension is installed — which, in this checkout, is always.
 - **Prove it never redelivers.** Run a second round with no new records and read
   the queue again: still `no proposals waiting`, and the offset is unchanged.
   Records consumed while nothing was enabled are gone to the fleet forever.
 - **Prove the cursor is keyed on file identity.** `fleet-tail.json` carries an
-  `identity` pair alongside the offset. The ledger rotates by **rename**, so a
-  replacement file must be detected by identity rather than by being shorter than
-  the offset — a longer replacement would defeat a size check silently.
+  `identity` pair — `(device, inode)` — alongside the offset. The ledger rotates
+  by **rename**, so a replacement file must be detected by identity rather than by
+  being shorter than the offset: a longer replacement would defeat a size check
+  silently.
 - **Prove isolation.** After any round, confirm the real `~/.operator` is
   unchanged (compare `operator.log` size before and after), while
   `<run>/home/operator.log` exists and has grown. The run wrote only to its own
   home.
-- **Prove the stop marker.** Start a run with no `--rounds` in the background,
-  create `<home>/fleet.stop`, and confirm the process exits `0` reporting the
-  rounds it completed. Prefer `--rounds` for every other drive.
+- **Prove the stop marker.** No backgrounding is needed: `run()` evaluates the
+  stop predicate at the **top** of each loop, before the first poll. Create the
+  marker first with `New-Item -ItemType File -Force <run>/home/fleet.stop`, then
+  run `control_operator.py fleet --run <run> --label stop-marker -- run` with no
+  `--rounds`. It prints `stop it with: <home>\fleet.stop` and exits `0` with
+  `fleet host stopped after 0 round(s)`, in well under a second — proof it never
+  waited out the 15-second default interval. Delete the marker afterwards.
 - **Proof.** `artifacts/transcript.md` carries each round with its exit code and
   both streams; `artifacts/after-inert/` carries the ledger and the tail cursor.
 
 ## Gotchas
 
 - **The tail never redelivers, and every round advances it** — including a round
-  with nothing enabled. An inert proof and an enabled proof cannot share one batch
-  of seeded records. Seed again after enabling, or use two separate `up` runs.
+  with nothing enabled. The mechanism is worth knowing precisely: `deliver()`
+  rewinds the cursor only when *nobody was asked*, and an installed extension is
+  asked whether or not it is enabled. Since this checkout always installs three,
+  an inert round spends the batch exactly like an active one. An inert proof and
+  an enabled proof therefore cannot share one batch of seeded records. Seed again
+  after enabling, or use two separate `up` runs.
 - **The discovery line goes to stderr, not stdout.** A check that reads only
   stdout will miss it.
 - **Discovery lists what is installed, not what is enabled.** Seeing three
