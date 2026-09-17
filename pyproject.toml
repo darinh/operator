@@ -7,17 +7,38 @@ requires-python = ">=3.10"
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
 
+[project.scripts]
+operator-fleet = "operator_cli.fleet:main"
+operator-seat = "operator_cli.seat:main"
+
+# The reference extensions ship registered but INERT. Registering is what makes
+# them discoverable; `operator_extensions/activation.py` is what makes them
+# answer, and it requires a file a human wrote. That split is deliberate: an
+# `admit_launch` refusal is honoured, so an extension that went live on install
+# would be one `pip install` away from holding every seat in the fleet closed.
+[project.entry-points."operator_kernel.extensions"]
+worktree-guard = "operator_extensions.worktree_guard"
+worktree-janitor = "operator_extensions.worktree_janitor"
+seat-watch = "operator_extensions.seat_watch"
+
 [build-system]
 requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["operator_kernel", "operator_fleet"]
+packages = ["operator_kernel", "operator_fleet", "operator_extensions",
+            "operator_cli", "operator_memory"]
 
 [tool.setuptools.dynamic]
 version = { attr = "operator_kernel.version.__version__" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["operator_kernel", "operator_fleet", "tests"]
+# The repository root joins the flat module directories so that
+# `operator_extensions` and `operator_cli` are importable as the *packages*
+# they are. They are not on this list as directories on purpose: their modules
+# import each other with `from . import ...`, unlike the kernel's flat imports,
+# so putting their directories on the path would make `import activation`
+# succeed and quietly create a second copy of the module holding its own state.
+pythonpath = ["operator_kernel", "operator_fleet", "tests", "."]
 norecursedirs = ["tests/pending"]

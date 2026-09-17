@@ -29,6 +29,29 @@ KERNEL = REPO / "operator_kernel"
 #: that made lines free on the far side of a boundary would be a fiction.
 FLEET = REPO / "operator_fleet"
 
+#: The packages that are neither kernel nor fleet, and are imported by their
+#: own name rather than by having their directory put on the path. They exist
+#: because the extension system needed two things the kernel may not grow: code
+#: that is *third party by construction* (`operator_extensions`, which is held
+#: to importing nothing of ours -- see `test_extension_packaging.py`) and an
+#: entry point (`operator_cli`, which is what finally starts the fleet host).
+#:
+#: They are listed here so the suite may import them. That is the whole of what
+#: this grants: their own budgets and import rules live in
+#: `test_extension_packaging.py`, and adding a name here does not exempt
+#: anything from those.
+EXTENSIONS = REPO / "operator_extensions"
+CLI = REPO / "operator_cli"
+
+#: A seat's memory of itself (`docs/seat-identity.md`). It imports the kernel
+#: and the kernel does not import it -- the same arrow `operator_fleet` sits on
+#: -- but it is *not* on `pythonpath` as a directory, deliberately: its module
+#: is called `journal`, which is an ordinary enough word that putting it on the
+#: flat path is how `snapshot` nearly became the collision that made seventy
+#: tests grade the wrong repository. It is imported as `operator_memory.journal`
+#: and nothing else may spell it.
+MEMORY = REPO / "operator_memory"
+
 #: What the kernel may import beyond the standard library and itself. Empty on
 #: purpose: a supervision kernel that needs a third-party package has stopped
 #: being a kernel. Adding a name here is a decision somebody has to defend in
@@ -199,6 +222,19 @@ def _fleet_module_names() -> set[str]:
     return {p.stem for p in fleet_modules()}
 
 
+def _source_package_names() -> set[str]:
+    """Top-level packages of this repository, importable under their own name.
+
+    Read from the filesystem rather than written out, so a package that is
+    deleted stops being allowed rather than staying on a list -- the direction
+    that fails safe. A directory without `__init__.py` is not a package and
+    does not count, which is what keeps a stray folder from silently widening
+    what the suite may import.
+    """
+    return {path.name for path in (EXTENSIONS, CLI, MEMORY)
+            if (path / "__init__.py").exists()}
+
+
 def imported_names(source: str) -> set[str]:
     """Top-level module names imported by ``source``, however spelled.
 
@@ -340,6 +376,7 @@ def test_the_test_suite_imports_nothing_from_outside_this_repository():
     stdlib = sys.stdlib_module_names
     kernel = _module_names()
     fleet = _fleet_module_names()
+    packages = _source_package_names()
     local = _importable_suite_names()
     offenders: list[str] = []
     for path in suite_modules():
@@ -349,6 +386,7 @@ def test_the_test_suite_imports_nothing_from_outside_this_repository():
                     f"{path.relative_to(REPO)}: {name} (forbidden)")
             elif (name not in stdlib and name not in kernel
                     and name not in fleet
+                    and name not in packages
                     and name not in local
                     and name not in ALLOWED_TEST_THIRD_PARTY):
                 offenders.append(
@@ -366,6 +404,19 @@ def test_there_are_suite_modules_to_check():
     """Otherwise the scan above passes by finding no files."""
     assert len(suite_modules()) >= 5
     assert len(_importable_suite_names()) >= 5
+
+
+def test_the_source_packages_the_suite_may_import_are_the_two_expected():
+    """A widening of what the suite may import should be a decision.
+
+    `_source_package_names` reads the filesystem, so a new top-level package
+    with an `__init__.py` would join it silently -- and the name it grants is
+    exactly the kind that resolved to `../copilot-tools/` and made seventy
+    tests grade the wrong repository. Naming them here means adding a third is
+    an edit somebody makes on purpose.
+    """
+    assert _source_package_names() == {"operator_extensions", "operator_cli",
+                                       "operator_memory"}
 
 
 def test_only_top_level_test_modules_count_as_importable():

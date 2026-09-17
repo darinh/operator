@@ -180,6 +180,47 @@ def project_handoff_file(cwd: Path,
     return base / "next-session.md"
 
 
+def project_journal_file(cwd: Path, instance: str) -> "Path | None":
+    """Where this seat's journal lives, or None if it cannot be addressed.
+
+    A sibling of ``handoff/`` and deliberately not part of it: a handoff is a
+    baton one session consumes and deletes, a journal accumulates. See
+    ``docs/seat-identity.md`` for the measurement that forced them apart.
+
+    Defined here although ``operator_memory`` reads and writes it: both must
+    agree on the path and the kernel may not import that package, so there is
+    one definition and the writer imports it.
+
+    The seat name is checked by :func:`guid_is_usable` -- about project ids by
+    name, about *"may this be one path component"* by behaviour. Reused rather
+    than reimplemented: three reviewers found the hand-rolled version missing
+    cases it already had, notably a Windows drive-relative ``D:other`` (which
+    ``Path`` resolves clean out of the project) and an embedded NUL (which
+    raises ``ValueError``, not ``OSError``, and so passes the usual guards).
+    """
+    found = catalog_guid(cwd)
+    if found.guid is None or not guid_is_usable(instance):
+        return None
+    return project_dir(found.guid) / "journal" / f"{instance}.jsonl"
+
+
+def seat_has_journal(cwd: Path, instance: str) -> bool:
+    """One ``stat``, never a parse: is a recall clause worth spending?
+
+    ``ValueError`` as well as ``OSError``: this runs on the launch path, where
+    an exception is caught by nothing in ``run_loop_mode`` and kills the seat's
+    supervisor for good. A probe there does not get to depend on the caller
+    having validated its argument.
+    """
+    path = project_journal_file(cwd, instance)
+    if path is None:
+        return False
+    try:
+        return path.stat().st_size > 0
+    except (OSError, ValueError):
+        return False
+
+
 
 
 

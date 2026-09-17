@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from paths import primary_repo_root
 from paths import project_dir
+from paths import seat_has_journal
 import claims
 import instance
 import evidence
@@ -381,6 +382,13 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                                          else ""),
                         handoff_unknown=(handoff.verdict == HANDOFF_UNKNOWN),
                         handoff_written=handoff.written,
+                        # One `stat`, and only to decide whether a clause is
+                        # worth spending. The kernel never reads the journal:
+                        # its contents are a seat's own claims, they are vetted
+                        # where they are rendered, and a supervisor that read
+                        # them would be putting unattributed agent prose on the
+                        # launch path -- which is the whole of backlog 0013.
+                        has_journal=seat_has_journal(workdir, instance.id),
                         assignment=assignment,
                         code_state=_launch_code_state(),
                         mandate=session_mandate,
