@@ -51,12 +51,16 @@ One thing it cannot isolate, because it is inherent to the checkout: `pip instal
 environment. Registration is not activation — they stay inert until an
 `extensions.json` enables them — but `operator-fleet` will list them at discovery.
 
-> **Known defect, unrelated to this skill.** `config.py` evaluates
+> **Why the ordering matters.** `config.py` evaluates
 > `OPERATOR_HOME = operator_home()` at import time, and `LOG_FILE` / `RESTART_DIR`
 > derive from it. In-process code that sets the environment variable *after*
-> importing the kernel therefore writes to the real `~/.operator` — which is why
-> `python -m pytest -q` appends to your live `operator.log`. This skill escapes it
-> only by setting the variable before the child process starts.
+> importing the kernel therefore addresses the real `~/.operator`. This skill
+> escapes that by setting the variable before the child process starts; the unit
+> suite escapes it through the `_no_real_operator_home` guard in
+> `tests/conftest.py`, which redirects all three names for every test. Before that
+> guard existed, one run of one passing test appended 1,773 bytes to the live
+> `operator.log`. The import-time capture itself is unchanged, so anything new
+> that resolves the home in-process still has to do it in that order.
 
 ## Launch
 
