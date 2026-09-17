@@ -390,6 +390,64 @@ def _no_process_wide_leaks():
                 pass
 
 
+@pytest.fixture(autouse=True)
+def _no_real_operator_home():
+    """Point every spelling of the operator home at a sandbox, for every test.
+
+    `config.py` resolves `OPERATOR_HOME = operator_home()` at import, and
+    derives `RESTART_DIR` and `LOG_FILE` from it there. A module-level constant
+    does not follow `COPILOT_OPERATOR_HOME` being set afterwards, so a test that
+    relocates only some of the three writes the rest into the developer's real
+    `~/.operator`. `probes.log` reads two of them, which makes the leak silent
+    in the worst way: the test passes, and the evidence lands in the log the
+    developer actually reads.
+
+    That is measured, not hypothetical.
+    `test_the_loop_still_reports_a_missing_handoff_as_crash_recovery` patched
+    `OPERATOR_HOME` and `RESTART_DIR` and not `LOG_FILE`, and one run of that
+    single test appended 1,773 bytes to the real operator log.
+
+    Redirecting all three here rather than fixing that one test is the point. A
+    guard every test has to remember is a guard that is one new test away from
+    being forgotten, and this is the same hazard the multiplexer guard above
+    exists for -- a unit test reaching the state the developer is using. A test
+    that relocates these itself still wins: its patch is applied after this one
+    and undone before it.
+
+    Saved and restored by hand, depending on no ordinary fixture, for the reason
+    `_no_real_multiplexer` gives at length. Requesting `monkeypatch` here would
+    pull its finalisation inside this fixture's, and a test's own
+    `monkeypatch.setattr(op, "LOG_FILE", ...)` has to be undone *before* this
+    restores the original.
+    """
+    import shutil
+    import tempfile
+
+    names = ("OPERATOR_HOME", "RESTART_DIR", "LOG_FILE")
+    saved = {name: getattr(op, name) for name in names}
+    had_env = "COPILOT_OPERATOR_HOME" in os.environ
+    saved_env = os.environ.get("COPILOT_OPERATOR_HOME")
+
+    sandbox = Path(tempfile.mkdtemp(prefix="op-test-home-"))
+    op.OPERATOR_HOME = sandbox
+    op.RESTART_DIR = sandbox / "restart"
+    op.LOG_FILE = sandbox / "operator.log"
+    # Exported as well as bound: `operator_extensions.activation` and both CLIs
+    # re-resolve the home from the environment rather than importing the
+    # kernel's constant, and a spawned worker inherits only this.
+    os.environ["COPILOT_OPERATOR_HOME"] = str(sandbox)
+    try:
+        yield sandbox
+    finally:
+        if had_env:
+            os.environ["COPILOT_OPERATOR_HOME"] = saved_env
+        else:
+            os.environ.pop("COPILOT_OPERATOR_HOME", None)
+        for name, value in saved.items():
+            setattr(op, name, value)
+        shutil.rmtree(sandbox, ignore_errors=True)
+
+
 @pytest.fixture
 def state_dir(tmp_path: Path) -> Path:
     d = tmp_path / "restart"
