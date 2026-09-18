@@ -85,14 +85,15 @@ No extension required for any of these.
 
 ## Coverage gaps
 
-Named here rather than silently missing, so a later run can close them.
+One left, and it is structural rather than unfinished.
 
-- **Two extensions with no recipe**, listed at the end of
-  [extensions.md](./extensions.md). `worktree-janitor` needs real merged git
-  worktrees; `worktree-guard` is a kernel hook and cannot be reached through
-  `operator-fleet` at all.
+- **`worktree-guard`** implements only `admit_launch`, a **kernel** hook on the
+  seat launch path. `operator-fleet` lists it at discovery and never calls it, so
+  no recipe written against these two commands can reach it. Closing it needs the
+  supervisor launch path, which this skill does not drive.
 
-Everything else the map names is now driven. Closed by live proof, recorded here
-so a later run knows it was checked rather than assumed: the 4 MB queue refusal,
-the 4 MB journal refusal, the 600-character entry truncation, the `fleet.stop`
-marker, and following a ledger rotation without losing records.
+Everything else the map names is driven. Recorded here so a later run knows it
+was checked rather than assumed: the 4 MB queue refusal, the 4 MB journal
+refusal, the 600-character entry truncation, the `fleet.stop` marker, following a
+ledger rotation without losing records, and `worktree-janitor` proposing a merged
+worktree while protecting a dirty one.

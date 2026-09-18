@@ -27,6 +27,7 @@ Verifying a new extension means writing a recipe here, not changing the helper.
 - `act-shape` an entry of the wrong shape means off.
 - `act-scope` activation is per-home, so enabling here cannot affect other repos.
 - `act-state` an enabled extension keeps cumulative memory in `extensions/<name>.json`.
+- `act-janitor` a second extension, driven from the filesystem rather than the ledger.
 
 ## How to get to it (user POV)
 
@@ -84,6 +85,38 @@ needs a different `seed-ledger` payload and its own section here.
 - **Proof.** `artifacts/transcript.md` carries the inert round and the enabled
   round with identical commands and different outcomes.
 
+### A second extension: `worktree-janitor`
+
+It implements `propose_work` only, needs no ledger records at all, and reads the
+filesystem instead — so it exercises a different half of the contract than
+`seat-watch` does. It needs a real repository with a merged worktree, which is
+cheap to build:
+
+```
+git init -b main -q <tmp>/proj
+git -C <tmp>/proj commit -q -m base          # after adding a file
+git -C <tmp>/proj worktree add -q -b feature <tmp>/wt
+git -C <tmp>/wt commit -q -m "feature work"  # after adding a file
+git -C <tmp>/proj merge -q --no-ff feature -m "merge feature"
+```
+
+- **Enable it against that root.** Run
+  `control_operator.py enable --run <run> --extension worktree-janitor --setting "roots=[\"<tmp>/proj\"]"`.
+  Forward slashes, because the value is parsed as JSON.
+- **Prove it proposes a retired worktree.** Run one round, then `proposals`. The
+  queue holds a `worktree-janitor` record reading
+  `proj: worktree wt is merged into main`, whose detail names the branch, states
+  that git reports no uncommitted changes, and warns that ignored files are
+  invisible both to the check and to the removal.
+- **Prove it protects uncommitted work.** Write an untracked file into `<tmp>/wt`
+  and run the same thing in a **fresh** run: `no proposals waiting`. Delete the
+  file, run a third fresh run: the proposal is back. The only thing that changed
+  was whether the worktree was clean, which is what makes the pair a proof rather
+  than a coincidence.
+- **It proposes; it never removes.** `gitfacts` contains no mutating git verb and
+  `tests/test_extension_packaging.py` asserts their absence over the parsed
+  source. A drive that finds a worktree actually deleted is the finding.
+
 ## Gotchas
 
 - **Inert and broken look identical from the outside.** Both produce an empty
@@ -109,9 +142,8 @@ needs a different `seed-ledger` payload and its own section here.
 
 ## Extensions with no recipe yet
 
-- **`worktree-janitor`** (`propose_work`) needs real git worktrees merged into
-  `main` before it has anything to say.
 - **`worktree-guard`** (`admit_launch`) is a **kernel** hook on the seat launch
   path. The fleet host lists it at discovery and never calls it — the fleet hooks
   are `on_fact`, `on_tick` and `propose_work`, and the two sets are disjoint. It
-  cannot be proven through `operator-fleet` at all.
+  cannot be proven through `operator-fleet` at all; reaching it needs the
+  supervisor launch path, which this skill does not drive.
