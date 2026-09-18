@@ -27,9 +27,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # tests/test_commit_attribution.py walks every commit from RULE_FROM.
-          # Under a shallow clone it would find nothing to check and pass by
-          # having been given nothing, which is the failure mode a guard has.
+          # tests/test_commit_attribution.py walks every commit from RULE_FROM,
+          # which a shallow clone does not have. Measured rather than assumed:
+          # `git clone --depth 1` yields 1 commit, the boundary object is
+          # absent, and that file reports 4 failed / 23 passed. So this is here
+          # to make the job meaningful, not to stop it passing vacuously. The
+          # guards do refuse history they were never given, which is what
+          # `test_there_is_something_left_to_check_after_the_exemption` is for.
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
