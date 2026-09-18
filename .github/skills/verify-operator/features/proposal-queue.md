@@ -18,6 +18,7 @@ Only the *producing* of a proposal needs an extension, and that is
 - `queue-archive` accumulates every drained batch in `proposals.handled.jsonl`.
 - `queue-recover` adopts a batch abandoned by a crashed drain.
 - `queue-corrupt` reports an unparseable line instead of dropping it.
+- `queue-full` refuses appends past 4 MB rather than rotating, and says so.
 - `queue-no-approval` archives without approving; a drain cannot mint work.
 
 ## How to get to it (user POV)
@@ -82,6 +83,16 @@ Preconditions:
   `recovered an abandoned batch: proposals.draining.<pid>.<ns>.jsonl` and the
   archive receives **both** — `archived 2 proposal(s)`. The orphan was not
   stranded and the live queue was not lost to it.
+- **Prove the queue refuses rather than rotates when full.** Pad the queue past
+  its limit with
+  `control_operator.py seed-queue --run <run> --extension filler --pad-to-bytes 4194304`,
+  enable an extension, seed enough ledger records to make it propose, and run a
+  round. The queue is **byte-identical** afterwards — the proposal was refused,
+  not appended and not rotated away — and `fleet-failures.jsonl` gains a record
+  naming the extension, the hook and the reason:
+  `"error": "QueueUnwritable"`. That is the whole point: rotation would delete
+  the oldest proposals, which nobody has read yet, so a full queue says so
+  instead and the refusal is reported rather than silent.
 - **Proof.** `artifacts/transcript.md` carries each command with its exit code;
   `artifacts/before-drain/` and `artifacts/after-drain/` carry the queue and the
   archive on either side, which together are the proof.

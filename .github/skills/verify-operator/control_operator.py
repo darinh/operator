@@ -322,7 +322,46 @@ def cmd_seed_queue(args) -> int:
             record.setdefault("ts", _utcnow())
             record.setdefault("extension", args.extension)
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    if args.pad_to_bytes:
+        # `FleetHost._append_proposal` compares `st_size` against
+        # MAX_QUEUE_BYTES, so bulk is all that is needed to reach the refusal.
+        # Padding is one long record rather than many, to keep the file cheap
+        # to write and to leave the record count readable.
+        while target.stat().st_size < args.pad_to_bytes:
+            short = args.pad_to_bytes - target.stat().st_size
+            filler = {"ts": _utcnow(), "extension": args.extension,
+                      "text": "x" * max(1, min(short, 1 << 20))}
+            with open(target, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(filler, ensure_ascii=False) + "\n")
+        print(f"padded {target.name} to {target.stat().st_size}b")
+
     print(f"seeded {len(records)} proposal(s) into {target}")
+    return 0
+
+
+def cmd_rotate_ledger(args) -> int:
+    """Rotate `trace.jsonl` by rename, exactly as `evidence._rotate_if_needed` does.
+
+    Fixture setup. The real rotation fires at 8 MB, which is a slow and clumsy
+    thing to reach through a CLI, and the behaviour actually under test is the
+    *tail's*: it must follow the records into `trace.jsonl.1` and then come back
+    to the new file, losing and duplicating nothing. Renaming is the whole of
+    what the appender does, so a rename here reaches the same code path.
+
+    The rename is why the cursor cannot be keyed on size: the replacement file
+    can be longer than the offset, and a size check would see nothing wrong.
+    """
+    run = Path(args.run).expanduser().resolve()
+    trace = _home(run) / "trace.jsonl"
+    if not trace.exists():
+        raise SystemExit(f"nothing to rotate: {trace} does not exist")
+    rotated = trace.with_name("trace.jsonl.1")
+    if rotated.exists():
+        rotated.unlink()
+    size = trace.stat().st_size
+    os.replace(trace, rotated)
+    print(f"rotated {trace.name} ({size}b) -> {rotated.name}")
     return 0
 
 
@@ -423,7 +462,15 @@ def build_parser() -> argparse.ArgumentParser:
     queue.add_argument("--abandoned", action="store_true",
                        help="write it as a proposals.draining.* batch, as a "
                             "crashed drain would leave behind")
+    queue.add_argument("--pad-to-bytes", type=int,
+                       help="pad the queue to at least N bytes, to reach the "
+                            "size at which the host refuses to append")
     queue.set_defaults(func=cmd_seed_queue)
+
+    rotate = sub.add_parser("rotate-ledger",
+                            help="rename trace.jsonl to trace.jsonl.1 (fixture)")
+    rotate.add_argument("--run", required=True)
+    rotate.set_defaults(func=cmd_rotate_ledger)
 
     fleet = sub.add_parser("fleet", help="run operator-fleet against this run")
     fleet.add_argument("--run", required=True)
