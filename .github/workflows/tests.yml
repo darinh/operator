@@ -1,0 +1,61 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # Not the platform default. On Windows runners a multi-line `run:` goes to
+    # pwsh, whose wrapper checks only the last command's exit code, so an early
+    # failure in a multi-line step passes silently. bash is `-eo pipefail` on
+    # both runners, which is the whole point of having the step.
+    shell: bash
+
+jobs:
+  suite:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # tests/test_commit_attribution.py walks every commit from RULE_FROM.
+          # Under a shallow clone it would find nothing to check and pass by
+          # having been given nothing, which is the failure mode a guard has.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - run: pip install -e ".[dev]"
+
+      - name: Unit suite
+        run: python -m pytest -q
+
+      - name: Verification harness
+        # Deliberately outside the repository's testpaths so it never enters the
+        # kernel suite or its line budgets. Which also means nothing ran it.
+        run: python -m pytest .github/skills/verify-operator/test_control_operator.py -q
+
+      - name: Console scripts answer for themselves
+        # The suite substitutes the multiplexer, the home and the catalog, so it
+        # can be green while the installed commands are broken. This is the
+        # cheapest check that entry-point discovery still resolves.
+        run: |
+          operator-fleet --help > /dev/null
+          operator-seat --help > /dev/null
+
+      - name: A disposable home comes up, passes doctor, and goes away
+        run: |
+          python .github/skills/verify-operator/control_operator.py up --run-id ci
+          python .github/skills/verify-operator/control_operator.py doctor --run .verify-operator/ci
+          python .github/skills/verify-operator/control_operator.py down --run .verify-operator/ci
