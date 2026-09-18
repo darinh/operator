@@ -142,8 +142,6 @@ git -C <tmp>/proj merge -q --no-ff feature -m "merge feature"
 
 ## Extensions with no recipe yet
 
-- **`worktree-guard`** (`admit_launch`) is a **kernel** hook on the seat launch
-  path. The fleet host lists it at discovery and never calls it — the fleet hooks
-  are `on_fact`, `on_tick` and `propose_work`, and the two sets are disjoint. It
-  cannot be proven through `operator-fleet` at all; reaching it needs the
-  supervisor launch path, which this skill does not drive.
+None. `worktree-guard` was the last, and it now has one in
+[launch-admission.md](./launch-admission.md) — not through `operator-fleet`,
+which never calls it, but through the kernel gate that does.

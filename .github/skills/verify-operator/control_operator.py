@@ -437,6 +437,47 @@ def cmd_seat(args) -> int:
     return _invoke(run, args.label or "seat " + " ".join(args.rest), argv, cwd)
 
 
+def cmd_gate(args) -> int:
+    """Ask the kernel's launch gate whether a seat may start, and report.
+
+    The one hook the two console scripts cannot reach. `admit_launch` is a
+    *kernel* hook on the seat launch path, and `operator-fleet` lists it at
+    discovery without ever calling it -- the fleet hooks and the kernel hooks
+    are disjoint sets. That made it the last unverifiable thing in the map.
+
+    It is reachable without a supervisor, though: `extension_seam.launch_gate`
+    is the factory the supervisor itself uses, and `admits()` takes plain
+    values. So this drives the real gate, the real discovery and the real
+    extension, and only the loop around them is absent.
+
+    Run in a child process, like every other verb here, so the kernel resolves
+    `OPERATOR_HOME` from the environment at import and this run's home is the
+    one it sees.
+    """
+    run = Path(args.run).expanduser().resolve()
+    # The checkout recorded at `up`, not the current directory: every other
+    # verb works from anywhere, and locating the kernel by `Path.cwd()` made
+    # this one silently depend on where it was called from. A test that
+    # chdir'd elsewhere failed on correct code, which is how it was found.
+    kernel = Path(_meta(run)["repo"]) / "operator_kernel"
+    script = (
+        "import os, sys\n"
+        "sys.path.insert(0, sys.argv[1])\n"
+        "import extension_seam\n"
+        "gate = extension_seam.launch_gate(home=sys.argv[2])\n"
+        "a = gate.admits(instance=sys.argv[3], session=int(sys.argv[4]),\n"
+        "                workdir=sys.argv[5])\n"
+        "print('admit:', a.admit)\n"
+        "for name, reason in a.refusals:\n"
+        "    print(f'refused by {name}: {reason}')\n"
+        "for name, error in a.blind:\n"
+        "    print(f'blind {name}: {error}')\n"
+    )
+    argv = [sys.executable, "-c", script, str(kernel), str(_home(run)),
+            args.instance, str(args.session), str(Path(args.workdir).resolve())]
+    return _invoke(run, args.label or f"gate {args.instance}", argv, Path.cwd())
+
+
 def cmd_evidence(args) -> int:
     """Copy the home's state files into the artifacts directory under a label."""
     run = Path(args.run).expanduser().resolve()
@@ -533,6 +574,15 @@ def build_parser() -> argparse.ArgumentParser:
     journal.add_argument("--seat", required=True)
     journal.add_argument("--pad-to-bytes", type=int, required=True)
     journal.set_defaults(func=cmd_seed_journal)
+
+    gate = sub.add_parser("gate", help="ask the kernel launch gate about a seat")
+    gate.add_argument("--run", required=True)
+    gate.add_argument("--label")
+    gate.add_argument("--instance", default="verify-seat")
+    gate.add_argument("--session", type=int, default=1)
+    gate.add_argument("--workdir", required=True,
+                      help="the repository the seat would work in")
+    gate.set_defaults(func=cmd_gate)
 
     fleet = sub.add_parser("fleet", help="run operator-fleet against this run")
     fleet.add_argument("--run", required=True)

@@ -429,3 +429,85 @@ def test_addressing_a_run_that_was_never_created_is_refused(tmp_path):
     with pytest.raises(SystemExit):
         control._meta(tmp_path / "nope")
 
+
+# ── the launch gate ──────────────────────────────────────────────
+
+
+def test_the_gate_runs_in_a_child_process(monkeypatch, run, tmp_path):
+    """In-process would resolve OPERATOR_HOME at import, before the redirect.
+
+    The kernel captures the home when `config` is imported, so a gate call that
+    ran here would address whatever home this process already resolved -- which
+    is the leak the suite's own conftest guard exists to stop.
+    """
+    seen = {}
+
+    def fake(run_, label, argv, cwd):
+        seen["argv"] = argv
+        return 0
+
+    monkeypatch.setattr(control, "_invoke", fake)
+    control.main(["gate", "--run", str(run), "--workdir", str(tmp_path)])
+    assert seen["argv"][0] == sys.executable
+    assert seen["argv"][1] == "-c"
+
+
+def test_the_gate_child_is_given_this_runs_home(monkeypatch, run, tmp_path):
+    seen = {}
+
+    def fake(run_, label, argv, cwd):
+        seen["argv"] = argv
+        return 0
+
+    monkeypatch.setattr(control, "_invoke", fake)
+    control.main(["gate", "--run", str(run), "--workdir", str(tmp_path)])
+    assert str(run / "home") in seen["argv"]
+
+
+def test_the_gate_is_pointed_at_the_kernel_directory(monkeypatch, run, tmp_path):
+    """The kernel's modules import each other flatly, so the directory is the path.
+
+    Located from the checkout recorded at `up`, never from `Path.cwd()`: `gate`
+    has to work from anywhere, like every other verb.
+    """
+    seen = {}
+
+    def fake(run_, label, argv, cwd):
+        seen["argv"] = argv
+        return 0
+
+    checkout = control.repo_root(Path(__file__).resolve().parent)
+    meta = json.loads((run / "run.json").read_text("utf-8"))
+    meta["repo"] = str(checkout)
+    (run / "run.json").write_text(json.dumps(meta), encoding="utf-8")
+
+    monkeypatch.setattr(control, "_invoke", fake)
+    monkeypatch.chdir(tmp_path)
+    control.main(["gate", "--run", str(run), "--workdir", str(tmp_path)])
+    kernel = [a for a in seen["argv"] if a.endswith("operator_kernel")]
+    assert kernel, f"no kernel directory in {seen['argv']}"
+    assert (Path(kernel[0]) / "extension_seam.py").is_file()
+
+
+def test_the_gate_resolves_the_workdir_it_is_given(monkeypatch, run, tmp_path):
+    """A relative path must be resolved here, against the caller's cwd.
+
+    The child runs from wherever `_invoke` puts it, so a relative `--workdir`
+    that survived unresolved would name a different directory there -- and the
+    gate would report on a repository nobody asked about, or on none at all.
+    Asserted with a genuinely relative path: an absolute one makes `resolve()`
+    a no-op and the test passes whether the call is there or not.
+    """
+    seen = {}
+
+    def fake(run_, label, argv, cwd):
+        seen["argv"] = argv
+        return 0
+
+    monkeypatch.setattr(control, "_invoke", fake)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "somewhere").mkdir()
+    control.main(["gate", "--run", str(run), "--workdir", "somewhere"])
+    assert "somewhere" not in seen["argv"], "the relative path was passed through"
+    assert str((tmp_path / "somewhere").resolve()) in seen["argv"]
+

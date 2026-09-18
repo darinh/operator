@@ -79,21 +79,24 @@ No extension required for any of these.
 
 ## Optional layer
 
-- [Extensions](./extensions.md) — the activation gate, plus `seat-watch` as a
-  worked example of verifying one extension end to end. Read this only when
-  changing an extension or the gate itself.
+- [Extensions](./extensions.md) — the activation gate, plus `seat-watch` and
+  `worktree-janitor` as worked examples of verifying an extension end to end.
+  Read this only when changing an extension or the gate itself.
+- [Launch admission](./launch-admission.md) — the **kernel** hook
+  `admit_launch`, where an extension's refusal holds a seat closed. Unreachable
+  through the two console scripts; driven through `control_operator.py gate`.
 
 ## Coverage gaps
 
-One left, and it is structural rather than unfinished.
+None outstanding. Every feature the map names is driven against real code.
 
-- **`worktree-guard`** implements only `admit_launch`, a **kernel** hook on the
-  seat launch path. `operator-fleet` lists it at discovery and never calls it, so
-  no recipe written against these two commands can reach it. Closing it needs the
-  supervisor launch path, which this skill does not drive.
+Recorded here so a later run knows these were checked rather than assumed: the
+4 MB queue refusal, the 4 MB journal refusal, the 600-character entry
+truncation, the `fleet.stop` marker, following a ledger rotation without losing
+records, `worktree-janitor` proposing a merged worktree while protecting a dirty
+one, and a `worktree-guard` refusal holding a launch and then lifting.
 
-Everything else the map names is driven. Recorded here so a later run knows it
-was checked rather than assumed: the 4 MB queue refusal, the 4 MB journal
-refusal, the 600-character entry truncation, the `fleet.stop` marker, following a
-ledger rotation without losing records, and `worktree-janitor` proposing a merged
-worktree while protecting a dirty one.
+The one thing this skill still does not drive is the supervisor loop itself —
+`run_loop_mode`, its relaunch behaviour and its breakers. `gate` reaches the
+admission hook the loop calls, but not the loop. That needs a multiplexer and a
+stub agent, which is a harness of a different kind rather than a missing recipe.
