@@ -125,6 +125,7 @@ Nothing in this table names an extension.
 | Seed an orphaned batch (fixture) | `control_operator.py seed-queue --run <run> --extension crashed --abandoned` |
 | Seed a ledger record (fixture) | `control_operator.py seed-ledger --run <run> --record '{"event":"...","instance":"..."}'` |
 | Enable any extension | `control_operator.py enable --run <run> --extension <name> --setting key=value` |
+| Ask the launch gate | `control_operator.py gate --run <run> --workdir <repo>` |
 
 Everything after `--` is passed to the console script untouched, so the flags are
 the ones a user types. Two things the helper handles that a hand-rolled call gets
@@ -204,6 +205,7 @@ knowledge. `python control_operator.py --help` lists every verb; each verb takes
 | `seed-queue` | append proposals to `proposals.jsonl`; `--abandoned` leaves an orphaned `proposals.draining.*` batch, `--pad-to-bytes` fills it to the refusal limit (fixture) |
 | `rotate-ledger` | rename `trace.jsonl` to `trace.jsonl.1`, as the appender does at 8 MB (fixture) |
 | `seed-journal` | pad a seat's journal toward its 4 MB refusal limit (fixture) |
+| `gate` | ask the kernel launch gate whether a seat may start in a repository |
 | `enable` | turn any extension on by name (fixture) |
 | `evidence` | snapshot home state under a label |
 | `down` | remove the instance, keep the artifacts |
