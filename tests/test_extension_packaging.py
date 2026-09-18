@@ -104,16 +104,16 @@ def declared_entry_points() -> "dict[str, str]":
     -- and a test that quietly checks nothing when the package is absent is
     worse than no test. `test_the_entry_point_table_was_actually_found` is what
     stops this returning an empty dict and every case below passing vacuously.
+
+    Hand-parsed rather than read with `tomllib`, for the reason
+    `test_fleet_boundary._declared_list` already gives: `tomllib` arrived in
+    3.11 and this repository claims `>=3.10`. A `try: import tomllib / except:
+    fall back` looks like it honours that and does not. The name is still an
+    import statement, so on 3.10 the boundary scan reads it as the suite
+    reaching outside the repository, and the fallback branch it guards was the
+    one never exercised on the machine anyone develops on.
     """
     text = (REPO / "pyproject.toml").read_text(encoding="utf-8")
-    try:
-        import tomllib
-        table = tomllib.loads(text).get("project", {}).get(
-            "entry-points", {}).get(extensions.ENTRY_POINT_GROUP, {})
-        if table:
-            return dict(table)
-    except ImportError:
-        pass
     header = f'[project.entry-points."{extensions.ENTRY_POINT_GROUP}"]'
     found: dict[str, str] = {}
     inside = False

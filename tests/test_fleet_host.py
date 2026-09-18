@@ -174,14 +174,25 @@ def test_a_truncated_ledger_is_a_counted_gap_and_not_a_replay(home, ledger):
 def test_a_second_rotation_between_polls_is_a_counted_gap(home, ledger):
     """The rotated copy is no longer the file this tail was following, so its
     contents cannot be read from this tail's offset. Counted, because a gap in
-    the evidence is itself evidence."""
+    the evidence is itself evidence.
+
+    The decoy is created *before* the ledger it displaces is removed, and that
+    ordering is the test rather than tidiness. Unlinking first frees the inode
+    for immediate reuse on Linux, so the decoy came back wearing the identity
+    of the very file this tail was following, the rotation branch found a
+    match, and `gaps` read zero. It passed on Windows only because NTFS was
+    slower to hand the same file id back -- a green suite resting on a
+    filesystem's allocation order.
+    """
     reader = tail(home)
     for n in range(50):
         append(ledger, event=f"old-{n}")
     assert len(reader.read()) == 50
     rotated = ledger.with_suffix(ledger.suffix + ".1")
-    ledger.unlink()
     rotated.write_text('{"event": "someone elses history"}\n', encoding="utf-8")
+    assert rotated.stat().st_ino != ledger.stat().st_ino, (
+        "the decoy has to be a different file, or this proves nothing")
+    ledger.unlink()
     append(ledger, event="new")
     assert [r["event"] for r in reader.read()] == ["new"]
     assert reader.gaps == 1

@@ -570,16 +570,38 @@ def test_a_deadline_survives_a_sandbox_that_cannot_be_removed(extdir):
         "the cleanup overwrote the verdict")
 
 
+def _too_deep_to_serialise() -> list:
+    """Nesting this interpreter's `json.dumps` gives up on.
+
+    The depth is found rather than stated. A hardcoded 3000 was deep enough on
+    the machine this was written on and not on CPython 3.12, where `json.dumps`
+    returned a string, no failure was recorded, and the test reported success
+    while exercising nothing -- which is the failure it exists to catch, in
+    itself.
+    """
+    depth = sys.getrecursionlimit()
+    for _ in range(8):
+        nested: list = []
+        cursor = nested
+        for _ in range(depth):
+            deeper: list = []
+            cursor.append(deeper)
+            cursor = deeper
+        try:
+            json.dumps(nested)
+        except RecursionError:
+            return nested
+        depth *= 2
+    raise AssertionError(
+        f"no nesting up to {depth} made json.dumps give up, so the case this "
+        "test names cannot be set up on this interpreter")
+
+
 def test_arguments_the_kernel_cannot_serialise_do_not_raise():
     """`json.dumps` raises `RecursionError` on deep nesting, which is neither a
     `TypeError` nor a `ValueError` -- and this runs before any per-extension
     backstop exists, so it went straight out of `call` into the supervisor."""
-    nested: list = []
-    cursor = nested
-    for _ in range(3000):
-        deeper: list = []
-        cursor.append(deeper)
-        cursor = deeper
+    nested = _too_deep_to_serialise()
     claims, failures = extensions.Host([]).call("detect_repo", arg=nested)
     assert claims == []
     assert [(f.extension, f.error) for f in failures] == [
