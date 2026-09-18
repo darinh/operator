@@ -75,8 +75,12 @@ def commits_under_the_rule(repo: Path = REPO,
                            since: str = RULE_FROM) -> "list[Commit]":
     """Commits at or after `RULE_FROM`, oldest first.
 
-    `--ancestry-path` rather than a date range: dates are attacker- and
-    rebase-controlled, and a commit can carry any timestamp it likes.
+    A reachability range rather than a date range: dates are attacker- and
+    rebase-controlled, and a commit can carry any timestamp it likes. It is
+    deliberately *not* `--ancestry-path`. That flag keeps only commits on a
+    path from the boundary to `HEAD`, which drops a side branch merged in
+    later -- so a human-authored commit could be merged in and never appear
+    here at all. Set subtraction by reachability has no such gap.
     """
     raw = _git("log", "--format=%H%x00%an%x00%ae%x00%P%x00%B%x00%x00",
                f"{since}..HEAD", repo=repo)
@@ -237,12 +241,41 @@ def test_an_empty_commit_is_not_exempt_because_it_is_not_a_merge(history):
 
 def test_a_squashed_branch_is_still_an_authorship_claim(history):
     """The forge's squash button makes a normal commit carrying all the work."""
-    history.commit("base", author=AGENT, text="one\n")
+    base = history.commit("base", author=AGENT, text="one\n")
     squashed = history.commit("squashed", author=PERSON, text="one\ntwo\n")
 
     assert not records_only_a_merge(history.at(squashed), repo=history.root)
+    assert own_content(squashed, repo=history.root) != "", (
+        "it has to be caught for carrying content, not merely for having one "
+        "parent, or this passes against a predicate that ignores content")
+    claims = [c.sha for c in commits_under_the_rule(repo=history.root,
+                                                   since=base)]
+    assert squashed in claims
     assert not seat.is_agent_identity(history.at(squashed).name,
                                       history.at(squashed).email)
+
+
+def test_an_octopus_merge_that_resolved_nothing_is_still_bookkeeping(history):
+    """Three parents, not two. The predicate says `>= 2` and means it.
+
+    A reviewer mutated `>= 2` to `== 2` and nothing failed, because no octopus
+    exists in this repository's history to notice. `git merge` makes them
+    without complaint, so the absence was a gap in the tests rather than a
+    property of the world.
+    """
+    history.commit("base", author=AGENT, text="one\n")
+    for side in ("a", "b"):
+        history.git("checkout", "-q", "-b", side, "main")
+        history.commit(f"side {side}", author=AGENT, text=f"{side}\n",
+                       file=f"{side}.txt")
+    history.git("checkout", "-q", "main")
+    history.git("merge", "--no-ff", "--no-commit", "a", "b")
+    history.git("commit", "-q", "--no-edit", f"--author={PERSON}")
+    octopus = history.head()
+
+    assert len(history.at(octopus).parents) == 3
+    assert own_content(octopus, repo=history.root) == ""
+    assert records_only_a_merge(history.at(octopus), repo=history.root)
 
 
 def test_the_exemption_is_load_bearing_on_this_repository():
@@ -283,6 +316,23 @@ def test_the_rule_boundary_names_a_commit_that_exists():
 
 def test_there_is_history_under_the_rule():
     assert len(commits_under_the_rule()) >= 1
+
+
+def test_there_is_something_left_to_check_after_the_exemption():
+    """The exemption must not be able to empty the gate it filters.
+
+    `commits_under_the_rule` has been guarded non-empty since it was written,
+    but the two rule tests below now read through a filter, and a filter that
+    returns nothing makes both of them pass while examining no commit at all.
+    A reviewer killed every mutant in the predicate and then made
+    `commits_making_an_authorship_claim` return `[]`; the whole file stayed
+    green. This is that hole.
+    """
+    claims = commits_making_an_authorship_claim()
+    assert len(claims) >= 1, (
+        "every commit under the rule was filtered out as bookkeeping, so the "
+        "two tests below are checking nothing"
+    )
 
 
 def test_no_commit_under_the_rule_is_authored_by_a_human_identity():
