@@ -312,8 +312,17 @@ def cmd_seed_queue(args) -> int:
     home = _home(run)
     if args.abandoned:
         # A pid and a nanosecond stamp, the same shape `_claim` writes, so the
-        # adopting drain treats it as a genuine orphan rather than a special case.
-        target = home / f"proposals.draining.{os.getpid()}.{time.time_ns()}.jsonl"
+        # adopting drain treats it as a genuine orphan rather than a special
+        # case. The uniqueness loop is not decoration: `time.time_ns()` is
+        # coarse enough on Windows that two calls in the same millisecond
+        # return the same value, and two orphans then land in one file, which
+        # is the opposite of the case this is meant to set up. `_claim` itself
+        # is safe without it because it runs once per drain process.
+        while True:
+            target = home / (f"proposals.draining.{os.getpid()}."
+                             f"{time.time_ns()}.jsonl")
+            if not target.exists():
+                break
     else:
         target = home / "proposals.jsonl"
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -362,6 +371,51 @@ def cmd_rotate_ledger(args) -> int:
     size = trace.stat().st_size
     os.replace(trace, rotated)
     print(f"rotated {trace.name} ({size}b) -> {rotated.name}")
+    return 0
+
+
+def cmd_seed_journal(args) -> int:
+    """Pad a seat's journal with well-formed entries, to reach the refusal size.
+
+    Fixture setup. `journal.remember` compares the *resulting* size against
+    MAX_JOURNAL_BYTES, so the only way to see it refuse is to arrive with a
+    journal already near the limit — and getting there honestly means tens of
+    thousands of `operator-seat remember` calls.
+
+    The entries written are the shape `remember` writes, so `recall` reads them
+    rather than skipping them as unparseable: a journal padded with junk would
+    prove a refusal caused by the wrong thing.
+    """
+    run = Path(args.run).expanduser().resolve()
+    meta = _meta(run)
+    path = (_home(run) / "projects" / meta["guid"] / "journal"
+            / f"{args.seat}.jsonl")
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    written = 0
+    # The size is counted rather than stat'd: the handle is buffered, so
+    # `stat()` lags the writes and the loop overshoots by whatever sits in the
+    # buffer. `newline=""` then stops Windows translating each "\n" into
+    # "\r\n", which otherwise adds one byte per line that the count does not
+    # see -- measured at 5,751 bytes past a 4,193,000 target, enough to carry a
+    # journal over a limit the pad was meant to stop just short of.
+    size = path.stat().st_size if path.exists() else 0
+    with open(path, "a", encoding="utf-8", newline="") as fh:
+        while True:
+            record = {
+                "ts": _utcnow(), "id": f"{written:08x}", "instance": args.seat,
+                "session": 0, "kind": "gotcha",
+                "text": "padding written by verify-operator " + "x" * 540,
+                "verified": False, "supersedes": [],
+            }
+            line = json.dumps(record, ensure_ascii=False) + "\n"
+            encoded = len(line.encode("utf-8"))
+            if size + encoded > args.pad_to_bytes:
+                break
+            fh.write(line)
+            size += encoded
+            written += 1
+    print(f"padded {path.name} to {path.stat().st_size}b with {written} entries")
     return 0
 
 
@@ -471,6 +525,14 @@ def build_parser() -> argparse.ArgumentParser:
                             help="rename trace.jsonl to trace.jsonl.1 (fixture)")
     rotate.add_argument("--run", required=True)
     rotate.set_defaults(func=cmd_rotate_ledger)
+
+    journal = sub.add_parser("seed-journal",
+                             help="pad a seat's journal toward its size cap "
+                                  "(fixture)")
+    journal.add_argument("--run", required=True)
+    journal.add_argument("--seat", required=True)
+    journal.add_argument("--pad-to-bytes", type=int, required=True)
+    journal.set_defaults(func=cmd_seed_journal)
 
     fleet = sub.add_parser("fleet", help="run operator-fleet against this run")
     fleet.add_argument("--run", required=True)

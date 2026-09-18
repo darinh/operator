@@ -249,6 +249,55 @@ def test_rotating_nothing_is_refused_rather_than_silently_succeeding(run):
         control.cmd_rotate_ledger(SimpleNamespace(run=str(run)))
 
 
+# ── padding a journal ────────────────────────────────────────────
+
+
+def test_journal_padding_does_not_overshoot_its_target(run):
+    """An imprecise pad cannot isolate a boundary, which is its whole purpose.
+
+    Two things made it overshoot: a buffered handle, so `stat()` lagged the
+    writes, and Windows translating each "\\n" into "\\r\\n", one byte per line
+    the count never saw.
+    """
+    target = 300_000
+    control.cmd_seed_journal(SimpleNamespace(run=str(run), seat="cap-seat",
+                                             pad_to_bytes=target))
+    path = (run / "home" / "projects" / "guid-1" / "journal" / "cap-seat.jsonl")
+    assert path.stat().st_size <= target
+
+
+def test_journal_padding_gets_close_enough_to_be_useful(run):
+    """Within one record of the target, or a boundary test cannot be set up."""
+    target = 300_000
+    control.cmd_seed_journal(SimpleNamespace(run=str(run), seat="cap-seat",
+                                             pad_to_bytes=target))
+    path = (run / "home" / "projects" / "guid-1" / "journal" / "cap-seat.jsonl")
+    assert target - path.stat().st_size < 1000
+
+
+def test_journal_padding_writes_entries_the_reader_can_parse(run):
+    """Padding with junk would prove a refusal caused by the wrong thing."""
+    control.cmd_seed_journal(SimpleNamespace(run=str(run), seat="cap-seat",
+                                             pad_to_bytes=20_000))
+    path = (run / "home" / "projects" / "guid-1" / "journal" / "cap-seat.jsonl")
+    lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert lines
+    for line in lines:
+        record = json.loads(line)
+        assert record["instance"] == "cap-seat"
+        assert record["verified"] is False
+
+
+def test_journal_padding_appends_to_what_is_already_there(run):
+    """It must extend a real journal, not replace one."""
+    path = (run / "home" / "projects" / "guid-1" / "journal" / "cap-seat.jsonl")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"id":"keepme","instance":"cap-seat"}\n', encoding="utf-8")
+    control.cmd_seed_journal(SimpleNamespace(run=str(run), seat="cap-seat",
+                                             pad_to_bytes=20_000))
+    assert "keepme" in path.read_text(encoding="utf-8")
+
+
 # ── evidence ─────────────────────────────────────────────────────────────
 
 

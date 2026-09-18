@@ -14,6 +14,7 @@ refusal rather than shown.
 - `seat-envelope` labels every physical line with seat, session, date, kind, id.
 - `seat-vetting` withholds an entry that purports to grant authority.
 - `seat-cap` truncates entry text at 600 characters without reporting failure.
+- `seat-full` refuses a write past 4 MB of journal, and says so.
 - `seat-unregistered` refuses to write from a directory that is not a project.
 - `seat-no-instance` refuses when no seat is named.
 
@@ -85,6 +86,16 @@ Preconditions:
   not lose the note, and it is not told it failed. (Contrast the 4 MB journal cap,
   where `remember` refuses outright — a refused write is visible to the agent
   making it, and truncation past that point would not be.)
+- **Prove the size cap refuses rather than truncating.** The other half of the
+  asymmetry. Pad the journal close to its 4 MB limit with
+  `control_operator.py seed-journal --run <run> --seat cap-seat --pad-to-bytes 4194104`,
+  then keep remembering short entries. They are accepted until the journal
+  reaches `4194258b` — 46 bytes of headroom — and **every** write after that
+  exits `1` with `nothing written`, leaving the file byte-identical. It never
+  exceeds `MAX_JOURNAL_BYTES`, which is the visible consequence of the check
+  being on the *resulting* size rather than the current one. A refused write is
+  visible to the agent making it; silently dropping the oldest entries would not
+  be.
 - **Proof.** `artifacts/transcript.md` holds each command with its exit code and
   both streams; `artifacts/after-remember/` and `artifacts/after-forget/` hold the
   journal on either side of the supersession.

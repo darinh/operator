@@ -203,6 +203,7 @@ knowledge. `python control_operator.py --help` lists every verb; each verb takes
 | `seed-ledger` | append records of any shape to `trace.jsonl` (fixture) |
 | `seed-queue` | append proposals to `proposals.jsonl`; `--abandoned` leaves an orphaned `proposals.draining.*` batch, `--pad-to-bytes` fills it to the refusal limit (fixture) |
 | `rotate-ledger` | rename `trace.jsonl` to `trace.jsonl.1`, as the appender does at 8 MB (fixture) |
+| `seed-journal` | pad a seat's journal toward its 4 MB refusal limit (fixture) |
 | `enable` | turn any extension on by name (fixture) |
 | `evidence` | snapshot home state under a label |
 | `down` | remove the instance, keep the artifacts |
