@@ -13,6 +13,7 @@ refusal rather than shown.
 - `seat-forget` stops an entry being recalled without deleting it.
 - `seat-envelope` labels every physical line with seat, session, date, kind, id.
 - `seat-vetting` withholds an entry that purports to grant authority.
+- `seat-cap` truncates entry text at 600 characters without reporting failure.
 - `seat-unregistered` refuses to write from a directory that is not a project.
 - `seat-no-instance` refuses when no seat is named.
 
@@ -77,6 +78,13 @@ Preconditions:
   under its size limit?` Then run the identical command **without** `--cwd`: exit
   `0` and an id is printed. The pair is the proof — the only thing that changed
   was where the command was standing.
+- **Prove the text cap truncates rather than refusing.** Remember an entry longer
+  than the 600-character cap — 700 `A`s will do. It **succeeds**, printing an id,
+  and the stored `text` in `projects/<guid>/journal/<seat>.jsonl` is exactly 600
+  characters. A seat that writes too much loses the tail of that one note; it does
+  not lose the note, and it is not told it failed. (Contrast the 4 MB journal cap,
+  where `remember` refuses outright — a refused write is visible to the agent
+  making it, and truncation past that point would not be.)
 - **Proof.** `artifacts/transcript.md` holds each command with its exit code and
   both streams; `artifacts/after-remember/` and `artifacts/after-forget/` hold the
   journal on either side of the supersession.

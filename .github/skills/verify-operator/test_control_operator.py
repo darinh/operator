@@ -170,7 +170,7 @@ def test_seeding_appends_rather_than_replacing(run):
 
 def test_a_seeded_proposal_is_attributed(run):
     control.cmd_seed_queue(SimpleNamespace(run=str(run), extension="fixture-x",
-                                           record=None, abandoned=False))
+                                           record=None, abandoned=False, pad_to_bytes=None))
     record = json.loads((run / "home" / "proposals.jsonl").read_text("utf-8").strip())
     assert record["extension"] == "fixture-x"
     assert record["ts"].endswith("Z")
@@ -179,7 +179,7 @@ def test_a_seeded_proposal_is_attributed(run):
 def test_an_abandoned_batch_is_not_written_to_the_live_queue(run):
     """The orphan a crashed drain leaves behind, which the next drain adopts."""
     control.cmd_seed_queue(SimpleNamespace(run=str(run), extension="fixture-x",
-                                           record=None, abandoned=True))
+                                           record=None, abandoned=True, pad_to_bytes=None))
     home = run / "home"
     assert not (home / "proposals.jsonl").exists()
     orphans = list(home.glob("proposals.draining.*.jsonl"))
@@ -191,8 +191,62 @@ def test_two_abandoned_batches_do_not_collide(run):
     """`_claim` keys orphans on pid AND a nanosecond stamp; so must the fixture."""
     for _ in range(2):
         control.cmd_seed_queue(SimpleNamespace(run=str(run), extension="x",
-                                               record=None, abandoned=True))
+                                               record=None, abandoned=True, pad_to_bytes=None))
     assert len(list((run / "home").glob("proposals.draining.*.jsonl"))) == 2
+
+
+def test_padding_reaches_the_size_at_which_the_host_refuses(run):
+    """`_append_proposal` compares st_size, so only bulk matters."""
+    target = 200_000
+    control.cmd_seed_queue(SimpleNamespace(run=str(run), extension="filler",
+                                           record=None, abandoned=False,
+                                           pad_to_bytes=target))
+    assert (run / "home" / "proposals.jsonl").stat().st_size >= target
+
+
+def test_padding_still_leaves_parseable_lines(run):
+    """A queue of unreadable bulk would prove the wrong refusal."""
+    control.cmd_seed_queue(SimpleNamespace(run=str(run), extension="filler",
+                                           record=None, abandoned=False,
+                                           pad_to_bytes=50_000))
+    body = (run / "home" / "proposals.jsonl").read_text(encoding="utf-8")
+    for line in body.splitlines():
+        if line.strip():
+            json.loads(line)
+
+
+# ── rotating the ledger ──────────────────────────────────────────
+
+
+def test_rotating_renames_rather_than_copying(run):
+    """The appender rotates by rename; a copy would leave two live files."""
+    trace = run / "home" / "trace.jsonl"
+    trace.parent.mkdir(parents=True, exist_ok=True)
+    trace.write_text('{"event":"e"}\n', encoding="utf-8")
+
+    control.cmd_rotate_ledger(SimpleNamespace(run=str(run)))
+
+    assert not trace.exists(), "the live ledger should be gone after a rename"
+    assert (run / "home" / "trace.jsonl.1").read_text(encoding="utf-8") == (
+        '{"event":"e"}\n')
+
+
+def test_rotating_twice_replaces_the_previous_rotation(run):
+    """`_rotate_if_needed` keeps one `.1` and no more; the fixture must match."""
+    trace = run / "home" / "trace.jsonl"
+    trace.parent.mkdir(parents=True, exist_ok=True)
+    trace.write_text("first\n", encoding="utf-8")
+    control.cmd_rotate_ledger(SimpleNamespace(run=str(run)))
+    trace.write_text("second\n", encoding="utf-8")
+    control.cmd_rotate_ledger(SimpleNamespace(run=str(run)))
+
+    assert (run / "home" / "trace.jsonl.1").read_text(encoding="utf-8") == "second\n"
+    assert not list((run / "home").glob("trace.jsonl.2"))
+
+
+def test_rotating_nothing_is_refused_rather_than_silently_succeeding(run):
+    with pytest.raises(SystemExit):
+        control.cmd_rotate_ledger(SimpleNamespace(run=str(run)))
 
 
 # ── evidence ─────────────────────────────────────────────────────────────
@@ -325,3 +379,4 @@ def test_the_working_directory_can_be_overridden(monkeypatch, run, tmp_path):
 def test_addressing_a_run_that_was_never_created_is_refused(tmp_path):
     with pytest.raises(SystemExit):
         control._meta(tmp_path / "nope")
+

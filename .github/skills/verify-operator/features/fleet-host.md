@@ -15,6 +15,7 @@ enabled**. What an enabled extension then does with a batch is
 - `fleet-discovery` reports which extensions are installed, at startup.
 - `fleet-inert` proposes nothing when nothing is enabled.
 - `fleet-tail` records a cursor and resumes from it; it never redelivers.
+- `fleet-rotate` follows the records into `trace.jsonl.1` and back, losing none.
 - `fleet-isolate` writes only under the home it was given.
 - `fleet-stop` ends a `--rounds`-less run when `fleet.stop` appears.
 
@@ -65,6 +66,16 @@ Preconditions:
   by **rename**, so a replacement file must be detected by identity rather than by
   being shorter than the offset: a longer replacement would defeat a size check
   silently.
+- **Prove the tail survives a rotation without losing records.** This needs the
+  tail *positioned in* the old file with records past its offset — a fresh tail
+  has no position to recover, so rotating before the first poll proves nothing.
+  Enable an extension, seed two records for `seat-A` (below its threshold) and
+  run one round: `fleet-tail.json` now holds an offset inside that file. Append a
+  third `seat-A` record, so bytes exist past the offset. Now
+  `control_operator.py rotate-ledger --run <run>`, seed three `seat-B` records
+  into the new `trace.jsonl`, and run two rounds. **Both** seats appear in the
+  queue: the remainder was read out of `trace.jsonl.1` and the new file was read
+  too, with nothing lost and nothing repeated.
 - **Prove isolation.** After any round, confirm the real `~/.operator` is
   unchanged (compare `operator.log` size before and after), while
   `<run>/home/operator.log` exists and has grown. The run wrote only to its own
