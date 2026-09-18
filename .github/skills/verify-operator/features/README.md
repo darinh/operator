@@ -87,13 +87,12 @@ No extension required for any of these.
 
 Named here rather than silently missing, so a later run can close them.
 
-- **Journal size cap.** `remember` refuses past 4 MB of journal — as opposed to
-  the 600-character text cap, which truncates and is proven in
-  [seat-memory](./seat-memory.md). Reaching 4 MB of journal through the CLI is
-  slow; unproven.
 - **Two extensions with no recipe**, listed at the end of
-  [extensions.md](./extensions.md).
+  [extensions.md](./extensions.md). `worktree-janitor` needs real merged git
+  worktrees; `worktree-guard` is a kernel hook and cannot be reached through
+  `operator-fleet` at all.
 
-Closed by live proof, kept here as a record of what was checked: the 4 MB queue
-refusal, the 600-character entry cap, the `fleet.stop` marker, and following a
-ledger rotation without losing records.
+Everything else the map names is now driven. Closed by live proof, recorded here
+so a later run knows it was checked rather than assumed: the 4 MB queue refusal,
+the 4 MB journal refusal, the 600-character entry truncation, the `fleet.stop`
+marker, and following a ledger rotation without losing records.
