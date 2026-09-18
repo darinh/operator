@@ -89,13 +89,26 @@ Preconditions:
 - **Prove the size cap refuses rather than truncating.** The other half of the
   asymmetry. Pad the journal close to its 4 MB limit with
   `control_operator.py seed-journal --run <run> --seat cap-seat --pad-to-bytes 4194104`,
-  then keep remembering short entries. They are accepted until the journal
-  reaches `4194258b` — 46 bytes of headroom — and **every** write after that
-  exits `1` with `nothing written`, leaving the file byte-identical. It never
-  exceeds `MAX_JOURNAL_BYTES`, which is the visible consequence of the check
-  being on the *resulting* size rather than the current one. A refused write is
-  visible to the agent making it; silently dropping the oldest entries would not
-  be.
+  then keep remembering short entries. They are accepted until the next entry
+  would not fit, and **every** write after that exits `1` with `nothing
+  written`, leaving the file byte-identical. It never exceeds
+  `MAX_JOURNAL_BYTES`, which is the visible consequence of the check being on
+  the *resulting* size rather than the current one. A refused write is visible
+  to the agent making it; silently dropping the oldest entries would not be.
+
+  The plateau the journal settles at is **not** a property of the cap. It is
+  `MAX_JOURNAL_BYTES` minus however long the entry you happened to submit
+  encodes to, so a recipe quoting one exact figure is describing its own test
+  data. Two runs measured `4194258b` and `4194273b` with different entry text.
+  Assert that the file never passes the limit, not that it stops at a number.
+
+  This is also where a one-byte overrun lived until it was found from outside.
+  `remember` budgets the encoded record plus `1` for the separator, while
+  `evidence._append` wrote that separator through a text-mode handle, which is
+  `\r\n` on Windows. An independent verifier drove the real CLI to
+  `4194305b` against a `4194304b` cap. `_append` now opens with `newline=""`,
+  and `tests/test_evidence.py` pins the record size to what the caller was
+  told, so the sentence above is true on every platform rather than on Linux.
 - **Proof.** `artifacts/transcript.md` holds each command with its exit code and
   both streams; `artifacts/after-remember/` and `artifacts/after-forget/` hold the
   journal on either side of the supersession.

@@ -7,13 +7,8 @@ earlier version could not express the event it existed to detect.
 from __future__ import annotations
 import json
 import os
-import re
-import sys
-import time
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from config import TOOLKIT_VERSION
 
 
 IS_WINDOWS = os.name == "nt"
@@ -479,7 +474,15 @@ def _append(path: Path, record: dict) -> bool:
         path.parent.mkdir(parents=True, exist_ok=True)
         _rotate_if_needed(path)
         line = json.dumps(record, ensure_ascii=False, default=str)
-        with open(path, "a", encoding="utf-8") as fh:
+        # `newline=""` so the one separator written is the one byte counted.
+        # Text mode translates "\n" to "\r\n" on Windows, and every caller that
+        # budgets for a record ahead of writing it -- `journal.remember` adds
+        # `+ 1` for this separator -- was then short by a byte per record. That
+        # let a journal finish 4,194,305 bytes into a 4,194,304 byte cap, which
+        # the feature notes claimed could not happen. It also made every byte
+        # offset in `trace.jsonl` differ by platform, under a tail whose whole
+        # design is to key on exact offsets.
+        with open(path, "a", encoding="utf-8", newline="") as fh:
             fh.write(line + "\n")
         return True
     except (OSError, TypeError, ValueError):
