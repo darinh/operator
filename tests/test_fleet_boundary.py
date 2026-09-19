@@ -48,14 +48,21 @@ from test_kernel_boundary import (ALLOWED_THIRD_PARTY, FLEET, FORBIDDEN,
 #: The fleet's complexity budget, in code lines. Set at the measured 60 plus
 #: room for the board and the fleet host (`on_fact`, `on_tick`, `propose_work`)
 #: that `docs/plan.md` says belong out here -- generous for what exists,
-#: binding well before this becomes a second god module. The kernel's 4,100 is
+#: binding well before this becomes a second god module. The kernel's budget is
 #: not the reference point: this package supervises nothing.
 MAX_FLEET_CODE_LINES = 600
 
-#: Total lines, for navigability, on the same 1:1.5 ratio the kernel's two
-#: ceilings sit at. Present because the kernel's total ceiling was once deleted
-#: and nothing noticed for a while.
-MAX_FLEET_TOTAL_LINES = 1200
+#: There is no package-wide *total*-line ceiling here, and there was: it sat at
+#: 1200, on an assumed 1:1.5 prose ratio. The ratio is 2.40, so 1200 total was
+#: 499 code lines against a 600 code budget -- the navigability guard silently
+#: setting the complexity limit, 101 lines below the number anybody chose, and
+#: doing it with a measure that makes deleting explanation the cheapest way to
+#: land a change. `test_kernel_boundary.py` has the full argument and the
+#: measurements; the kernel's went for the same reason on the same day.
+#:
+#: Per-module navigability is still guarded, by `MAX_MODULE_LINES` below, which
+#: is where navigability actually lives: a file nobody can scroll is the
+#: problem, and a package of well-sized files is not one.
 
 
 def test_there_are_fleet_modules_to_check():
@@ -99,15 +106,6 @@ def test_the_fleet_stays_under_its_budget():
         f"operator_fleet is {total} code lines, budget "
         f"{MAX_FLEET_CODE_LINES}. This package was created to receive a cut "
         f"from the kernel, not to be the place cuts stop being counted."
-    )
-
-
-def test_the_fleet_stays_under_its_total_ceiling():
-    total = sum(len(p.read_text(encoding="utf-8").splitlines())
-                for p in fleet_modules())
-    assert total <= MAX_FLEET_TOTAL_LINES, (
-        f"operator_fleet is {total} total lines, ceiling "
-        f"{MAX_FLEET_TOTAL_LINES}."
     )
 
 
