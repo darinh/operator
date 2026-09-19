@@ -720,8 +720,15 @@ def _spawn_background_loop(instance: Instance, copilot_args: list[str],
                            cwd: str | None = None) -> int:
     """Launch the loop supervisor as a detached background OS process.
 
-    Re-execs this same script with --_supervise so the child runs
-    run_loop_mode directly instead of recursing into this function again.
+    Re-execs the supervise entry point so the child runs run_loop_mode
+    directly instead of recursing into this function again.
+
+    `-m operator_cli.supervise` rather than this file's own path, and that is
+    a fix rather than a preference: the spawn used to name `__file__`, nothing
+    in this file has ever read `--_supervise`, and so every supervisor it
+    started ran a module with no entry point and exited 0 in silence. A module
+    path also survives this file being moved, which a `__file__` path does
+    not. `operator_cli/supervise.py` records what that cost.
 
     Windows note: use CREATE_NO_WINDOW, *not* DETACHED_PROCESS. Both detach
     the child from the parent terminal's console, but DETACHED_PROCESS leaves
@@ -733,7 +740,7 @@ def _spawn_background_loop(instance: Instance, copilot_args: list[str],
     console that has no window, and every descendant inherits that invisible
     console, so nothing ever pops up.
     """
-    cmd = [sys.executable, str(Path(__file__).resolve()),
+    cmd = [sys.executable, "-m", "operator_cli.supervise",
            "--_supervise", "--loop", "--name", instance.display_name]
     if is_fresh:
         cmd.append("--fresh")
