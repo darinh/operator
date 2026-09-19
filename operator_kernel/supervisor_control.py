@@ -235,9 +235,9 @@ def restart_all_loops() -> int:
     for inst in ordered:
         label = inst.display_name
         if inst.id == mine:
-            print(f"\n── {label} (this session's own supervisor — done last) ──")
+            print(f"\n-- {label} (this session's own supervisor -- done last) --")
         else:
-            print(f"\n── {label} ──")
+            print(f"\n-- {label} --")
         try:
             rc = restart_loop(label)
         except SystemExit as exc:
@@ -289,7 +289,7 @@ def restart_loop(target: str | None) -> int:
     instance = Instance(target)
 
     if not MUX.has_session(instance.session):
-        print(f"No running session '{target}'. Nothing to keep alive — "
+        print(f"No running session '{target}'. Nothing to keep alive -- "
               f"start it with: operator --loop --name {target}", file=sys.stderr)
         return 1
     if not instance.owns_live_session():
@@ -309,7 +309,7 @@ def restart_loop(target: str | None) -> int:
               file=sys.stderr)
         print("  Its next session would lose its original arguments, so it is "
               "safer to restart it yourself. Run this from "
-              f"{instance.display_name}'s working directory — --adopt is what "
+              f"{instance.display_name}'s working directory -- --adopt is what "
               "keeps the running session alive:", file=sys.stderr)
         print(f"    operator stop-loop {instance.display_name}", file=sys.stderr)
         print(f"    operator --loop --headless --adopt "
@@ -376,7 +376,7 @@ def _do_restart_loop(instance: Instance, user_args: list[str],
         if path_present(instance.detach_marker) is not False:
             remove_file(instance.detach_marker)
             print(f"The supervisor for '{target}' exited without taking the "
-                  f"restart request — something else stopped it.",
+                  f"restart request -- something else stopped it.",
                   file=sys.stderr)
             print("  Not starting a replacement.", file=sys.stderr)
             return 1
@@ -385,12 +385,12 @@ def _do_restart_loop(instance: Instance, user_args: list[str],
         # printed as the one that stopped.
         print(f"Old supervisor ({where}) stopped.")
     else:
-        print(f"No supervisor was running for '{target}' — starting one.")
+        print(f"No supervisor was running for '{target}' -- starting one.")
 
     # Re-check rather than trust the check from before the handoff: `operator
     # stop` may have killed the session while we waited.
     if not MUX.has_session(instance.session):
-        print(f"Session '{target}' disappeared during the restart — it was "
+        print(f"Session '{target}' disappeared during the restart -- it was "
               f"stopped by something else. Not starting a replacement.",
               file=sys.stderr)
         return 1
@@ -421,7 +421,7 @@ def _do_restart_loop(instance: Instance, user_args: list[str],
     while time.time() < deadline:
         new_pid = _running_loop_pid(instance)
         if new_pid is not None:
-            print(f"✅ Loop supervisor for '{target}' replaced "
+            print(f"Loop supervisor for '{target}' replaced "
                   f"(pid {new_pid}); session kept running.")
             print(f"  Attach: operator join {target}")
             return 0
