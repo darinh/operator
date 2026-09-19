@@ -132,7 +132,14 @@ MAX_KERNEL_CODE_LINES = 4100
 #: overall size uncapped -- so "tighter, not looser" was true of the code
 #: measure and silent about totals. Generous, because prose is welcome here;
 #: present, because "no ceiling at all" is not a decision anyone made.
-MAX_KERNEL_TOTAL_LINES = 9000
+#:
+#: Raised from 9000 when crash recovery landed. The kernel was at 8992 of it
+#: and 4060 of the code budget, so a capability it was missing could not be
+#: added without a deliberate decision -- which is the ceiling working rather
+#: than failing. Re-set at the new measured size plus room, on the same rule
+#: the code budgets use, and the complexity measure is unchanged: that one is
+#: what stops a second god module, and it still refuses at 4100.
+MAX_KERNEL_TOTAL_LINES = 9400
 
 #: Per-module code ceiling, the same split applied one file down.
 #: `supervisor.py` is the largest at 446.
