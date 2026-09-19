@@ -578,7 +578,7 @@ def test_a_session_that_ran_for_minutes_does_not_count_toward_the_give_up_limit(
     What is left unbounded here is bounded elsewhere: this fixture runs with
     the progress breaker inactive, and in a real project it is the breaker
     that stops a loop relaunching healthy-but-idle sessions forever. See
-    `test_circuit_breaker.py::test_the_breaker_bounds_the_healthy_uptime_path`.
+    `test_breakers.py::test_the_breaker_bounds_the_healthy_uptime_path`.
     """
     clock = {"t": 1_000.0}
     monkeypatch.setattr(op.time, "time", lambda: clock["t"])
