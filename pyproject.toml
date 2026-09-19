@@ -10,6 +10,7 @@ dev = ["pytest>=7.0"]
 [project.scripts]
 operator-fleet = "operator_cli.fleet:main"
 operator-seat = "operator_cli.seat:main"
+operator-recover = "operator_cli.recover:main"
 
 # The reference extensions ship registered but INERT. Registering is what makes
 # them discoverable; `operator_extensions/activation.py` is what makes them

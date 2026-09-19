@@ -724,11 +724,13 @@ def _spawn_background_loop(instance: Instance, copilot_args: list[str],
     directly instead of recursing into this function again.
 
     `-m operator_cli.supervise` rather than this file's own path, and that is
-    a fix rather than a preference: the spawn used to name `__file__`, nothing
-    in this file has ever read `--_supervise`, and so every supervisor it
-    started ran a module with no entry point and exited 0 in silence. A module
-    path also survives this file being moved, which a `__file__` path does
-    not. `operator_cli/supervise.py` records what that cost.
+    a fix rather than a preference: the spawn used to name `__file__`, and
+    when this loop was ported here out of the 9,120-line module the argument
+    handling stayed behind in it. Nothing in this file reads `--_supervise`,
+    so every supervisor spawned ran a module with no entry point and exited 0
+    in silence -- and `restart_loop`, which retires the old supervisor before
+    spawning its replacement, left live sessions unsupervised. A module path
+    also survives this file being moved, which a `__file__` path does not.
 
     Windows note: use CREATE_NO_WINDOW, *not* DETACHED_PROCESS. Both detach
     the child from the parent terminal's console, but DETACHED_PROCESS leaves

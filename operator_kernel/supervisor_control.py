@@ -433,6 +433,74 @@ def _do_restart_loop(instance: Instance, user_args: list[str],
     return 1
 
 
+def recoverable_instances() -> list[Instance]:
+    """Seats that were being supervised when something stopped them un-cleanly.
+
+    `active_instances` asks who is here *now*, and after a reboot the answer is
+    nobody: the multiplexer server is gone and every supervisor pid belongs to
+    a previous boot. That is the whole gap this closes. A seat is not a process
+    -- it is an identity with a journal, a handoff and a session number that
+    accumulate -- and losing the machine should cost it the process, not the
+    continuity.
+
+    The discriminator is what a clean stop leaves behind, which is nothing:
+    `cleanup_files` removes the ownership claim and the recorded loop
+    arguments. A crash, a kill or a power cut removes neither. So a managed
+    instance that still has its arguments, with no live session and no live
+    supervisor, is one that was running when the machine went down -- and one
+    that was stopped on purpose is absent from this list by construction,
+    rather than by a flag somebody has to remember to set.
+    """
+    live = set(MUX.list_sessions()) if MUX.available() else set()
+    found: list[Instance] = []
+    for ident, meta in sorted(managed_instances().items()):
+        inst = Instance(meta.get("display_name", ident))
+        if inst.id in live or _running_loop_pid(inst) is not None:
+            continue
+        _, recorded_cwd = _load_loop_args(inst)
+        if recorded_cwd is not None:
+            found.append(inst)
+    return found
+
+
+def recover_loop(instance: Instance) -> int:
+    """Start a supervisor for a seat whose machine went down under it.
+
+    Not `--adopt`: adoption joins a session that is still running, and there is
+    none. Not `--fresh` either, and that is the point of the command -- fresh
+    means forget the previous run, which would restart the session numbering,
+    discard the resume id and re-arm the breakers that were counting. The seat
+    continues: same run, next session, its journal and handoff exactly where it
+    left them.
+    """
+    target = instance.display_name
+    user_args, recorded_cwd = _load_loop_args(instance)
+    if recorded_cwd is None:
+        print(f"No recorded loop arguments for '{target}'. Nothing to recover "
+              f"it with.", file=sys.stderr)
+        return 1
+    if dir_present(Path(recorded_cwd)) is False:
+        # Recovering it somewhere else would point the seat at a different
+        # project, and its journal is keyed to the one it was working in.
+        print(f"The directory '{target}' was working in no longer exists:",
+              file=sys.stderr)
+        print(f"  {recorded_cwd}", file=sys.stderr)
+        return 1
+    if MUX.has_session(instance.session):
+        print(f"'{target}' has a live session; it did not need recovering.",
+              file=sys.stderr)
+        return 1
+    try:
+        _spawn_background_loop(instance, user_args, is_fresh=False,
+                               adopt=False, cwd=recorded_cwd)
+    except OSError as exc:
+        print(f"Could not start a supervisor for '{target}': {exc}",
+              file=sys.stderr)
+        return 1
+    print(f"Recovering '{target}' in {recorded_cwd}")
+    return 0
+
+
 def active_instances() -> list[Instance]:
     """Managed instances with a live session and/or a live loop supervisor.
 
