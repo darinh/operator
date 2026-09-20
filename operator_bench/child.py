@@ -11,9 +11,60 @@ from pathlib import Path
 
 from operator_bench.world import git
 
+_real_time = time
+
+#: Kernel modules that sleep or read the clock. Imported before the rebind so
+#: the scan cannot miss one that nothing has pulled in yet.
+_CLOCK_USERS = (
+    "launch", "mux", "runner", "session_state", "supervisor",
+    "supervisor_control", "supervisor_records", "process_identity",
+    "breakers", "probes", "exits", "claims", "evidence",
+)
+
 
 class ClockExhausted(RuntimeError):
     pass
+
+
+def _install_clock(clock) -> None:
+    """Rebind the name `time` inside kernel modules only.
+
+    Patching `time.sleep` on the module itself would also reach `subprocess`,
+    whose POSIX `Popen._wait` busy-waits on `time.sleep` while Windows blocks
+    in `WaitForSingleObject`. That difference silently burned the whole clock
+    budget on Linux and nothing on Windows.
+    """
+    import importlib
+    for name in _CLOCK_USERS:
+        try:
+            importlib.import_module(name)
+        except ImportError:
+            continue
+    roots = _source_roots()
+    reached = []
+    for name, mod in list(sys.modules.items()):
+        if mod is None or not _under(getattr(mod, "__file__", None), roots):
+            continue
+        if isinstance(getattr(mod, "time", None), type(_real_time)):
+            mod.time = clock
+            reached.append(name)
+    if "supervisor" not in reached:
+        raise RuntimeError(f"clock did not reach supervisor, only {reached}")
+
+
+def _source_roots() -> tuple[Path, ...]:
+    root = Path(__file__).resolve().parent.parent
+    return (root / "operator_kernel", root / "operator_fleet")
+
+
+def _under(path: str | None, roots: tuple[Path, ...]) -> bool:
+    if not path:
+        return False
+    try:
+        resolved = Path(path).resolve()
+    except OSError:
+        return False
+    return any(resolved.is_relative_to(r) for r in roots)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -41,8 +92,7 @@ def _run(home: Path, program: dict) -> int:
     clock = _Clock(program.get("max_virtual_seconds", 20_000),
                    program.get("max_sleeps", 200_000))
     clock.poll_interval = float(config.POLL_INTERVAL)
-    time.time = clock.now
-    time.sleep = clock.sleep
+    _install_clock(clock)
     seat = _Seat(home, program, clock)
     Mux._run = seat.run
     result = home / "bench-result.json"
@@ -86,6 +136,18 @@ class _Clock:
     def now(self) -> float:
         self._on_tick()
         return self.t
+
+    def time(self) -> float:
+        return self.now()
+
+    def monotonic(self) -> float:
+        return self.now()
+
+    def perf_counter(self) -> float:
+        return self.now()
+
+    def __getattr__(self, name: str):
+        return getattr(_real_time, name)
 
     def sleep(self, seconds: float) -> None:
         seconds = max(0.0, float(seconds))
