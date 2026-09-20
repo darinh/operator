@@ -32,14 +32,37 @@ were chaining from record N.
 Each writer keeps its own chain. Records interleave in the file. A verifier
 groups by `w` before it checks continuity.
 
+## What it detects, and what it does not
+
+Within one writer's chain it detects an edited payload, a deleted record that
+had a successor, and reordering.
+
+It does not detect these, and a verifier will return `Verified`:
+
+- An entire writer's records removed. Nothing else references them, so their
+  absence leaves no hole.
+- A writer's trailing records removed. There is no successor left to mismatch.
+- Unchained records inserted. They are indistinguishable from the pre-chain
+  records a real ledger legitimately contains.
+- Reordering *across* writers. Order between writers is file order, which the
+  chain does not cover.
+
+The first two matter for rotation. A `Gap` is reported only when surviving
+records sit on both sides of the loss, so a rotation that discards a generation
+containing only finished writers is invisible. Do not read a `Verified` as
+"nothing was lost".
+
+Detecting those needs a witness outside the file, which is the next section.
+
 ## Rotation
 
 The chain is bound to the log, not to the file. A writer survives rotation, so
 the sequence continues across `trace.jsonl.1` then `trace.jsonl`. The verifier
 reads both as one stream.
 
-Rotation keeps one generation. A second rotation destroys the first. That is
-permanent loss. The verifier reports a gap in `n` as `Gap`, never as `Verified`.
+Rotation keeps one generation. A second rotation destroys the first. When
+surviving records bracket the loss the verifier reports `Gap`, never
+`Verified`. When they do not, see the limits above.
 
 A torn final line, at most one and only at the very end, is `TruncatedTail`,
 not `Broken`.

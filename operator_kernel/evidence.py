@@ -595,7 +595,6 @@ def record_session_exit(operator_home: Path, *, instance: str, session: int,
         })
     except Exception:
         return
-    record_session_cost(operator_home, instance=instance, session=session)
 
 
 def record_session_cost(operator_home, *, instance: str, session: int) -> None:

@@ -329,7 +329,7 @@ def _costs(home):
             if json.loads(line).get("event") == "session_cost"]
 
 
-def test_session_exit_records_session_cost_when_spend_is_readable(
+def test_record_session_cost_writes_the_amount_unit_and_source(
         tmp_path, monkeypatch):
     import spend
     monkeypatch.setattr("config.SPEND_CEILING", 20.0)
@@ -337,7 +337,7 @@ def test_session_exit_records_session_cost_when_spend_is_readable(
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps(
         {"amount": 4.5, "unit": "usd", "source": "ingest"}), encoding="utf-8")
-    evidence.record_session_exit(tmp_path, **_exit_kwargs())
+    evidence.record_session_cost(tmp_path, instance="seat", session=3)
     costs = _costs(tmp_path)
     assert len(costs) == 1
     rec = costs[0]
@@ -350,13 +350,13 @@ def test_session_exit_records_session_cost_when_spend_is_readable(
     assert rec["session"] == 3
 
 
-def test_session_exit_does_not_record_session_cost_when_spend_is_unknown(
+def test_record_session_cost_writes_nothing_when_spend_is_unknown(
         tmp_path):
-    evidence.record_session_exit(tmp_path, **_exit_kwargs())
+    evidence.record_session_cost(tmp_path, instance="seat", session=1)
     assert _costs(tmp_path) == []
 
 
-def test_session_cost_records_a_null_ceiling_when_none_is_set(
+def test_record_session_cost_writes_a_null_ceiling_when_none_is_set(
         tmp_path, monkeypatch):
     import spend
     monkeypatch.setattr("config.SPEND_CEILING", None)
@@ -364,13 +364,13 @@ def test_session_cost_records_a_null_ceiling_when_none_is_set(
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps(
         {"amount": 1, "unit": "usd", "source": "t"}), encoding="utf-8")
-    evidence.record_session_exit(tmp_path, **_exit_kwargs())
+    evidence.record_session_cost(tmp_path, instance="seat", session=1)
     rec = _costs(tmp_path)[0]
     assert rec["amount"] == 1
     assert rec["ceiling"] is None
 
 
-def test_recording_session_cost_never_raises(tmp_path, monkeypatch):
+def test_record_session_cost_never_raises(tmp_path, monkeypatch):
     monkeypatch.setattr(evidence, "_append",
                         lambda *a, **k: (_ for _ in ()).throw(OSError("nope")))
     evidence.record_session_exit(tmp_path, **_exit_kwargs())

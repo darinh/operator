@@ -290,5 +290,10 @@ def _record_session_exit(instance, session_num: int,
             limit=MAX_LAUNCH_FAILURES,
             code=running_code_fingerprint().get("digest"),
         )
+        # The seat id, not the display name: the launch gate reads spend under
+        # `instance.id`, and `safe_instance_id` is not idempotent, so recording
+        # under the display name files the cost where no ceiling will find it.
+        evidence.record_session_cost(
+            OPERATOR_HOME, instance=instance.id, session=session_num)
     except Exception:
         return
