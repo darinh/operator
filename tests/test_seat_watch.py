@@ -73,8 +73,25 @@ def test_only_session_exit_records_are_counted(home):
     seat_watch.on_fact(facts=[
         exited(event="supervisor_start", consecutive=9),
         exited(event="launch_admission", consecutive=9),
+        exited(event="progress_verdict", consecutive=9),
     ])
     assert activation.read_state(seat_watch.NAME) == {}
+
+
+def test_progress_verdict_is_ignored_even_when_it_looks_like_a_failure(home):
+    turn_on(home, failures=1)
+    seat_watch.on_fact(facts=[{
+        "ts": "2026-08-17T10:00:00Z",
+        "event": "progress_verdict",
+        "instance": "alpha",
+        "session": 3,
+        "verdict": "unchanged",
+        "consecutive": 9,
+        "giving_up": True,
+        "nochange_streak": 9,
+    }])
+    assert activation.read_state(seat_watch.NAME) == {}
+    assert seat_watch.propose_work() is None
 
 
 @pytest.mark.parametrize("record", [
