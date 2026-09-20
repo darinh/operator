@@ -28,7 +28,7 @@ def repo_root() -> Path:
 
 def make_world(parent: Path) -> World:
     root = Path(parent) / "world"
-    root.mkdir()
+    root.mkdir(parents=True)
     home = root / "home"
     home.mkdir()
     repo = root / "repo"

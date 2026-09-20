@@ -7,6 +7,11 @@ from pathlib import Path
 from operator_bench.world import git, kill, make_world, refs, spawn, wait
 
 
+def test_make_world_creates_missing_parents(tmp_path):
+    world = make_world(tmp_path / "nested" / "run")
+    assert world.home.is_dir()
+
+
 def test_disposable_home_is_not_the_real_operator_home(tmp_path):
     world = make_world(tmp_path)
     real = (Path.home() / ".operator").resolve()
