@@ -17,6 +17,7 @@ DETECTION = "detection"
 MISS = "miss"
 TRUE_NEGATIVE = "true-negative"
 FALSE_ALARM = "false-alarm"
+INVALID = "invalid"
 
 _EFFECTS = frozenset({WORK, BUSYWORK, SILENCE, LAUNCH_FAIL})
 _ENDINGS = frozenset({HANDOFF, EXIT, UNACCOUNTED, STOP, LAUNCH_FAIL})
@@ -76,6 +77,7 @@ class Oracle:
     expected: str
     label_source: str
     horizon_sessions: int
+    expected_exit: int | None = None
 
 
 @dataclass(frozen=True)

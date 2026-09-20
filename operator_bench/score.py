@@ -6,11 +6,13 @@ from dataclasses import dataclass
 
 from operator_bench.observe import Observation
 from operator_bench.scenario import (
-    DETECTION, FALSE_ALARM, MISS, TRUE_NEGATIVE, Oracle,
+    DETECTION, FALSE_ALARM, INVALID, MISS, TRUE_NEGATIVE, Oracle,
 )
 
 EXIT_NO_PROGRESS = 3
 EXIT_UNACCOUNTED = 4
+EXIT_GIVE_UP = 1
+STOP_EXITS = frozenset({EXIT_GIVE_UP, EXIT_NO_PROGRESS, EXIT_UNACCOUNTED})
 WILSON = "Wilson"
 _Z95 = 1.96
 
@@ -48,6 +50,10 @@ class Measurement:
     def __post_init__(self) -> None:
         if not isinstance(self.estimate, (Exact, Estimated, NoEstimate)):
             raise TypeError("Measurement requires an Estimate, not a bare float")
+        if self.n < 0 or self.eligible < 0 or self.censored < 0:
+            raise ValueError("Measurement counts cannot be negative")
+        if self.n + self.censored > self.eligible:
+            raise ValueError("n + censored must be <= eligible")
 
 
 @dataclass(frozen=True)
@@ -55,6 +61,7 @@ class Latency:
     polls: int | None
     censored: bool
     bound_polls: int
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -64,6 +71,7 @@ class ScenarioScore:
     exit_code: int
     latency: Latency
     error: str | None
+    required_stop: bool
 
 
 @dataclass(frozen=True)
@@ -87,11 +95,12 @@ def wilson(k: int, n: int, z: float = _Z95) -> tuple[float, float, float]:
 
 def rate(k: int, n: int, *, eligible: int, censored: int,
          label_source: str, horizon: str) -> Measurement:
-    coverage = (eligible / n) if n else 0.0
-    if eligible <= 0:
-        est: Estimate = NoEstimate("no eligible trials")
+    coverage = (n / eligible) if eligible else 0.0
+    if n <= 0:
+        est: Estimate = NoEstimate(
+            "no eligible trials" if eligible <= 0 else "no observed trials")
     else:
-        p, lo, hi = wilson(k, eligible)
+        p, lo, hi = wilson(k, n)
         est = Estimated(p, lo, hi)
     return Measurement(
         estimate=est, n=n, eligible=eligible, censored=censored,
@@ -100,30 +109,40 @@ def rate(k: int, n: int, *, eligible: int, censored: int,
 
 
 def kernel_stopped(obs: Observation) -> bool:
-    if obs.exit_code in (EXIT_NO_PROGRESS, EXIT_UNACCOUNTED):
-        return True
-    if obs.exit_code == 0:
-        return False
-    if obs.error:
-        return True
-    return "Giving up" in obs.log_text or "Progress breaker tripped" in obs.log_text
+    return obs.exit_code in STOP_EXITS
 
 
 def classify(obs: Observation, oracle: Oracle) -> str:
-    stopped = kernel_stopped(obs)
+    expected = oracle.expected_exit
     if oracle.any_stop_is_false_alarm:
-        return FALSE_ALARM if stopped else TRUE_NEGATIVE
+        if obs.exit_code == 0:
+            return TRUE_NEGATIVE
+        if obs.exit_code in STOP_EXITS:
+            return FALSE_ALARM
+        return INVALID
     if oracle.stop_required_by is not None:
-        return DETECTION if stopped else MISS
-    return FALSE_ALARM if stopped else TRUE_NEGATIVE
+        if expected is not None and obs.exit_code == expected:
+            return DETECTION
+        if obs.exit_code == 0:
+            return MISS
+        return INVALID
+    if obs.exit_code == 0:
+        return TRUE_NEGATIVE
+    if obs.exit_code in STOP_EXITS:
+        return FALSE_ALARM
+    return INVALID
 
 
 def latency_for(obs: Observation, oracle: Oracle, outcome: str) -> Latency:
     bound = obs.polls
     if outcome != DETECTION:
         return Latency(polls=None, censored=True, bound_polls=bound)
+    if oracle.stalled_from is None:
+        return Latency(
+            polls=None, censored=True, bound_polls=bound,
+            reason="oracle declares no onset")
     start = 0
-    if oracle.stalled_from is not None and obs.launch_polls:
+    if obs.launch_polls:
         idx = oracle.stalled_from - 1
         if 0 <= idx < len(obs.launch_polls):
             start = obs.launch_polls[idx]
@@ -132,43 +151,51 @@ def latency_for(obs: Observation, oracle: Oracle, outcome: str) -> Latency:
 
 def score_run(name: str, obs: Observation, oracle: Oracle) -> ScenarioScore:
     outcome = classify(obs, oracle)
+    required = (oracle.stop_required_by is not None
+                and not oracle.any_stop_is_false_alarm)
     return ScenarioScore(
         name=name, outcome=outcome, exit_code=obs.exit_code,
         latency=latency_for(obs, oracle, outcome), error=obs.error,
+        required_stop=required,
     )
 
 
 def scorecard(rows: tuple[ScenarioScore, ...], *,
               label_source: str, horizon: str) -> Scorecard:
-    n = len(rows)
-    required = tuple(r for r in rows if r.outcome in (DETECTION, MISS))
-    misses = sum(1 for r in required if r.outcome == MISS)
-    controls = tuple(r for r in rows if r.outcome in (TRUE_NEGATIVE, FALSE_ALARM))
-    alarms = sum(1 for r in controls if r.outcome == FALSE_ALARM)
+    required = tuple(r for r in rows if r.required_stop)
+    observed_req = tuple(r for r in required if r.outcome in (DETECTION, MISS))
+    misses = sum(1 for r in observed_req if r.outcome == MISS)
+    controls = tuple(r for r in rows if not r.required_stop)
+    observed_ctl = tuple(
+        r for r in controls if r.outcome in (TRUE_NEGATIVE, FALSE_ALARM))
+    alarms = sum(1 for r in observed_ctl if r.outcome == FALSE_ALARM)
     detections = tuple(r for r in rows if r.outcome == DETECTION)
-    uncensored = tuple(r for r in detections if not r.latency.censored
-                       and r.latency.polls is not None)
-    if not uncensored:
+    numbered = tuple(r for r in detections if r.latency.polls is not None)
+    if not numbered:
         lat_est: Estimate = NoEstimate("no uncensored detections")
-    elif len(uncensored) == 1:
-        lat_est = Exact(float(uncensored[0].latency.polls))
+        lat_elig = len(detections)
+        lat_n, lat_cens = 0, lat_elig
+    elif len(numbered) == 1:
+        lat_est = Exact(float(numbered[0].latency.polls or 0))
+        lat_n, lat_elig, lat_cens = 1, 1, 0
     else:
-        mean = sum(r.latency.polls or 0 for r in uncensored) / len(uncensored)
-        lat_est = Exact(mean)
+        lat_est = NoEstimate("latencies span unrelated breakers")
+        lat_n, lat_elig, lat_cens = 0, len(numbered), 0
     lat = Measurement(
-        estimate=lat_est, n=len(detections), eligible=len(uncensored),
-        censored=len(detections) - len(uncensored),
-        coverage=(len(uncensored) / len(detections)) if detections else 0.0,
+        estimate=lat_est, n=lat_n, eligible=lat_elig, censored=lat_cens,
+        coverage=(lat_n / lat_elig) if lat_elig else 0.0,
         label_source=label_source, horizon=horizon,
     )
     return Scorecard(
         scenarios=rows,
-        miss_rate=rate(misses, n, eligible=len(required),
-                       censored=n - len(required),
-                       label_source=label_source, horizon=horizon),
-        false_alarm_rate=rate(alarms, n, eligible=len(controls),
-                              censored=n - len(controls),
-                              label_source=label_source, horizon=horizon),
+        miss_rate=rate(
+            misses, len(observed_req), eligible=len(required),
+            censored=len(required) - len(observed_req),
+            label_source=label_source, horizon=horizon),
+        false_alarm_rate=rate(
+            alarms, len(observed_ctl), eligible=len(controls),
+            censored=len(controls) - len(observed_ctl),
+            label_source=label_source, horizon=horizon),
         detection_latency=lat,
     )
 
@@ -196,11 +223,16 @@ def format_scorecard(card: Scorecard) -> str:
     lines = ["operator_bench measure"]
     for row in card.scenarios:
         extra = ""
-        if row.outcome == DETECTION and row.latency.polls is not None:
+        shown = "INVALID" if row.outcome == INVALID else row.outcome
+        if row.outcome == INVALID:
+            extra = f" error={row.error}" if row.error else ""
+        elif row.outcome == DETECTION and row.latency.polls is not None:
             extra = f" latency {row.latency.polls} polls"
+        elif row.latency.reason:
+            extra = f" NoEstimate ({row.latency.reason})"
         elif row.latency.censored:
             extra = f" censored at {row.latency.bound_polls} polls"
-        lines.append(f"  {row.name}: {row.outcome} exit={row.exit_code}{extra}")
+        lines.append(f"  {row.name}: {shown} exit={row.exit_code}{extra}")
     lines.append(format_measurement("miss_rate", card.miss_rate))
     lines.append(format_measurement("false_alarm_rate", card.false_alarm_rate))
     lines.append(format_measurement("detection_latency", card.detection_latency))
