@@ -19,7 +19,7 @@ CHILD_EXTRA = STDLIB | OWN | {
     "config", "instance", "mux", "supervisor", "launch", "breakers",
     "evidence", "probes", "paths",
 }
-OBSERVE_EXTRA = STDLIB | OWN | {"operator_fleet", "ledger_tail"}
+OBSERVE_EXTRA = STDLIB | OWN | {"operator_fleet", "ledger_tail", "operator_kernel"}
 
 
 def bench_modules() -> list[Path]:

@@ -112,6 +112,7 @@ def test_scorecard_has_no_combined_accuracy_field():
     names = set(card.__dataclass_fields__)
     assert "miss_rate" in names
     assert "false_alarm_rate" in names
+    assert "ledger_chain_verified" in names
     for banned in ("accuracy", "score", "pass_rate"):
         assert banned not in names
 
@@ -293,6 +294,7 @@ def test_format_scorecard_is_ascii():
     assert "miss_rate" in text
     assert "false_alarm_rate" in text
     assert "verdict_in_ledger_coverage" in text
+    assert "ledger_chain_verified" in text
     assert math.isfinite(row.latency.bound_polls)
 
 
@@ -398,3 +400,44 @@ def test_verdict_in_ledger_coverage_is_one_when_every_exit_has_a_verdict():
     assert isinstance(m.estimate, Estimated)
     assert m.estimate.value == 1
     assert m.coverage == 1.0
+
+
+def test_ledger_chain_verified_is_noestimate_when_the_chain_is_absent():
+    required = Oracle(
+        stalled_from=1, stop_required_by=3, any_stop_is_false_alarm=False,
+        expected=DETECTION, label_source="fixture", horizon_sessions=3,
+        expected_exit=3,
+    )
+    row = score_run(
+        "old",
+        _obs(exit_code=3, records=({"event": "session_exit", "session": 1},)),
+        required,
+    )
+    card = scorecard((row,), label_source="fixture", horizon="unit1")
+    m = card.ledger_chain_verified
+    assert isinstance(m.estimate, NoEstimate)
+    assert "chain" in m.estimate.reason
+    assert not isinstance(m.estimate, Estimated)
+    text = format_scorecard(card)
+    assert "ledger_chain_verified" in text
+    assert "NoEstimate" in text
+
+
+def test_ledger_chain_verified_is_one_when_every_run_verifies():
+    required = Oracle(
+        stalled_from=1, stop_required_by=3, any_stop_is_false_alarm=False,
+        expected=DETECTION, label_source="fixture", horizon_sessions=3,
+        expected_exit=3,
+    )
+    row = score_run(
+        "chained",
+        _obs(exit_code=3, chain="verified"),
+        required,
+    )
+    card = scorecard((row,), label_source="fixture", horizon="unit1")
+    m = card.ledger_chain_verified
+    assert isinstance(m.estimate, Estimated)
+    assert m.estimate.value == 1
+    assert m.n == 1
+    assert m.eligible == 1
+    assert m.censored == 0

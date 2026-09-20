@@ -74,6 +74,7 @@ class ScenarioScore:
     required_stop: bool
     completed_sessions: int
     verdict_covered: int
+    chain: str
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,7 @@ class Scorecard:
     false_alarm_rate: Measurement
     detection_latency: Measurement
     verdict_in_ledger_coverage: Measurement
+    ledger_chain_verified: Measurement
 
 
 def wilson(k: int, n: int, z: float = _Z95) -> tuple[float, float, float]:
@@ -179,6 +181,7 @@ def score_run(name: str, obs: Observation, oracle: Oracle) -> ScenarioScore:
         latency=latency_for(obs, oracle, outcome), error=obs.error,
         required_stop=required,
         completed_sessions=completed, verdict_covered=covered,
+        chain=obs.chain,
     )
 
 
@@ -210,6 +213,16 @@ def scorecard(rows: tuple[ScenarioScore, ...], *,
     )
     eligible = sum(r.completed_sessions for r in rows)
     covered = sum(r.verdict_covered for r in rows)
+    if any(r.chain != "no_chain" for r in rows):
+        chain_m = rate(
+            sum(r.chain == "verified" for r in rows), len(rows),
+            eligible=len(rows), censored=0,
+            label_source=label_source, horizon=horizon)
+    else:
+        chain_m = Measurement(
+            estimate=NoEstimate("ledger has no chain"),
+            n=0, eligible=len(rows), censored=0, coverage=0.0,
+            label_source=label_source, horizon=horizon)
     return Scorecard(
         scenarios=rows,
         miss_rate=rate(
@@ -224,6 +237,7 @@ def scorecard(rows: tuple[ScenarioScore, ...], *,
         verdict_in_ledger_coverage=rate(
             covered, eligible, eligible=eligible, censored=0,
             label_source=label_source, horizon=horizon),
+        ledger_chain_verified=chain_m,
     )
 
 
@@ -265,6 +279,8 @@ def format_scorecard(card: Scorecard) -> str:
     lines.append(format_measurement("detection_latency", card.detection_latency))
     lines.append(format_measurement(
         "verdict_in_ledger_coverage", card.verdict_in_ledger_coverage))
+    lines.append(format_measurement(
+        "ledger_chain_verified", card.ledger_chain_verified))
     return "\n".join(lines)
 
 
