@@ -520,7 +520,7 @@ def test_spend_ceiling_fidelity_is_zero_when_launches_pass_the_ceiling():
     assert m.eligible == 1
 
 
-def test_spend_ceiling_fidelity_is_one_when_launching_stops_at_the_ceiling():
+def test_spend_ceiling_fidelity_is_zero_when_no_refusal_was_recorded():
     oracle = Oracle(
         stalled_from=None, stop_required_by=None, any_stop_is_false_alarm=False,
         expected=TRUE_NEGATIVE, label_source="fixture", horizon_sessions=4,
@@ -537,6 +537,32 @@ def test_spend_ceiling_fidelity_is_one_when_launching_stops_at_the_ceiling():
              records=exits + (
                  {"event": "session_cost", "session": 1, "amount": 1},
                  {"event": "session_cost", "session": 2, "amount": 2},
+             )),
+        oracle,
+    )
+    assert row.outcome == TRUE_NEGATIVE
+    assert row.ceiling_held is False
+    assert scorecard((row,), label_source="fixture",
+                     horizon="unit1").spend_ceiling_fidelity.estimate.value == 0
+
+
+def test_spend_ceiling_fidelity_is_one_when_a_refusal_was_recorded():
+    oracle = Oracle(
+        stalled_from=None, stop_required_by=None, any_stop_is_false_alarm=False,
+        expected=TRUE_NEGATIVE, label_source="fixture", horizon_sessions=4,
+        spend_ceiling=2.0,
+    )
+    exits = (
+        {"event": "session_exit", "session": 1},
+        {"event": "session_exit", "session": 2},
+    )
+    row = score_run(
+        "spend-ceiling",
+        _obs(exit_code=0, launch_polls=(0, 1),
+             session_exits=exits,
+             records=exits + (
+                 {"event": "launch_admission",
+                  "refusals": [["spend-ceiling", "ceiling reached"]]},
              )),
         oracle,
     )
@@ -561,7 +587,9 @@ def test_spend_ceiling_fidelity_is_noestimate_when_every_run_is_invalid():
              session_exits=(
                  {"event": "session_exit", "session": 1},
                  {"event": "session_exit", "session": 2},
-             )),
+             ),
+             records=({"event": "launch_admission",
+                       "refusals": [["spend-ceiling", "ceiling reached"]]},)),
         oracle,
     )
     assert row.outcome == INVALID
@@ -587,3 +615,58 @@ def test_format_scorecard_names_the_spend_metrics():
     text.encode("ascii")
     assert "spend_recorded_coverage" in text
     assert "spend_ceiling_fidelity" in text
+
+
+def _exits(n):
+    return tuple({"event": "session_exit", "session": i + 1} for i in range(n))
+
+
+def _window_oracle():
+    return Oracle(
+        stalled_from=6, stop_required_by=8, any_stop_is_false_alarm=False,
+        expected=DETECTION, label_source="fixture", horizon_sessions=8,
+        expected_exit=3,
+    )
+
+
+def test_a_stop_before_the_stall_began_is_a_false_alarm_not_a_detection():
+    """Matching the expected exit only says the right breaker fired eventually.
+    Stopping at session 2 when the stall starts at 6 is a false alarm."""
+    row = score_run("early", _obs(exit_code=3, session_exits=_exits(2)),
+                    _window_oracle())
+    assert row.outcome == FALSE_ALARM
+
+
+def test_a_stop_after_the_deadline_is_a_miss_not_a_detection():
+    row = score_run("late", _obs(exit_code=3, session_exits=_exits(12)),
+                    _window_oracle())
+    assert row.outcome == MISS
+
+
+def test_a_stop_inside_the_window_is_a_detection():
+    row = score_run("timely", _obs(exit_code=3, session_exits=_exits(8)),
+                    _window_oracle())
+    assert row.outcome == DETECTION
+
+
+def test_a_scenario_that_completes_no_session_has_no_window_to_miss():
+    """A launch crash-loop never completes a session, so the window cannot be
+    counted and the exit and error carry the verdict alone."""
+    row = score_run("crash", _obs(exit_code=3, session_exits=()),
+                    _window_oracle())
+    assert row.outcome == DETECTION
+
+
+def test_ceiling_held_reads_the_refusal_record_not_the_launch_count():
+    """The launch count and the monetary ceiling are different units."""
+    refused = _obs(exit_code=0, records=(
+        {"event": "launch_admission",
+         "refusals": [["spend-ceiling", "seat spend meets the configured ceiling"]]},
+    ))
+    quiet = _obs(exit_code=0, records=({"event": "launch_admission", "refusals": []},))
+    oracle = Oracle(
+        stalled_from=None, stop_required_by=None, any_stop_is_false_alarm=False,
+        expected=TRUE_NEGATIVE, label_source="fixture", horizon_sessions=4,
+        spend_ceiling=2.0)
+    assert score_run("refused", refused, oracle).ceiling_held is True
+    assert score_run("quiet", quiet, oracle).ceiling_held is False

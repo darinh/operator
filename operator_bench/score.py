@@ -136,7 +136,7 @@ def classify(obs: Observation, oracle: Oracle) -> str:
         return INVALID
     if oracle.stop_required_by is not None:
         if expected is not None and obs.exit_code == expected:
-            return DETECTION
+            return _in_window(obs, oracle)
         if obs.exit_code == 0:
             return MISS
         return INVALID
@@ -145,6 +145,43 @@ def classify(obs: Observation, oracle: Oracle) -> str:
     if obs.exit_code in STOP_EXITS:
         return FALSE_ALARM
     return INVALID
+
+
+def _ceiling_held(obs: Observation) -> bool:
+    """Did the kernel actually refuse a launch on spend?
+
+    Read from the production record, not inferred. An earlier version compared
+    the launch count against the monetary ceiling, which are different units
+    and happened to separate the one fixture it was written against.
+    """
+    for record in obs.records:
+        if record.get("event") != "launch_admission":
+            continue
+        for refusal in record.get("refusals") or ():
+            if "spend-ceiling" in str(refusal):
+                return True
+    return False
+
+
+def _in_window(obs: Observation, oracle: Oracle) -> str:
+    """Did the right breaker fire, and did it fire in time?
+
+    Matching the expected exit only says the right breaker fired eventually.
+    Acting before the stall began is a false alarm and acting after the
+    deadline is a miss, so both are scored as such rather than as a detection.
+
+    The window is counted in completed sessions. A scenario where nothing
+    completes, such as a launch crash-loop, has no such count, so the window
+    does not apply and the exit and error carry the verdict alone.
+    """
+    at = len(obs.session_exits)
+    if at == 0:
+        return DETECTION
+    if oracle.stalled_from is not None and at < oracle.stalled_from:
+        return FALSE_ALARM
+    if at > oracle.stop_required_by:
+        return MISS
+    return DETECTION
 
 
 def latency_for(obs: Observation, oracle: Oracle, outcome: str) -> Latency:
@@ -186,7 +223,7 @@ def score_run(name: str, obs: Observation, oracle: Oracle) -> ScenarioScore:
     cap = oracle.spend_ceiling
     avail = len(obs.session_exits) if cap is not None else 0
     facts = sum(1 for r in obs.session_exits if r.get("session") in costs)
-    held = None if cap is None else (0 < len(obs.launch_polls) <= cap)
+    held = None if cap is None else _ceiling_held(obs)
     return ScenarioScore(
         name=name, outcome=outcome, exit_code=obs.exit_code,
         latency=latency_for(obs, oracle, outcome), error=obs.error,
