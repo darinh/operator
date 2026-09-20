@@ -17,12 +17,23 @@ def _why(row):
     return f"{row.name}: outcome={row.outcome} exit={row.exit_code} error={row.error}"
 
 
-def test_the_suite_is_exactly_the_five_named_scenarios():
+def test_the_suite_is_exactly_its_named_scenarios():
     names = [s.program.name for s in scenarios()]
     assert names == [
         "stall-after-five", "healthy-slow", "backlog-0014",
-        "crash-loop", "unaccounted-endings",
+        "crash-loop", "unaccounted-endings", "spend-ceiling",
     ]
+
+
+def test_run_suite_scores_every_scenario_the_suite_declares():
+    """run_suite once ran a scenario that scenarios() did not list, so the
+    suite under-reported what it measured."""
+    import inspect
+
+    from operator_bench import suite as suite_mod
+    source = inspect.getsource(suite_mod.run_suite)
+    assert "scenarios()" in source
+    assert source.count("run_one") == 1
 
 
 def test_stall_after_five_reaches_the_nochange_breaker():
@@ -93,13 +104,6 @@ def test_unaccounted_endings_are_detected(tmp_path):
     row = run_one(unaccounted_endings(), tmp_path)
     assert row.outcome == DETECTION, _why(row)
     assert row.exit_code == op.EXIT_UNACCOUNTED
-
-
-def test_spend_ceiling_is_not_folded_into_the_breaker_suite():
-    from operator_bench.suite import spend_ceiling, scenarios
-    names = [s.program.name for s in scenarios()]
-    assert spend_ceiling().program.name not in names
-    assert spend_ceiling().oracle.spend_ceiling == 2.0
 
 
 def test_spend_ceiling_stops_launching_at_the_cap(tmp_path):

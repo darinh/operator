@@ -12,7 +12,12 @@ from test_kernel_boundary import (
 from operator_bench.score import Scorecard
 
 BENCH = REPO / "operator_bench"
-MAX_BENCH_CODE_LINES = 900
+#: Raised from 900 when the spend scenario landed. The first number came from a
+#: design sketch, not a measurement, and the cheapest way to fit under it was to
+#: compress the scenario fixtures from keyword to positional arguments. A suite
+#: whose line count is capped has its coverage capped, and this package's whole
+#: job is coverage.
+MAX_BENCH_CODE_LINES = 1200
 STDLIB = sys.stdlib_module_names
 OWN = {"operator_bench"}
 CHILD_EXTRA = STDLIB | OWN | {
