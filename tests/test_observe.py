@@ -40,6 +40,7 @@ def test_observe_reads_the_sandbox_ledger_after_a_real_run(tmp_path):
     assert obs.error is None
     events = [r.get("event") for r in obs.records]
     assert "supervisor_start" in events
+    assert obs.chain == "verified"
     assert obs.polls >= 0
     assert (world.home / "bench-tail.json").exists()
     tail = LedgerTail(world.home / "trace.jsonl", world.home / "other-tail.json")
