@@ -1,4 +1,4 @@
-"""The five unit-1 scenarios. Labels live on Oracle, never on Program."""
+"""The benchmark scenarios. Labels live on Oracle, never on Program."""
 from __future__ import annotations
 
 import json
@@ -18,50 +18,78 @@ _LABELS = "fixture"
 
 
 def stall_after_five() -> Scenario:
-    s = tuple([Session(0, WORK, HANDOFF)] * 5 + [Session(0, SILENCE, HANDOFF)] * 3)
-    return Scenario(Program("stall-after-five", "stall-after-five", s),
-                    Oracle(6, 8, False, DETECTION, _LABELS, 8, 3))
+    sessions = tuple(
+        [Session(0, WORK, HANDOFF)] * 5 + [Session(0, SILENCE, HANDOFF)] * 3
+    )
+    return Scenario(
+        Program("stall-after-five", "stall-after-five", sessions),
+        Oracle(stalled_from=6, stop_required_by=8, any_stop_is_false_alarm=False,
+               expected=DETECTION, label_source=_LABELS, horizon_sessions=8,
+               expected_exit=3),
+    )
 
 
 def healthy_slow() -> Scenario:
-    s = tuple([Session(150, WORK, HANDOFF)] * 4 + [Session(0, SILENCE, STOP)])
-    return Scenario(Program("healthy-slow", "healthy-slow", s),
-                    Oracle(None, None, True, TRUE_NEGATIVE, _LABELS, 4))
+    sessions = tuple(
+        [Session(150, WORK, HANDOFF)] * 4 + [Session(0, SILENCE, STOP)]
+    )
+    return Scenario(
+        Program("healthy-slow", "healthy-slow", sessions),
+        Oracle(stalled_from=None, stop_required_by=None, any_stop_is_false_alarm=True,
+               expected=TRUE_NEGATIVE, label_source=_LABELS, horizon_sessions=4),
+    )
 
 
 def backlog_0014() -> Scenario:
-    s = (Session(0, WORK, HANDOFF), *([Session(0, BUSYWORK, HANDOFF)] * 7),
-         Session(0, SILENCE, STOP))
-    return Scenario(Program("backlog-0014", "backlog-0014", s),
-                    Oracle(2, 8, False, MISS, _LABELS, 8, 3))
+    sessions = (
+        Session(0, WORK, HANDOFF),
+        *([Session(0, BUSYWORK, HANDOFF)] * 7),
+        Session(0, SILENCE, STOP),
+    )
+    return Scenario(
+        Program("backlog-0014", "backlog-0014", sessions),
+        Oracle(stalled_from=2, stop_required_by=8, any_stop_is_false_alarm=False,
+               expected=MISS, label_source=_LABELS, horizon_sessions=8,
+               expected_exit=3),
+    )
 
 
 def crash_loop() -> Scenario:
+    sessions = (Session(0, LAUNCH_FAIL, LAUNCH_FAIL),)
     return Scenario(
-        Program("crash-loop", "crash-loop", (Session(0, LAUNCH_FAIL, LAUNCH_FAIL),)),
-        Oracle(1, 1, False, DETECTION, _LABELS, 1, 1, "MuxSessionError"))
+        Program("crash-loop", "crash-loop", sessions),
+        Oracle(stalled_from=1, stop_required_by=1, any_stop_is_false_alarm=False,
+               expected=DETECTION, label_source=_LABELS, horizon_sessions=1,
+               expected_exit=1, expected_error="MuxSessionError"),
+    )
 
 
 def unaccounted_endings() -> Scenario:
-    s = tuple([Session(130, SILENCE, UNACCOUNTED)] * 5)
-    return Scenario(Program("unaccounted-endings", "unaccounted-endings", s),
-                    Oracle(1, 5, False, DETECTION, _LABELS, 5, 4))
+    sessions = tuple([Session(130, SILENCE, UNACCOUNTED)] * 5)
+    return Scenario(
+        Program("unaccounted-endings", "unaccounted-endings", sessions),
+        Oracle(stalled_from=1, stop_required_by=5, any_stop_is_false_alarm=False,
+               expected=DETECTION, label_source=_LABELS, horizon_sessions=5,
+               expected_exit=4),
+    )
 
 
 def spend_ceiling() -> Scenario:
-    s = tuple([Session(0, WORK, HANDOFF, 1.0)] * 4)
+    sessions = tuple([Session(0, WORK, HANDOFF, 1.0)] * 4)
     return Scenario(
-        Program("spend-ceiling", "spend-ceiling", s,
+        Program("spend-ceiling", "spend-ceiling", sessions,
                 max_virtual_seconds=8_000.0, max_sleeps=8_000),
-        Oracle(None, None, False, TRUE_NEGATIVE, _LABELS, 4, spend_ceiling=2.0))
+        Oracle(stalled_from=None, stop_required_by=None,
+               any_stop_is_false_alarm=False, expected=TRUE_NEGATIVE,
+               label_source=_LABELS, horizon_sessions=4, spend_ceiling=2.0),
+    )
 
 
 def scenarios() -> tuple[Scenario, ...]:
     return (
         stall_after_five(), healthy_slow(), backlog_0014(),
-        crash_loop(), unaccounted_endings(),
+        crash_loop(), unaccounted_endings(), spend_ceiling(),
     )
-
 
 def run_one(scenario: Scenario, parent: Path, timeout: float = 90.0) -> ScenarioScore:
     world = make_world(parent)
@@ -93,7 +121,6 @@ def measure(parent: Path | None = None, timeout: float = 90.0) -> Scorecard:
 
 
 def run_suite(parent: Path, timeout: float = 90.0) -> Scorecard:
-    rows = [run_one(s, Path(parent) / s.program.name, timeout=timeout)
-            for s in scenarios()]
-    extra = run_one(spend_ceiling(), Path(parent) / "spend-ceiling", timeout)
-    return scorecard(tuple(rows) + (extra,), label_source=_LABELS, horizon=_HORIZON)
+    rows = tuple(run_one(s, Path(parent) / s.program.name, timeout=timeout)
+                 for s in scenarios())
+    return scorecard(rows, label_source=_LABELS, horizon=_HORIZON)
