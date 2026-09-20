@@ -1,8 +1,10 @@
 """The ledger chain is per writer. These tests are pure functions over records."""
 from __future__ import annotations
 
+import json
+
 from ledger_chain import (
-    Broken, Gap, NoChain, TruncatedTail, Verified, Writer, digest,
+    Broken, Gap, NoChain, TruncatedTail, Verified, Writer, digest, verify,
     verify_records,
 )
 
@@ -99,6 +101,33 @@ def test_a_prev_digest_mismatch_reports_broken():
     assert result.writer == "alice"
     assert result.seq == 2
     assert result.reason == "digest"
+
+
+def test_verify_reads_rotated_files_as_one_stream(tmp_path):
+    w = Writer("alice")
+    older = tmp_path / "trace.jsonl.1"
+    newer = tmp_path / "trace.jsonl"
+    first = w.stamp({"event": "one"})
+    second = w.stamp({"event": "two"})
+    older.write_text(json.dumps(first, ensure_ascii=False) + "\n", encoding="utf-8")
+    newer.write_text(json.dumps(second, ensure_ascii=False) + "\n", encoding="utf-8")
+    result = verify([older, newer])
+    assert isinstance(result, Verified)
+    assert result.writers == 1
+    assert result.records == 2
+
+
+def test_verify_reports_truncated_tail_for_a_torn_final_line(tmp_path):
+    w = Writer("alice")
+    rec = w.stamp({"event": "probe"})
+    path = tmp_path / "trace.jsonl"
+    complete = (json.dumps(rec, ensure_ascii=False) + "\n").encode("utf-8")
+    torn = b'{"event":"partial"'
+    path.write_bytes(complete + torn)
+    result = verify([path])
+    assert isinstance(result, TruncatedTail)
+    assert result.bytes_dropped == len(torn)
+    assert not isinstance(result, Broken)
 
 
 def test_a_writer_whose_first_seen_seq_is_not_one_is_a_gap():

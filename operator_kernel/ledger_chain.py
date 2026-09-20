@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from pathlib import Path
 
 
 def digest(prev: "str | None", payload: dict) -> str:
@@ -116,3 +117,44 @@ def verify_records(records, truncated_bytes: int = 0) -> Result:
     if truncated_bytes:
         return TruncatedTail(truncated_bytes)
     return Verified(writers=len(last), records=len(chained))
+
+
+def _file_records(raw: bytes, torn_ok: bool):
+    if not raw:
+        return [], 0, None
+    chunks = raw.split(b"\n")
+    if raw.endswith(b"\n"):
+        chunks = chunks[:-1]
+        dropped = 0
+    else:
+        dropped = len(chunks[-1])
+        chunks = chunks[:-1]
+        if not torn_ok:
+            return [], dropped, Broken("", 0, "framing")
+    records = []
+    for chunk in chunks:
+        if not chunk:
+            continue
+        try:
+            rec = json.loads(chunk.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+            return [], 0, Broken("", 0, "json")
+        records.append(rec)
+    return records, dropped, None
+
+
+def verify(paths) -> Result:
+    paths = [Path(p) for p in paths]
+    records = []
+    truncated = 0
+    last_index = len(paths) - 1
+    for i, path in enumerate(paths):
+        if not path.exists():
+            continue
+        recs, dropped, err = _file_records(path.read_bytes(), torn_ok=(i == last_index))
+        if err is not None:
+            return err
+        records.extend(recs)
+        if i == last_index:
+            truncated = dropped
+    return verify_records(records, truncated_bytes=truncated)

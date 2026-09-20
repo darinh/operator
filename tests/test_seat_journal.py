@@ -60,6 +60,7 @@ def test_an_entry_is_durable_the_moment_it_is_written(project):
     assert line["kind"] == "gotcha"
     assert line["session"] == 7
     assert line["verified"] is False
+    assert "chain" not in line
 
 
 def test_nothing_can_write_a_verified_entry(project):
