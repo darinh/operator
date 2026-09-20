@@ -293,3 +293,20 @@ def test_format_scorecard_is_ascii():
     assert "miss_rate" in text
     assert "false_alarm_rate" in text
     assert math.isfinite(row.latency.bound_polls)
+
+
+def test_an_errored_run_is_invalid_even_when_its_exit_code_was_expected():
+    """crash-loop expects exit 1, and the child also exits 1 on any exception,
+    so the exit code alone cannot tell a kernel give-up from a harness crash."""
+    oracle = Oracle(
+        stalled_from=1, stop_required_by=5, any_stop_is_false_alarm=False,
+        expected=DETECTION, label_source="fixture", horizon_sessions=6,
+        expected_exit=1,
+    )
+    clean = score_run("give-up", _obs(exit_code=1), oracle)
+    crashed = score_run("crash", _obs(exit_code=1, error="ImportError: boom"), oracle)
+    assert clean.outcome == DETECTION
+    assert crashed.outcome == "invalid"
+    card = scorecard((clean, crashed), label_source="fixture", horizon="t")
+    assert card.miss_rate.n == 1
+    assert card.miss_rate.censored == 1

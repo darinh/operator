@@ -13,6 +13,10 @@ from operator_bench.suite import (
 )
 
 
+def _why(row):
+    return f"{row.name}: outcome={row.outcome} exit={row.exit_code} error={row.error}"
+
+
 def test_the_suite_is_exactly_the_five_named_scenarios():
     names = [s.program.name for s in scenarios()]
     assert names == [
@@ -64,28 +68,28 @@ def test_backlog_0014_keeps_moving_the_fingerprint():
 
 def test_stall_after_five_is_a_detection(tmp_path):
     row = run_one(stall_after_five(), tmp_path)
-    assert row.outcome == DETECTION
+    assert row.outcome == DETECTION, _why(row)
     assert row.latency.polls is not None
     assert not row.latency.censored
 
 
 def test_healthy_slow_records_no_false_alarm(tmp_path):
     row = run_one(healthy_slow(), tmp_path)
-    assert row.outcome == TRUE_NEGATIVE
+    assert row.outcome == TRUE_NEGATIVE, _why(row)
     assert row.exit_code == 0
 
 
 def test_backlog_0014_is_a_recorded_kernel_blind_spot(tmp_path):
     row = run_one(backlog_0014(), tmp_path)
-    assert row.outcome == backlog_0014().oracle.expected
+    assert row.outcome == backlog_0014().oracle.expected, _why(row)
 
 
 def test_crash_loop_is_detected(tmp_path):
     row = run_one(crash_loop(), tmp_path)
-    assert row.outcome == DETECTION
+    assert row.outcome == DETECTION, _why(row)
 
 
 def test_unaccounted_endings_are_detected(tmp_path):
     row = run_one(unaccounted_endings(), tmp_path)
-    assert row.outcome == DETECTION
+    assert row.outcome == DETECTION, _why(row)
     assert row.exit_code == op.EXIT_UNACCOUNTED
