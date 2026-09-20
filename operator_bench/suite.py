@@ -93,6 +93,18 @@ def run_one(scenario: Scenario, parent: Path, timeout: float = 90.0) -> Scenario
         world.close()
 
 
+def measure(parent: Path | None = None, timeout: float = 90.0) -> Scorecard:
+    import shutil
+    import tempfile
+    owned = parent is None
+    root = Path(tempfile.mkdtemp(prefix="operator-bench-")) if owned else Path(parent)
+    try:
+        return run_suite(root, timeout=timeout)
+    finally:
+        if owned:
+            shutil.rmtree(root, ignore_errors=True)
+
+
 def run_suite(parent: Path, timeout: float = 90.0) -> Scorecard:
     rows = []
     for scenario in scenarios():
