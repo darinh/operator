@@ -40,6 +40,7 @@ def _run(home: Path, program: dict) -> int:
 
     clock = _Clock(program.get("max_virtual_seconds", 20_000),
                    program.get("max_sleeps", 200_000))
+    clock.poll_interval = float(config.POLL_INTERVAL)
     time.time = clock.now
     time.sleep = clock.sleep
     seat = _Seat(home, program, clock)
@@ -64,6 +65,7 @@ def _run(home: Path, program: dict) -> int:
         "sleep_report": clock.report(),
         "sleeps": clock.sleeps,
         "virtual_seconds": clock.t,
+        "polls": clock.polls,
     }, indent=2), encoding="utf-8")
     return rc
 
@@ -76,6 +78,9 @@ class _Clock:
         self.max_n = int(max_n)
         self.ledger: list[tuple[float, float, str, str]] = []
         self._on_tick = lambda: None
+        self.polls = 0
+        self.poll_interval = 10.0
+        self._sleep_frame = None
 
     def now(self) -> float:
         self._on_tick()
@@ -93,6 +98,13 @@ class _Clock:
                 f"clock exhausted in {mod}.{func} at {self.t}s "
                 f"after {self.sleeps} sleeps")
         self.ledger.append((self.t, seconds, mod, func))
+        if caller and func == "_sleep":
+            fid = id(caller)
+            if fid != self._sleep_frame:
+                self._sleep_frame = fid
+                total = caller.f_locals.get("total")
+                if total == self.poll_interval:
+                    self.polls += 1
         self.t += seconds
         self._on_tick()
 
