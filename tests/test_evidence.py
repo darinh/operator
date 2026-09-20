@@ -307,3 +307,72 @@ def test_ledger_tail_reads_progress_verdict_across_a_rotation(tmp_path, monkeypa
     assert second[0]["session"] == 2
     assert second[0]["verdict"] == "unchanged"
     assert "chain" in second[0]
+
+
+def _exit_kwargs(**overrides):
+    fields = dict(
+        instance="seat", session=3, pid=None,
+        markers={"stop": False, "detach": False, "restart": True,
+                 "exit_code": 0, "uptime_s": 1},
+        consecutive=0, limit=5,
+    )
+    fields.update(overrides)
+    return fields
+
+
+def _costs(home):
+    path = evidence.trace_path(home)
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in
+            path.read_text(encoding="utf-8").splitlines()
+            if json.loads(line).get("event") == "session_cost"]
+
+
+def test_session_exit_records_session_cost_when_spend_is_readable(
+        tmp_path, monkeypatch):
+    import spend
+    monkeypatch.setattr("config.SPEND_CEILING", 20.0)
+    path = spend.spend_path(tmp_path, "seat")
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(
+        {"amount": 4.5, "unit": "usd", "source": "ingest"}), encoding="utf-8")
+    evidence.record_session_exit(tmp_path, **_exit_kwargs())
+    costs = _costs(tmp_path)
+    assert len(costs) == 1
+    rec = costs[0]
+    for key in ("ts", "event", "pid", "instance", "session"):
+        assert key in rec
+    assert rec["amount"] == 4.5
+    assert rec["unit"] == "usd"
+    assert rec["source"] == "ingest"
+    assert rec["ceiling"] == 20.0
+    assert rec["session"] == 3
+
+
+def test_session_exit_does_not_record_session_cost_when_spend_is_unknown(
+        tmp_path):
+    evidence.record_session_exit(tmp_path, **_exit_kwargs())
+    assert _costs(tmp_path) == []
+
+
+def test_session_cost_records_a_null_ceiling_when_none_is_set(
+        tmp_path, monkeypatch):
+    import spend
+    monkeypatch.setattr("config.SPEND_CEILING", None)
+    path = spend.spend_path(tmp_path, "seat")
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(
+        {"amount": 1, "unit": "usd", "source": "t"}), encoding="utf-8")
+    evidence.record_session_exit(tmp_path, **_exit_kwargs())
+    rec = _costs(tmp_path)[0]
+    assert rec["amount"] == 1
+    assert rec["ceiling"] is None
+
+
+def test_recording_session_cost_never_raises(tmp_path, monkeypatch):
+    monkeypatch.setattr(evidence, "_append",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("nope")))
+    evidence.record_session_exit(tmp_path, **_exit_kwargs())
+    assert not (tmp_path / "trace.jsonl").exists()
+    assert _costs(tmp_path) == []

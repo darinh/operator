@@ -24,7 +24,8 @@ from __future__ import annotations
 
 import evidence
 import extensions
-from config import OPERATOR_HOME, RESTART_PAUSE_SECONDS
+import spend
+from config import OPERATOR_HOME, RESTART_PAUSE_SECONDS, SPEND_CEILING
 from probes import log
 
 #: The longest wait between re-asking a gate that keeps refusing. The launch
@@ -68,7 +69,12 @@ class LaunchGate:
         # *detail*, which is a package's prose and unbounded.
         blind = tuple((f.extension, f.error)
                       for f in tuple(self.failures) + tuple(failures))
-        if self.host is None and not blind:
+        blocked = spend.spend_blocks(self.home, instance, SPEND_CEILING)
+        if blocked:
+            verdict = extensions.Admission(
+                refusals=verdict.refusals + (blocked,),
+                blind=verdict.blind)
+        if self.host is None and not blind and not blocked:
             # No third party in this launch, so nothing to attribute. Every
             # other combination is recorded -- a reviewer found this early
             # return one line higher, where a discovery producing *only*
