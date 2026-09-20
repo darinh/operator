@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 
 import evidence
+from ledger_chain import Broken, Gap, NoChain, TruncatedTail, Verified, verify
 
 
 def budgeted_size(record: dict) -> int:
@@ -161,6 +162,94 @@ def test_recording_a_progress_verdict_never_raises(tmp_path, monkeypatch):
     assert not (tmp_path / "trace.jsonl").exists()
 
 
+def test_ledger_recorders_write_a_chain_field(tmp_path):
+    evidence._chain_writer = None
+    evidence.record_supervisor_start(tmp_path, instance="seat", session=1)
+    path = evidence.trace_path(tmp_path)
+    rec = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    assert rec["event"] == "supervisor_start"
+    chain = rec["chain"]
+    assert chain["n"] == 1
+    assert chain["p"] is None
+    assert chain["d"]
+    assert chain["w"]
+    result = verify([path])
+    assert isinstance(result, Verified)
+    assert result.writers == 1
+    assert result.records == 1
+
+
+def test_append_without_the_opt_in_writes_no_chain_field(tmp_path):
+    path = tmp_path / "journal.jsonl"
+    assert evidence._append(path, {"kind": "gotcha", "body": "x"}) is True
+    rec = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    assert "chain" not in rec
+
+
+def test_editing_a_written_payload_reports_broken(tmp_path):
+    evidence._chain_writer = None
+    evidence.record_supervisor_start(tmp_path, instance="seat", session=1)
+    path = evidence.trace_path(tmp_path)
+    rec = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    rec["instance"] = "tampered"
+    path.write_text(json.dumps(rec, ensure_ascii=False) + "\n", encoding="utf-8")
+    result = verify([path])
+    assert isinstance(result, Broken)
+    assert result.seq == 1
+
+
+def test_deleting_a_written_record_reports_gap_or_broken_for_that_writer(tmp_path):
+    evidence._chain_writer = None
+    evidence.record_supervisor_start(tmp_path, instance="seat", session=1)
+    evidence.record_progress_verdict(tmp_path, **_verdict_kwargs(session=1))
+    evidence.record_session_exit(
+        tmp_path, instance="seat", session=1, pid=None,
+        markers={}, consecutive=0, limit=5)
+    path = evidence.trace_path(tmp_path)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 3
+    writer = json.loads(lines[0])["chain"]["w"]
+    path.write_text(lines[0] + "\n" + lines[2] + "\n", encoding="utf-8")
+    result = verify([path])
+    assert isinstance(result, (Gap, Broken))
+    assert result.writer == writer
+
+
+def test_a_torn_final_line_on_disk_reports_truncated_tail(tmp_path):
+    evidence._chain_writer = None
+    evidence.record_supervisor_start(tmp_path, instance="seat", session=1)
+    path = evidence.trace_path(tmp_path)
+    path.write_bytes(path.read_bytes() + b'{"event":"partial"')
+    result = verify([path])
+    assert isinstance(result, TruncatedTail)
+    assert not isinstance(result, Broken)
+
+
+def test_a_pre_chain_ledger_file_reports_no_chain(tmp_path):
+    path = evidence.trace_path(tmp_path)
+    path.write_text(
+        json.dumps({"event": "supervisor_start", "pid": 1}) + "\n",
+        encoding="utf-8")
+    result = verify([path])
+    assert isinstance(result, NoChain)
+    assert result.records == 1
+    assert not isinstance(result, Broken)
+
+
+def test_a_ledger_that_rotates_still_verifies(tmp_path, monkeypatch):
+    evidence._chain_writer = None
+    monkeypatch.setattr(evidence, "_MAX_BYTES", 1)
+    evidence.record_supervisor_start(tmp_path, instance="seat", session=1)
+    evidence.record_progress_verdict(tmp_path, **_verdict_kwargs(session=1))
+    path = evidence.trace_path(tmp_path)
+    rotated = path.with_suffix(path.suffix + ".1")
+    assert rotated.exists()
+    result = verify([rotated, path])
+    assert isinstance(result, Verified)
+    assert result.records == 2
+    assert result.writers == 1
+
+
 def test_ledger_tail_reads_progress_verdict_across_a_rotation(tmp_path, monkeypatch):
     import ledger_tail
 
@@ -171,9 +260,11 @@ def test_ledger_tail_reads_progress_verdict_across_a_rotation(tmp_path, monkeypa
     first = tail.read()
     assert [r.get("event") for r in first] == ["progress_verdict"]
     assert first[0]["session"] == 1
+    assert "chain" in first[0]
     evidence.record_progress_verdict(tmp_path, **_verdict_kwargs(session=2))
     assert path.with_suffix(path.suffix + ".1").exists()
     second = tail.read()
     assert [r.get("event") for r in second] == ["progress_verdict"]
     assert second[0]["session"] == 2
     assert second[0]["verdict"] == "unchanged"
+    assert "chain" in second[0]

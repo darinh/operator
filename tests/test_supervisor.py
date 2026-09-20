@@ -90,6 +90,20 @@ def test_run_loop_mode_records_an_unchanged_progress_verdict(looping, monkeypatc
     assert rec["instance"] != inst.display_name
 
 
+def test_a_ledger_written_by_the_real_supervisor_verifies(looping, monkeypatch):
+    from ledger_chain import Verified, verify
+
+    op.evidence._chain_writer = None
+    _age_clock(monkeypatch)
+    attempts = {"n": 0}
+    monkeypatch.setattr(op, "start_session", _one_then_stop(attempts))
+    op.run_loop_mode(op.Instance("a.b"), ["--agent", "test:agent"], is_fresh=True)
+    result = verify([op.evidence.trace_path(looping)])
+    assert isinstance(result, Verified)
+    assert result.records >= 1
+    assert result.writers == 1
+
+
 def test_run_loop_mode_records_a_changed_progress_verdict(looping, monkeypatch):
     _age_clock(monkeypatch)
     attempts = {"n": 0}

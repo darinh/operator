@@ -55,6 +55,15 @@ def test_what_on_fact_learns_survives_into_a_later_call(home):
         "there is nowhere else it could be")
 
 
+def test_seat_watch_still_reads_a_session_exit_that_carries_a_chain(home):
+    turn_on(home)
+    record = exited(consecutive=4)
+    record["chain"] = {"w": "w1", "n": 1, "p": None, "d": "abc"}
+    seat_watch.on_fact(facts=[record])
+    assert activation.read_state(seat_watch.NAME)["seats"]["alpha"][
+        "consecutive"] == 4
+
+
 def test_a_redelivered_record_does_not_inflate_the_count(home):
     """Delivery is at-least-once. A counter that incremented would report
     seats failing that never did."""

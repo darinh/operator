@@ -7,8 +7,10 @@ earlier version could not express the event it existed to detect.
 from __future__ import annotations
 import json
 import os
+import secrets
 from datetime import datetime, timezone
 from pathlib import Path
+from ledger_chain import Writer
 
 
 IS_WINDOWS = os.name == "nt"
@@ -19,6 +21,8 @@ IS_WINDOWS = os.name == "nt"
 #: that unfolded over days, short enough not to become the largest file in
 #: the directory.
 _MAX_BYTES = 8 * 1024 * 1024
+
+_chain_writer = None
 
 
 def trace_path(operator_home: Path) -> Path:
@@ -250,7 +254,7 @@ def record_mandate_read(operator_home: Path, *, instance: str, session: int,
     on: the sentence was discoverable only because git had kept it.
     """
     try:
-        _append(trace_path(Path(operator_home)), {
+        _ledger(operator_home, {
             "ts": _utcnow(),
             "event": "mandate_read",
             "pid": os.getpid(),
@@ -294,7 +298,7 @@ def record_handoff_state(operator_home: Path, *, instance: str, session: int,
     supervision.
     """
     try:
-        _append(trace_path(Path(operator_home)), {
+        _ledger(operator_home, {
             "ts": _utcnow(),
             "event": "handoff_state",
             "pid": os.getpid(),
@@ -336,7 +340,7 @@ def record_launch_admission(operator_home: Path, *, instance: str, session: int,
     extension will ever be asked again.
     """
     try:
-        return _append(trace_path(Path(operator_home)), {
+        return _ledger(operator_home, {
             "ts": _utcnow(),
             "event": "launch_admission",
             "kind": "claim",
@@ -371,7 +375,7 @@ def record_withheld_clause(operator_home: Path, *, instance: str, session: int,
     confused agent or a deliberate one, and both are worth knowing about.
     """
     try:
-        _append(trace_path(Path(operator_home)), {
+        _ledger(operator_home, {
             "ts": _utcnow(),
             "event": "withheld_clause",
             "pid": os.getpid(),
@@ -469,10 +473,23 @@ def _rotate_if_needed(path: Path) -> None:
         pass
 
 
-def _append(path: Path, record: dict) -> bool:
+def _stamp_chain(record: dict) -> dict:
+    global _chain_writer
+    if _chain_writer is None:
+        _chain_writer = Writer(f"{os.getpid()}-{secrets.token_hex(8)}")
+    return _chain_writer.stamp(record)
+
+
+def _ledger(operator_home, record: dict) -> bool:
+    return _append(trace_path(Path(operator_home)), record, chain=True)
+
+
+def _append(path: Path, record: dict, *, chain: bool = False) -> bool:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         _rotate_if_needed(path)
+        if chain:
+            record = _stamp_chain(record)
         line = json.dumps(record, ensure_ascii=False, default=str)
         # `newline=""` so the one separator written is the one byte counted.
         # Text mode translates "\n" to "\r\n" on Windows, and every caller that
@@ -517,7 +534,7 @@ def record_supervisor_start(operator_home: Path, *, instance: str,
         if isinstance(code, dict):
             payload["code"] = code.get("digest")
             payload["toolkit_version"] = code.get("version")
-        _append(trace_path(Path(operator_home)), payload)
+        _ledger(operator_home, payload)
     except Exception:
         return
 
@@ -560,7 +577,7 @@ def record_session_exit(operator_home: Path, *, instance: str, session: int,
     written by supervisors without it.
     """
     try:
-        _append(trace_path(Path(operator_home)), {
+        _ledger(operator_home, {
             "ts": _utcnow(),
             "event": "session_exit",
             "pid": os.getpid(),
@@ -593,7 +610,7 @@ def record_progress_verdict(
     shows the tree moved underneath the conclusion.
     """
     try:
-        _append(trace_path(Path(operator_home)), {
+        _ledger(operator_home, {
             "ts": _utcnow(),
             "event": "progress_verdict",
             "pid": os.getpid(),
