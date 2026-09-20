@@ -42,41 +42,30 @@ def make_world(parent: Path) -> World:
 
 
 def git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
-    proc = subprocess.run(
-        ("git",) + args,
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=_git_env(),
-        timeout=60,
-    )
+    proc = subprocess.run(("git",) + args, cwd=str(cwd), capture_output=True,
+                          text=True, encoding="utf-8", errors="replace",
+                          env=_git_env(), timeout=60)
     if proc.returncode != 0:
         raise RuntimeError(
             f"git {' '.join(args)} failed ({proc.returncode}): "
-            f"{proc.stderr or proc.stdout}"
-        )
+            f"{proc.stderr or proc.stdout}")
     return proc
 
 
 def refs(cwd: Path) -> str:
-    return git(
-        cwd, "for-each-ref", "--format=%(objectname) %(refname)",
-        "refs/heads", "refs/tags", "refs/stash", "refs/remotes",
-    ).stdout
+    return git(cwd, "for-each-ref", "--format=%(objectname) %(refname)",
+               "refs/heads", "refs/tags", "refs/stash", "refs/remotes").stdout
 
 
-def spawn(world: World, argv: list[str]) -> subprocess.Popen:
+def spawn(world: World, argv: list[str], extra: dict | None = None) -> subprocess.Popen:
     env = os.environ.copy()
+    if extra:
+        env.update(extra)
     env["COPILOT_OPERATOR_HOME"] = str(world.home)
     env["PATH"] = str(world.bin) + os.pathsep + env.get("PATH", "")
     root = repo_root()
     env["PYTHONPATH"] = os.pathsep.join((
-        str(root / "operator_kernel"),
-        str(root / "operator_fleet"),
-        str(root),
-    ))
+        str(root / "operator_kernel"), str(root / "operator_fleet"), str(root)))
     kwargs: dict = {}
     if os.name == "nt":
         kwargs["creationflags"] = _CREATE_NO_WINDOW
@@ -84,13 +73,7 @@ def spawn(world: World, argv: list[str]) -> subprocess.Popen:
     err = (world.home / "child.stderr").open("w", encoding="utf-8", errors="replace")
     try:
         proc = subprocess.Popen(
-            argv,
-            cwd=str(world.repo),
-            env=env,
-            stdout=out,
-            stderr=err,
-            **kwargs,
-        )
+            argv, cwd=str(world.repo), env=env, stdout=out, stderr=err, **kwargs)
     except Exception:
         out.close()
         err.close()

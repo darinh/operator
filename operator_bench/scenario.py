@@ -31,6 +31,7 @@ class Session:
     duration_s: float
     effect: str
     ending: str
+    cost: float = 0.0
 
     def __post_init__(self) -> None:
         if self.effect not in _EFFECTS:
@@ -60,6 +61,7 @@ class Program:
                     "duration_s": session.duration_s,
                     "effect": session.effect,
                     "ending": session.ending,
+                    "cost": session.cost,
                 }
                 for session in self.sessions
             ],
@@ -79,6 +81,7 @@ class Oracle:
     horizon_sessions: int
     expected_exit: int | None = None
     expected_error: str | None = None
+    spend_ceiling: float | None = None
 
 
 @dataclass(frozen=True)

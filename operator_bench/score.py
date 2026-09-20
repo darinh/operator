@@ -75,6 +75,9 @@ class ScenarioScore:
     completed_sessions: int
     verdict_covered: int
     chain: str
+    spend_facts: int = 0
+    spend_available: int = 0
+    ceiling_held: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +88,8 @@ class Scorecard:
     detection_latency: Measurement
     verdict_in_ledger_coverage: Measurement
     ledger_chain_verified: Measurement
+    spend_recorded_coverage: Measurement
+    spend_ceiling_fidelity: Measurement
 
 
 def wilson(k: int, n: int, z: float = _Z95) -> tuple[float, float, float]:
@@ -176,25 +181,31 @@ def score_run(name: str, obs: Observation, oracle: Oracle) -> ScenarioScore:
     required = (oracle.stop_required_by is not None
                 and not oracle.any_stop_is_false_alarm)
     completed, covered = ledger_verdict_counts(obs)
+    costs = {r.get("session") for r in obs.records
+             if r.get("event") == "session_cost"}
+    cap = oracle.spend_ceiling
+    avail = len(obs.session_exits) if cap is not None else 0
+    facts = sum(1 for r in obs.session_exits if r.get("session") in costs)
+    held = None if cap is None else (0 < len(obs.launch_polls) <= cap)
     return ScenarioScore(
         name=name, outcome=outcome, exit_code=obs.exit_code,
         latency=latency_for(obs, oracle, outcome), error=obs.error,
-        required_stop=required,
-        completed_sessions=completed, verdict_covered=covered,
-        chain=obs.chain,
-    )
+        required_stop=required, completed_sessions=completed,
+        verdict_covered=covered, chain=obs.chain,
+        spend_facts=facts, spend_available=avail, ceiling_held=held)
 
 
 def scorecard(rows: tuple[ScenarioScore, ...], *,
               label_source: str, horizon: str) -> Scorecard:
-    required = tuple(r for r in rows if r.required_stop)
+    core = tuple(r for r in rows if r.ceiling_held is None)
+    required = tuple(r for r in core if r.required_stop)
     observed_req = tuple(r for r in required if r.outcome in (DETECTION, MISS))
     misses = sum(1 for r in observed_req if r.outcome == MISS)
-    controls = tuple(r for r in rows if not r.required_stop)
+    controls = tuple(r for r in core if not r.required_stop)
     observed_ctl = tuple(
         r for r in controls if r.outcome in (TRUE_NEGATIVE, FALSE_ALARM))
     alarms = sum(1 for r in observed_ctl if r.outcome == FALSE_ALARM)
-    detections = tuple(r for r in rows if r.outcome == DETECTION)
+    detections = tuple(r for r in core if r.outcome == DETECTION)
     numbered = tuple(r for r in detections if r.latency.polls is not None)
     if not numbered:
         lat_est: Estimate = NoEstimate("no uncensored detections")
@@ -209,8 +220,7 @@ def scorecard(rows: tuple[ScenarioScore, ...], *,
     lat = Measurement(
         estimate=lat_est, n=lat_n, eligible=lat_elig, censored=lat_cens,
         coverage=(lat_n / lat_elig) if lat_elig else 0.0,
-        label_source=label_source, horizon=horizon,
-    )
+        label_source=label_source, horizon=horizon)
     eligible = sum(r.completed_sessions for r in rows)
     covered = sum(r.verdict_covered for r in rows)
     if any(r.chain != "no_chain" for r in rows):
@@ -223,6 +233,20 @@ def scorecard(rows: tuple[ScenarioScore, ...], *,
             estimate=NoEstimate("ledger has no chain"),
             n=0, eligible=len(rows), censored=0, coverage=0.0,
             label_source=label_source, horizon=horizon)
+    rec_elig = sum(r.spend_available for r in rows)
+    rec_n = sum(r.spend_facts for r in rows)
+    rec = (rate(rec_n, rec_elig, eligible=rec_elig, censored=0,
+                label_source=label_source, horizon=horizon) if rec_n else
+           Measurement(estimate=NoEstimate("no session_cost facts"), n=0,
+                       eligible=rec_elig, censored=0, coverage=0.0,
+                       label_source=label_source, horizon=horizon))
+    fid_rows = tuple(r for r in rows if r.ceiling_held is not None)
+    fid = (rate(sum(1 for r in fid_rows if r.ceiling_held), len(fid_rows),
+                eligible=len(fid_rows), censored=0,
+                label_source=label_source, horizon=horizon) if fid_rows else
+           Measurement(estimate=NoEstimate("no spend-ceiling runs"), n=0,
+                       eligible=0, censored=0, coverage=0.0,
+                       label_source=label_source, horizon=horizon))
     return Scorecard(
         scenarios=rows,
         miss_rate=rate(
@@ -238,6 +262,8 @@ def scorecard(rows: tuple[ScenarioScore, ...], *,
             covered, eligible, eligible=eligible, censored=0,
             label_source=label_source, horizon=horizon),
         ledger_chain_verified=chain_m,
+        spend_recorded_coverage=rec,
+        spend_ceiling_fidelity=fid,
     )
 
 
@@ -281,6 +307,10 @@ def format_scorecard(card: Scorecard) -> str:
         "verdict_in_ledger_coverage", card.verdict_in_ledger_coverage))
     lines.append(format_measurement(
         "ledger_chain_verified", card.ledger_chain_verified))
+    lines.append(format_measurement(
+        "spend_recorded_coverage", card.spend_recorded_coverage))
+    lines.append(format_measurement("spend_ceiling_fidelity",
+                                    card.spend_ceiling_fidelity))
     return "\n".join(lines)
 
 

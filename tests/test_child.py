@@ -80,6 +80,24 @@ def test_child_writes_evidence_only_under_the_sandbox_home(tmp_path):
     assert not leaked.exists()
 
 
+def test_child_writes_spend_at_the_kernel_input_boundary(tmp_path):
+    world, rc, _proc = _run_child(tmp_path, _program([
+        {"duration_s": 0, "effect": "work", "ending": "handoff", "cost": 1},
+        {"duration_s": 0, "effect": "silence", "ending": "stop"},
+    ]))
+    assert rc == 0, (world.home / "child.stderr").read_text(
+        encoding="utf-8", errors="replace")
+    path = world.home / "spend" / "bench.json"
+    assert path.exists()
+    body = json.loads(path.read_text(encoding="utf-8"))
+    assert body["amount"] == 1
+    assert body["unit"]
+    assert body["source"]
+    source = (REPO / "operator_bench" / "child.py").read_text(encoding="utf-8")
+    assert "session_cost" not in source
+    assert "OPERATOR_SPEND_CEILING" not in source
+
+
 def test_the_virtual_clock_never_reaches_subprocess(tmp_path):
     """POSIX Popen._wait busy-waits on time.sleep while Windows blocks in
     WaitForSingleObject, so a clock patched onto the time module itself burns

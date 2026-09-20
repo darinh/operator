@@ -441,3 +441,121 @@ def test_ledger_chain_verified_is_one_when_every_run_verifies():
     assert m.n == 1
     assert m.eligible == 1
     assert m.censored == 0
+
+
+def test_spend_recorded_coverage_is_noestimate_without_session_cost():
+    oracle = Oracle(
+        stalled_from=None, stop_required_by=None, any_stop_is_false_alarm=False,
+        expected=TRUE_NEGATIVE, label_source="fixture", horizon_sessions=2,
+        spend_ceiling=2.0,
+    )
+    row = score_run(
+        "spend-ceiling",
+        _obs(exit_code=2, error="ClockExhausted",
+             session_exits=(
+                 {"event": "session_exit", "session": 1},
+                 {"event": "session_exit", "session": 2},
+             ),
+             records=(
+                 {"event": "session_exit", "session": 1},
+                 {"event": "session_exit", "session": 2},
+             ),
+             launch_polls=(0, 1)),
+        oracle,
+    )
+    card = scorecard((row,), label_source="fixture", horizon="unit1")
+    m = card.spend_recorded_coverage
+    assert isinstance(m.estimate, NoEstimate)
+    assert "session_cost" in m.estimate.reason
+
+
+def test_spend_recorded_coverage_is_one_when_every_exit_has_a_cost():
+    oracle = Oracle(
+        stalled_from=None, stop_required_by=None, any_stop_is_false_alarm=False,
+        expected=TRUE_NEGATIVE, label_source="fixture", horizon_sessions=2,
+        spend_ceiling=2.0,
+    )
+    exits = (
+        {"event": "session_exit", "session": 1},
+        {"event": "session_exit", "session": 2},
+    )
+    row = score_run(
+        "spend-ceiling",
+        _obs(exit_code=2, error="ClockExhausted",
+             session_exits=exits,
+             records=exits + (
+                 {"event": "session_cost", "session": 1, "amount": 1},
+                 {"event": "session_cost", "session": 2, "amount": 2},
+             ),
+             launch_polls=(0, 1)),
+        oracle,
+    )
+    card = scorecard((row,), label_source="fixture", horizon="unit1")
+    m = card.spend_recorded_coverage
+    assert m.estimate.value == 1
+    assert m.n == 2
+    assert m.eligible == 2
+    assert m.n + m.censored <= m.eligible
+
+
+def test_spend_ceiling_fidelity_is_zero_when_launches_pass_the_ceiling():
+    oracle = Oracle(
+        stalled_from=None, stop_required_by=None, any_stop_is_false_alarm=False,
+        expected=TRUE_NEGATIVE, label_source="fixture", horizon_sessions=4,
+        spend_ceiling=2.0,
+    )
+    row = score_run(
+        "spend-ceiling",
+        _obs(exit_code=0, launch_polls=(0, 1, 2, 3),
+             session_exits=tuple(
+                 {"event": "session_exit", "session": n} for n in (1, 2, 3, 4)),
+             records=()),
+        oracle,
+    )
+    assert row.ceiling_held is False
+    card = scorecard((row,), label_source="fixture", horizon="unit1")
+    m = card.spend_ceiling_fidelity
+    assert m.estimate.value == 0
+    assert m.n == 1
+    assert m.eligible == 1
+
+
+def test_spend_ceiling_fidelity_is_one_when_launching_stops_at_the_ceiling():
+    oracle = Oracle(
+        stalled_from=None, stop_required_by=None, any_stop_is_false_alarm=False,
+        expected=TRUE_NEGATIVE, label_source="fixture", horizon_sessions=4,
+        spend_ceiling=2.0,
+    )
+    exits = (
+        {"event": "session_exit", "session": 1},
+        {"event": "session_exit", "session": 2},
+    )
+    row = score_run(
+        "spend-ceiling",
+        _obs(exit_code=2, error="ClockExhausted", launch_polls=(0, 1),
+             session_exits=exits,
+             records=exits + (
+                 {"event": "session_cost", "session": 1, "amount": 1},
+                 {"event": "session_cost", "session": 2, "amount": 2},
+             )),
+        oracle,
+    )
+    assert row.ceiling_held is True
+    card = scorecard((row,), label_source="fixture", horizon="unit1")
+    m = card.spend_ceiling_fidelity
+    assert m.estimate.value == 1
+    assert m.n == 1
+    assert m.n + m.censored <= m.eligible
+
+
+def test_format_scorecard_names_the_spend_metrics():
+    oracle = Oracle(
+        stalled_from=None, stop_required_by=None, any_stop_is_false_alarm=False,
+        expected=TRUE_NEGATIVE, label_source="fixture", horizon_sessions=2,
+        spend_ceiling=2.0,
+    )
+    row = score_run("spend-ceiling", _obs(exit_code=0, launch_polls=(0, 1)), oracle)
+    text = format_scorecard(scorecard((row,), label_source="fixture", horizon="unit1"))
+    text.encode("ascii")
+    assert "spend_recorded_coverage" in text
+    assert "spend_ceiling_fidelity" in text
