@@ -78,6 +78,7 @@ class Oracle:
     label_source: str
     horizon_sessions: int
     expected_exit: int | None = None
+    expected_error: str | None = None
 
 
 @dataclass(frozen=True)

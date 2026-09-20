@@ -114,7 +114,9 @@ def kernel_stopped(obs: Observation) -> bool:
 
 def classify(obs: Observation, oracle: Oracle) -> str:
     if obs.error is not None:
-        return INVALID
+        expected_error = oracle.expected_error
+        if expected_error is None or expected_error not in obs.error:
+            return INVALID
     expected = oracle.expected_exit
     if oracle.any_stop_is_false_alarm:
         if obs.exit_code == 0:

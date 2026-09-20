@@ -61,7 +61,8 @@ def crash_loop() -> Scenario:
         Program("crash-loop", "crash-loop", sessions),
         Oracle(stalled_from=1, stop_required_by=1, any_stop_is_false_alarm=False,
                expected=DETECTION, label_source=_LABELS, horizon_sessions=1,
-               expected_exit=1),
+               expected_exit=1,
+               expected_error="MuxSessionError"),
     )
 
 

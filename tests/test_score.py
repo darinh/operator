@@ -310,3 +310,20 @@ def test_an_errored_run_is_invalid_even_when_its_exit_code_was_expected():
     card = scorecard((clean, crashed), label_source="fixture", horizon="t")
     assert card.miss_rate.n == 1
     assert card.miss_rate.censored == 1
+
+
+def test_an_unexpected_error_is_invalid_even_when_a_give_up_error_was_declared():
+    """The kernel's launch-failure give-up re-raises MuxSessionError rather than
+    returning an exit code, so an oracle may declare it. Any other error is still
+    the harness falling over, and must not be scored as a detection."""
+    oracle = Oracle(
+        stalled_from=1, stop_required_by=1, any_stop_is_false_alarm=False,
+        expected=DETECTION, label_source="fixture", horizon_sessions=1,
+        expected_exit=1, expected_error="MuxSessionError",
+    )
+    declared = score_run(
+        "gave-up", _obs(exit_code=1, error="MuxSessionError: scripted"), oracle)
+    other = score_run(
+        "broke", _obs(exit_code=1, error="ImportError: no module"), oracle)
+    assert declared.outcome == DETECTION
+    assert other.outcome == "invalid"
