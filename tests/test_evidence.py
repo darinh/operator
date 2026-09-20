@@ -99,3 +99,81 @@ def test_a_record_that_cannot_be_encoded_is_refused_rather_than_raised(tmp_path)
     circular["self"] = circular
 
     assert evidence._append(path, circular) is False
+
+
+def _verdict_kwargs(**overrides):
+    fields = dict(
+        instance="seat-id", session=4, verdict="unchanged",
+        before="abc", after="abc", accounted=True,
+        nochange_streak=1, unaccounted_streak=0,
+        limit_nochange=3, limit_unaccounted=5,
+    )
+    fields.update(overrides)
+    return fields
+
+
+def _verdicts(home):
+    path = evidence.trace_path(home)
+    if not path.exists():
+        return []
+    records = [json.loads(line) for line in
+               path.read_text(encoding="utf-8").splitlines()]
+    return [r for r in records if r.get("event") == "progress_verdict"]
+
+
+def test_progress_verdict_carries_the_verdict_and_both_fingerprints(tmp_path):
+    evidence.record_progress_verdict(tmp_path, **_verdict_kwargs())
+    records = _verdicts(tmp_path)
+    assert len(records) == 1
+    rec = records[0]
+    for key in ("ts", "event", "pid", "instance", "session"):
+        assert key in rec
+    assert rec["event"] == "progress_verdict"
+    assert rec["verdict"] == "unchanged"
+    assert rec["before"] == "abc"
+    assert rec["after"] == "abc"
+    assert rec["accounted"] is True
+    assert rec["session_num"] == 4
+    assert rec["session"] == 4
+    assert rec["nochange_streak"] == 1
+    assert rec["unaccounted_streak"] == 0
+    assert rec["limit_nochange"] == 3
+    assert rec["limit_unaccounted"] == 5
+    assert rec["instance"] == "seat-id"
+
+
+def test_progress_verdict_writes_null_when_a_fingerprint_could_not_be_read(tmp_path):
+    evidence.record_progress_verdict(
+        tmp_path, **_verdict_kwargs(verdict="unknown", before=None, after="xyz",
+                                    accounted=False, nochange_streak=None))
+    rec = _verdicts(tmp_path)[0]
+    assert rec["before"] is None
+    assert rec["after"] == "xyz"
+    assert rec["accounted"] is False
+    assert rec["nochange_streak"] is None
+    assert rec["verdict"] == "unknown"
+
+
+def test_recording_a_progress_verdict_never_raises(tmp_path, monkeypatch):
+    monkeypatch.setattr(evidence, "_append",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("nope")))
+    evidence.record_progress_verdict(tmp_path, **_verdict_kwargs())
+    assert not (tmp_path / "trace.jsonl").exists()
+
+
+def test_ledger_tail_reads_progress_verdict_across_a_rotation(tmp_path, monkeypatch):
+    import ledger_tail
+
+    monkeypatch.setattr(evidence, "_MAX_BYTES", 1)
+    path = evidence.trace_path(tmp_path)
+    tail = ledger_tail.LedgerTail(path, tmp_path / "tail.json")
+    evidence.record_progress_verdict(tmp_path, **_verdict_kwargs(session=1))
+    first = tail.read()
+    assert [r.get("event") for r in first] == ["progress_verdict"]
+    assert first[0]["session"] == 1
+    evidence.record_progress_verdict(tmp_path, **_verdict_kwargs(session=2))
+    assert path.with_suffix(path.suffix + ".1").exists()
+    second = tail.read()
+    assert [r.get("event") for r in second] == ["progress_verdict"]
+    assert second[0]["session"] == 2
+    assert second[0]["verdict"] == "unchanged"

@@ -72,6 +72,8 @@ class ScenarioScore:
     latency: Latency
     error: str | None
     required_stop: bool
+    completed_sessions: int
+    verdict_covered: int
 
 
 @dataclass(frozen=True)
@@ -80,6 +82,7 @@ class Scorecard:
     miss_rate: Measurement
     false_alarm_rate: Measurement
     detection_latency: Measurement
+    verdict_in_ledger_coverage: Measurement
 
 
 def wilson(k: int, n: int, z: float = _Z95) -> tuple[float, float, float]:
@@ -153,14 +156,29 @@ def latency_for(obs: Observation, oracle: Oracle, outcome: str) -> Latency:
     return Latency(polls=max(0, obs.polls - start), censored=False, bound_polls=bound)
 
 
+def ledger_verdict_counts(obs: Observation) -> tuple[int, int]:
+    """Completed sessions, and how many of those have a progress_verdict.
+
+    A completed session is a `session_exit`. Coverage is per session number,
+    not a raw event-count ratio, so extra verdicts cannot wash out a miss.
+    """
+    verdicts = {r.get("session") for r in obs.records
+                if r.get("event") == "progress_verdict"}
+    completed = obs.session_exits
+    covered = sum(1 for r in completed if r.get("session") in verdicts)
+    return len(completed), covered
+
+
 def score_run(name: str, obs: Observation, oracle: Oracle) -> ScenarioScore:
     outcome = classify(obs, oracle)
     required = (oracle.stop_required_by is not None
                 and not oracle.any_stop_is_false_alarm)
+    completed, covered = ledger_verdict_counts(obs)
     return ScenarioScore(
         name=name, outcome=outcome, exit_code=obs.exit_code,
         latency=latency_for(obs, oracle, outcome), error=obs.error,
         required_stop=required,
+        completed_sessions=completed, verdict_covered=covered,
     )
 
 
@@ -190,6 +208,8 @@ def scorecard(rows: tuple[ScenarioScore, ...], *,
         coverage=(lat_n / lat_elig) if lat_elig else 0.0,
         label_source=label_source, horizon=horizon,
     )
+    eligible = sum(r.completed_sessions for r in rows)
+    covered = sum(r.verdict_covered for r in rows)
     return Scorecard(
         scenarios=rows,
         miss_rate=rate(
@@ -201,6 +221,9 @@ def scorecard(rows: tuple[ScenarioScore, ...], *,
             censored=len(controls) - len(observed_ctl),
             label_source=label_source, horizon=horizon),
         detection_latency=lat,
+        verdict_in_ledger_coverage=rate(
+            covered, eligible, eligible=eligible, censored=0,
+            label_source=label_source, horizon=horizon),
     )
 
 
@@ -240,6 +263,8 @@ def format_scorecard(card: Scorecard) -> str:
     lines.append(format_measurement("miss_rate", card.miss_rate))
     lines.append(format_measurement("false_alarm_rate", card.false_alarm_rate))
     lines.append(format_measurement("detection_latency", card.detection_latency))
+    lines.append(format_measurement(
+        "verdict_in_ledger_coverage", card.verdict_in_ledger_coverage))
     return "\n".join(lines)
 
 
