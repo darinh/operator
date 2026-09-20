@@ -53,7 +53,7 @@ def test_child_runs_real_loop_mode_to_a_known_exit(tmp_path):
     world, rc, proc = _run_child(tmp_path, _program([
         {"duration_s": 0, "effect": "silence", "ending": "stop"},
     ]))
-    stderr = proc.stderr.read() if proc.stderr else ""
+    stderr = (world.home / "child.stderr").read_text(encoding="utf-8", errors="replace")
     assert rc == 0, stderr
     log = (world.home / "operator.log").read_text(encoding="utf-8")
     assert "loop mode" in log
@@ -70,7 +70,8 @@ def test_child_writes_evidence_only_under_the_sandbox_home(tmp_path):
     world, rc, proc = _run_child(tmp_path, _program([
         {"duration_s": 0, "effect": "silence", "ending": "stop"},
     ]))
-    assert rc == 0, proc.stderr.read() if proc.stderr else ""
+    assert rc == 0, (world.home / "child.stderr").read_text(
+        encoding="utf-8", errors="replace")
     trace = world.home / "trace.jsonl"
     assert trace.exists()
     real = Path.home() / ".operator"
