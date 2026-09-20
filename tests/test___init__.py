@@ -6,3 +6,4 @@ import operator_bench
 
 def test_operator_bench_is_importable():
     assert operator_bench.__doc__
+    assert callable(operator_bench.measure)
