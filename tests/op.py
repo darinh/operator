@@ -41,7 +41,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "operator_kernel
 _MODULE_NAMES = (
     "config", "paths", "gitio", "probes", "presence", "instance", "launch",
     "session_state", "provenance", "supervisor_records", "breakers", "exits",
-    "preamble", "supervisor", "supervisor_control", "evidence", "claims",
+    "preamble", "supervisor", "supervisor_control", "evidence", "ledger_chain",
+    "claims",
     "snapshot", "process_identity", "mux", "console", "sqlite_store",
     "version", "mandate", "work_seam", "extension_seam", "fleet_host",
     "ledger_tail",
