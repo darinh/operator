@@ -120,6 +120,24 @@ EXIT_GRACE_SECONDS = 20
 METRICS_GRACE_SECONDS = 15
 
 
+def spend_ceiling(environ=None) -> float | None:
+    """None is unlimited. Unreadable values do not bind."""
+    raw = (os.environ if environ is None else environ).get(
+        "OPERATOR_SPEND_CEILING")
+    if raw is None or not str(raw).strip():
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if value != value:
+        return None
+    return value
+
+
+SPEND_CEILING = spend_ceiling()
+
+
 # How long a supervisor's startup record may be believed on its age alone,
 # once the pid it names is no longer alive. It bounds one specific unknown:
 # on Windows `sys.executable` is often a launcher shim that re-execs the real

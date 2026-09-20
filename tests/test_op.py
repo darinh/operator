@@ -4,6 +4,12 @@ from __future__ import annotations
 import op
 
 
+def test_spend_is_bound_by_the_shim():
+    assert "spend" in op._MODULE_NAMES
+    assert op.is_repo_module(op.spend) is True
+    assert hasattr(op.spend, "seat_spend")
+
+
 def test_ledger_chain_is_bound_by_the_shim():
     """A new kernel module is invisible to monkeypatching unless it is listed.
 

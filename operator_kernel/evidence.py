@@ -595,6 +595,35 @@ def record_session_exit(operator_home: Path, *, instance: str, session: int,
         })
     except Exception:
         return
+    record_session_cost(operator_home, instance=instance, session=session)
+
+
+def record_session_cost(operator_home, *, instance: str, session: int) -> None:
+    """Record a readable spend figure when a session ends. Never raises.
+
+    Recording is independent of whether a ceiling is set. Unknown spend is
+    not written as zero.
+    """
+    try:
+        import spend
+        from config import SPEND_CEILING
+        figure = spend.seat_figure(operator_home, instance)
+        if figure is None:
+            return
+        amount, unit, source = figure
+        _ledger(operator_home, {
+            "ts": _utcnow(),
+            "event": "session_cost",
+            "pid": os.getpid(),
+            "instance": str(instance),
+            "session": session,
+            "amount": amount,
+            "unit": unit,
+            "source": source,
+            "ceiling": SPEND_CEILING,
+        })
+    except Exception:
+        return
 
 
 def record_progress_verdict(
