@@ -66,6 +66,7 @@ def _run(home: Path, program: dict) -> int:
         "sleeps": clock.sleeps,
         "virtual_seconds": clock.t,
         "polls": clock.polls,
+        "launch_polls": seat.launch_polls,
     }, indent=2), encoding="utf-8")
     return rc
 
@@ -127,6 +128,7 @@ class _Seat:
         self.sessions: dict[str, dict] = {}
         self.index = 0
         self.pending: list[tuple[str, dict, float]] = []
+        self.launch_polls: list[int] = []
         clock._on_tick = self._fire
 
     def _paths(self):
@@ -226,6 +228,7 @@ class _Seat:
         if spec.get("effect") == "launch_fail" or spec.get("ending") == "launch_fail":
             return "", "scripted launch failure", 1
         self.index += 1
+        self.launch_polls.append(self.clock.polls)
         name = args[3]
         self.sessions[name] = {
             "cwd": args[5], "argv": list(args[7:]),
