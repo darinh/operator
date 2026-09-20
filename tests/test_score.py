@@ -57,7 +57,7 @@ def test_rate_is_estimated_not_a_bare_float():
 
 
 def test_rate_without_eligible_trials_is_noestimate():
-    m = rate(0, 3, eligible=0, censored=3, label_source="fixture", horizon="unit1")
+    m = rate(0, 0, eligible=0, censored=0, label_source="fixture", horizon="unit1")
     assert isinstance(m.estimate, NoEstimate)
     assert "eligible" in m.estimate.reason
 
@@ -81,6 +81,7 @@ def test_classify_miss_and_false_alarm_are_distinct():
     required = Oracle(
         stalled_from=2, stop_required_by=8, any_stop_is_false_alarm=False,
         expected=MISS, label_source="fixture", horizon_sessions=8,
+        expected_exit=3,
     )
     control = Oracle(
         stalled_from=None, stop_required_by=None, any_stop_is_false_alarm=True,
@@ -97,12 +98,14 @@ def test_kernel_stopped_reads_breaker_exit_codes():
     assert kernel_stopped(_obs(exit_code=4))
     assert not kernel_stopped(_obs(exit_code=0))
     assert kernel_stopped(_obs(exit_code=1, error="MuxSessionError: x"))
+    assert not kernel_stopped(_obs(exit_code=2, log_text="Giving up after 5"))
 
 
 def test_scorecard_has_no_combined_accuracy_field():
     row = score_run("demo", _obs(exit_code=3), Oracle(
         stalled_from=1, stop_required_by=3, any_stop_is_false_alarm=False,
         expected=DETECTION, label_source="fixture", horizon_sessions=3,
+        expected_exit=3,
     ))
     card = scorecard((row,), label_source="fixture", horizon="unit1")
     assert isinstance(card, Scorecard)
@@ -129,6 +132,7 @@ def test_detection_latency_is_polls_from_stall_start():
     oracle = Oracle(
         stalled_from=2, stop_required_by=5, any_stop_is_false_alarm=False,
         expected=DETECTION, label_source="fixture", horizon_sessions=5,
+        expected_exit=3,
     )
     row = score_run("stall", _obs(exit_code=3, polls=20, launch_polls=(0, 7, 14)),
                     oracle)
@@ -140,10 +144,149 @@ def test_detection_latency_is_polls_from_stall_start():
     assert card.detection_latency.estimate.value == 13
 
 
+def test_n_is_the_sample_the_interval_was_computed_from():
+    required = Oracle(
+        stalled_from=1, stop_required_by=3, any_stop_is_false_alarm=False,
+        expected=DETECTION, label_source="fixture", horizon_sessions=3,
+        expected_exit=3,
+    )
+    control = Oracle(
+        stalled_from=None, stop_required_by=None, any_stop_is_false_alarm=True,
+        expected=TRUE_NEGATIVE, label_source="fixture", horizon_sessions=4,
+    )
+    rows = (
+        score_run("d1", _obs(exit_code=3), required),
+        score_run("d2", _obs(exit_code=3), required),
+        score_run("d3", _obs(exit_code=3), required),
+        score_run("miss", _obs(exit_code=0), required),
+        score_run("ok", _obs(exit_code=0), control),
+    )
+    card = scorecard(rows, label_source="fixture", horizon="unit1")
+    assert card.miss_rate.n == 4
+    assert card.miss_rate.eligible == 4
+    assert card.miss_rate.censored == 0
+    assert card.miss_rate.coverage == 1.0
+    p, lo, hi = wilson(1, 4)
+    assert isinstance(card.miss_rate.estimate, Estimated)
+    assert card.miss_rate.estimate.value == p
+    assert card.miss_rate.estimate.lo == lo
+    assert card.miss_rate.estimate.hi == hi
+    assert card.false_alarm_rate.n == 1
+    assert card.false_alarm_rate.eligible == 1
+
+
+def test_coverage_is_n_over_eligible_not_the_reverse():
+    m = rate(0, 1, eligible=4, censored=3, label_source="fixture", horizon="unit1")
+    assert m.n == 1
+    assert m.eligible == 4
+    assert m.censored == 3
+    assert m.coverage == 0.25
+    p, lo, hi = wilson(0, 1)
+    assert isinstance(m.estimate, Estimated)
+    assert m.estimate.value == p
+    assert m.estimate.lo == lo
+    assert m.estimate.hi == hi
+
+
+def test_measurement_rejects_n_plus_censored_past_eligible():
+    with pytest.raises(ValueError):
+        Measurement(
+            estimate=Exact(1.0), n=5, eligible=4, censored=1,
+            coverage=1.0, label_source="x", horizon="y",
+        )
+
+
+def test_mean_of_unrelated_breaker_latencies_is_noestimate():
+    progress = Oracle(
+        stalled_from=1, stop_required_by=3, any_stop_is_false_alarm=False,
+        expected=DETECTION, label_source="fixture", horizon_sessions=3,
+        expected_exit=3,
+    )
+    crash = Oracle(
+        stalled_from=1, stop_required_by=1, any_stop_is_false_alarm=False,
+        expected=DETECTION, label_source="fixture", horizon_sessions=1,
+        expected_exit=1,
+    )
+    unacc = Oracle(
+        stalled_from=1, stop_required_by=5, any_stop_is_false_alarm=False,
+        expected=DETECTION, label_source="fixture", horizon_sessions=5,
+        expected_exit=4,
+    )
+    rows = (
+        score_run("stall", _obs(exit_code=3, polls=3, launch_polls=(0,)), progress),
+        score_run("crash", _obs(exit_code=1, polls=1, launch_polls=(0,)), crash),
+        score_run("unacc", _obs(exit_code=4, polls=55, launch_polls=(0,)), unacc),
+    )
+    card = scorecard(rows, label_source="fixture", horizon="unit1")
+    assert isinstance(card.detection_latency.estimate, NoEstimate)
+    assert card.detection_latency.estimate.reason == "latencies span unrelated breakers"
+
+
+def test_harness_error_is_invalid_and_moves_neither_rate():
+    required = Oracle(
+        stalled_from=1, stop_required_by=3, any_stop_is_false_alarm=False,
+        expected=DETECTION, label_source="fixture", horizon_sessions=3,
+        expected_exit=3,
+    )
+    control = Oracle(
+        stalled_from=None, stop_required_by=None, any_stop_is_false_alarm=True,
+        expected=TRUE_NEGATIVE, label_source="fixture", horizon_sessions=4,
+    )
+    detected = score_run("ok", _obs(exit_code=3), required)
+    boom = score_run(
+        "boom", _obs(exit_code=1, error="RuntimeError: harness"), required)
+    quiet = score_run("quiet", _obs(exit_code=0), control)
+    assert boom.outcome == "invalid"
+    assert detected.outcome == DETECTION
+    card = scorecard((detected, boom, quiet), label_source="fixture", horizon="unit1")
+    assert card.miss_rate.n == 1
+    assert card.miss_rate.eligible == 2
+    assert card.miss_rate.censored == 1
+    assert card.miss_rate.coverage == 0.5
+    assert isinstance(card.miss_rate.estimate, Estimated)
+    assert card.miss_rate.estimate.value == 0.0
+    assert card.false_alarm_rate.n == 1
+    assert card.false_alarm_rate.eligible == 1
+    assert card.false_alarm_rate.censored == 0
+    assert isinstance(card.false_alarm_rate.estimate, Estimated)
+    assert card.false_alarm_rate.estimate.value == 0.0
+
+
+def test_log_prose_does_not_score_a_detection():
+    required = Oracle(
+        stalled_from=1, stop_required_by=3, any_stop_is_false_alarm=False,
+        expected=DETECTION, label_source="fixture", horizon_sessions=3,
+        expected_exit=3,
+    )
+    row = score_run(
+        "quiet",
+        _obs(exit_code=2, log_text="Progress breaker tripped"),
+        required,
+    )
+    assert row.outcome == "invalid"
+    assert not kernel_stopped(
+        _obs(exit_code=2, log_text="Progress breaker tripped"))
+
+
+def test_latency_without_onset_is_noestimate_not_the_run_length():
+    oracle = Oracle(
+        stalled_from=None, stop_required_by=5, any_stop_is_false_alarm=False,
+        expected=DETECTION, label_source="fixture", horizon_sessions=5,
+        expected_exit=4,
+    )
+    row = score_run("unacc", _obs(exit_code=4, polls=55, launch_polls=(0,)), oracle)
+    assert row.outcome == DETECTION
+    assert row.latency.polls is None
+    text = format_scorecard(scorecard((row,), label_source="fixture", horizon="unit1"))
+    assert "latency 55" not in text
+    assert "oracle declares no onset" in text
+
+
 def test_format_scorecard_is_ascii():
     row = score_run("demo", _obs(exit_code=3), Oracle(
         stalled_from=1, stop_required_by=3, any_stop_is_false_alarm=False,
         expected=DETECTION, label_source="fixture", horizon_sessions=3,
+        expected_exit=3,
     ))
     text = format_scorecard(scorecard((row,), label_source="fixture", horizon="unit1"))
     text.encode("ascii")

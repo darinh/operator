@@ -25,7 +25,8 @@ def stall_after_five() -> Scenario:
     return Scenario(
         Program("stall-after-five", "stall-after-five", sessions),
         Oracle(stalled_from=6, stop_required_by=8, any_stop_is_false_alarm=False,
-               expected=DETECTION, label_source=_LABELS, horizon_sessions=8),
+               expected=DETECTION, label_source=_LABELS, horizon_sessions=8,
+               expected_exit=3),
     )
 
 
@@ -49,7 +50,8 @@ def backlog_0014() -> Scenario:
     return Scenario(
         Program("backlog-0014", "backlog-0014", sessions),
         Oracle(stalled_from=2, stop_required_by=8, any_stop_is_false_alarm=False,
-               expected=MISS, label_source=_LABELS, horizon_sessions=8),
+               expected=MISS, label_source=_LABELS, horizon_sessions=8,
+               expected_exit=3),
     )
 
 
@@ -58,7 +60,8 @@ def crash_loop() -> Scenario:
     return Scenario(
         Program("crash-loop", "crash-loop", sessions),
         Oracle(stalled_from=1, stop_required_by=1, any_stop_is_false_alarm=False,
-               expected=DETECTION, label_source=_LABELS, horizon_sessions=1),
+               expected=DETECTION, label_source=_LABELS, horizon_sessions=1,
+               expected_exit=1),
     )
 
 
@@ -67,7 +70,8 @@ def unaccounted_endings() -> Scenario:
     return Scenario(
         Program("unaccounted-endings", "unaccounted-endings", sessions),
         Oracle(stalled_from=1, stop_required_by=5, any_stop_is_false_alarm=False,
-               expected=DETECTION, label_source=_LABELS, horizon_sessions=5),
+               expected=DETECTION, label_source=_LABELS, horizon_sessions=5,
+               expected_exit=4),
     )
 
 
