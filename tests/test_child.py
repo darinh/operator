@@ -78,3 +78,19 @@ def test_child_writes_evidence_only_under_the_sandbox_home(tmp_path):
     assert world.home.resolve() != real.resolve()
     leaked = real / "restart" / "bench.stopreq"
     assert not leaked.exists()
+
+
+def test_the_virtual_clock_never_reaches_subprocess(tmp_path):
+    """POSIX Popen._wait busy-waits on time.sleep while Windows blocks in
+    WaitForSingleObject, so a clock patched onto the time module itself burns
+    its whole budget on Linux and nothing on Windows. Every git probe the
+    kernel makes goes through that wait."""
+    world, _rc, _proc = _run_child(tmp_path, _program([
+        {"duration_s": 600, "effect": "work", "ending": "handoff"},
+    ]))
+    report = json.loads(
+        (world.home / "bench-result.json").read_text(encoding="utf-8"))
+    callers = [row[0] for row in report["sleep_report"]]
+    assert callers, "the run recorded no sleeps at all"
+    assert not [c for c in callers if c.startswith("subprocess")], callers
+    assert all(c.split(".")[0] not in ("asyncio", "threading") for c in callers)
