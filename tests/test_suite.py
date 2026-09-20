@@ -95,6 +95,19 @@ def test_unaccounted_endings_are_detected(tmp_path):
     assert row.exit_code == op.EXIT_UNACCOUNTED
 
 
+def test_spend_ceiling_is_not_folded_into_the_breaker_suite():
+    from operator_bench.suite import spend_ceiling, scenarios
+    names = [s.program.name for s in scenarios()]
+    assert spend_ceiling().program.name not in names
+    assert spend_ceiling().oracle.spend_ceiling == 2.0
+
+
+def test_spend_ceiling_stops_launching_at_the_cap(tmp_path):
+    from operator_bench.suite import spend_ceiling, run_one
+    row = run_one(spend_ceiling(), tmp_path)
+    assert row.ceiling_held is True, _why(row)
+
+
 def test_crash_loop_declares_the_kernels_raise_based_give_up():
     """supervisor.py re-raises MuxSessionError after MAX_LAUNCH_FAILURES rather
     than returning, so the exit code alone cannot describe that give-up."""

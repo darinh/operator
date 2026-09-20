@@ -230,6 +230,19 @@ class _Seat:
                 session["dead"] = True
         else:
             raise AssertionError(f"unmodelled ending {ending!r}")
+        cost = spec.get("cost") or 0
+        if cost:
+            from mux import safe_instance_id
+            path = self.home / "spend" / (
+                f"{safe_instance_id(self.program.get('instance', 'bench'))}.json")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                prev = float(json.loads(path.read_text(encoding="utf-8"))["amount"])
+            except Exception:
+                prev = 0.0
+            path.write_text(json.dumps({
+                "amount": prev + float(cost), "unit": "usd", "source": "bench",
+            }), encoding="utf-8")
 
     def _effect(self, spec: dict, n: int) -> None:
         kind = spec.get("effect", "silence")

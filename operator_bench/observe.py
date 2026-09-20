@@ -34,17 +34,11 @@ def observe(home: Path) -> Observation:
     result = verify(paths) if paths else NoChain(0)
     chain = "verified" if isinstance(result, Verified) else "no_chain" if isinstance(result, NoChain) else "failed"
     return Observation(
-        exit_code=int(raw.get("exit_code", 1)),
-        error=raw.get("error"),
-        records=records,
-        session_exits=exits,
-        polls=int(raw.get("polls", 0)),
+        exit_code=int(raw.get("exit_code", 1)), error=raw.get("error"),
+        records=records, session_exits=exits, polls=int(raw.get("polls", 0)),
         launch_polls=tuple(int(x) for x in raw.get("launch_polls", ())),
         virtual_seconds=float(raw.get("virtual_seconds", 0)),
-        sleeps=int(raw.get("sleeps", 0)),
-        log_text=log_text,
-        chain=chain,
-    )
+        sleeps=int(raw.get("sleeps", 0)), log_text=log_text, chain=chain)
 
 
 def _ledger_records(tail_cls, home: Path) -> tuple[dict, ...]:

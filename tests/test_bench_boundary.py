@@ -89,6 +89,8 @@ def test_scorecard_has_no_combined_score_field():
         assert banned not in names
     assert "miss_rate" in names
     assert "false_alarm_rate" in names
+    assert "spend_recorded_coverage" in names
+    assert "spend_ceiling_fidelity" in names
 
 
 def test_printed_cli_text_is_ascii():

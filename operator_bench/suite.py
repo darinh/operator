@@ -13,67 +13,47 @@ from operator_bench.scenario import (
 from operator_bench.score import ScenarioScore, Scorecard, score_run, scorecard
 from operator_bench.world import make_world, spawn, wait
 
-_AGENT = ("--agent", "bench:seat")
 _HORIZON = "unit1"
 _LABELS = "fixture"
 
 
 def stall_after_five() -> Scenario:
-    sessions = tuple(
-        [Session(0, WORK, HANDOFF)] * 5 + [Session(0, SILENCE, HANDOFF)] * 3
-    )
-    return Scenario(
-        Program("stall-after-five", "stall-after-five", sessions),
-        Oracle(stalled_from=6, stop_required_by=8, any_stop_is_false_alarm=False,
-               expected=DETECTION, label_source=_LABELS, horizon_sessions=8,
-               expected_exit=3),
-    )
+    s = tuple([Session(0, WORK, HANDOFF)] * 5 + [Session(0, SILENCE, HANDOFF)] * 3)
+    return Scenario(Program("stall-after-five", "stall-after-five", s),
+                    Oracle(6, 8, False, DETECTION, _LABELS, 8, 3))
 
 
 def healthy_slow() -> Scenario:
-    sessions = tuple(
-        [Session(150, WORK, HANDOFF)] * 4 + [Session(0, SILENCE, STOP)]
-    )
-    return Scenario(
-        Program("healthy-slow", "healthy-slow", sessions),
-        Oracle(stalled_from=None, stop_required_by=None, any_stop_is_false_alarm=True,
-               expected=TRUE_NEGATIVE, label_source=_LABELS, horizon_sessions=4),
-    )
+    s = tuple([Session(150, WORK, HANDOFF)] * 4 + [Session(0, SILENCE, STOP)])
+    return Scenario(Program("healthy-slow", "healthy-slow", s),
+                    Oracle(None, None, True, TRUE_NEGATIVE, _LABELS, 4))
 
 
 def backlog_0014() -> Scenario:
-    sessions = (
-        Session(0, WORK, HANDOFF),
-        *([Session(0, BUSYWORK, HANDOFF)] * 7),
-        Session(0, SILENCE, STOP),
-    )
-    return Scenario(
-        Program("backlog-0014", "backlog-0014", sessions),
-        Oracle(stalled_from=2, stop_required_by=8, any_stop_is_false_alarm=False,
-               expected=MISS, label_source=_LABELS, horizon_sessions=8,
-               expected_exit=3),
-    )
+    s = (Session(0, WORK, HANDOFF), *([Session(0, BUSYWORK, HANDOFF)] * 7),
+         Session(0, SILENCE, STOP))
+    return Scenario(Program("backlog-0014", "backlog-0014", s),
+                    Oracle(2, 8, False, MISS, _LABELS, 8, 3))
 
 
 def crash_loop() -> Scenario:
-    sessions = (Session(0, LAUNCH_FAIL, LAUNCH_FAIL),)
     return Scenario(
-        Program("crash-loop", "crash-loop", sessions),
-        Oracle(stalled_from=1, stop_required_by=1, any_stop_is_false_alarm=False,
-               expected=DETECTION, label_source=_LABELS, horizon_sessions=1,
-               expected_exit=1,
-               expected_error="MuxSessionError"),
-    )
+        Program("crash-loop", "crash-loop", (Session(0, LAUNCH_FAIL, LAUNCH_FAIL),)),
+        Oracle(1, 1, False, DETECTION, _LABELS, 1, 1, "MuxSessionError"))
 
 
 def unaccounted_endings() -> Scenario:
-    sessions = tuple([Session(130, SILENCE, UNACCOUNTED)] * 5)
+    s = tuple([Session(130, SILENCE, UNACCOUNTED)] * 5)
+    return Scenario(Program("unaccounted-endings", "unaccounted-endings", s),
+                    Oracle(1, 5, False, DETECTION, _LABELS, 5, 4))
+
+
+def spend_ceiling() -> Scenario:
+    s = tuple([Session(0, WORK, HANDOFF, 1.0)] * 4)
     return Scenario(
-        Program("unaccounted-endings", "unaccounted-endings", sessions),
-        Oracle(stalled_from=1, stop_required_by=5, any_stop_is_false_alarm=False,
-               expected=DETECTION, label_source=_LABELS, horizon_sessions=5,
-               expected_exit=4),
-    )
+        Program("spend-ceiling", "spend-ceiling", s,
+                max_virtual_seconds=8_000.0, max_sleeps=8_000),
+        Oracle(None, None, False, TRUE_NEGATIVE, _LABELS, 4, spend_ceiling=2.0))
 
 
 def scenarios() -> tuple[Scenario, ...]:
@@ -88,9 +68,11 @@ def run_one(scenario: Scenario, parent: Path, timeout: float = 90.0) -> Scenario
     try:
         path = world.home / "program.json"
         path.write_text(json.dumps(scenario.program.request()), encoding="utf-8")
+        cap = scenario.oracle.spend_ceiling
+        extra = None if cap is None else {"OPERATOR_SPEND_CEILING": str(cap)}
         proc = spawn(world, [
             sys.executable, "-m", "operator_bench.child", str(path),
-        ])
+        ], extra)
         wait(proc, timeout)
         obs = observe(world.home)
         return score_run(scenario.program.name, obs, scenario.oracle)
@@ -111,8 +93,7 @@ def measure(parent: Path | None = None, timeout: float = 90.0) -> Scorecard:
 
 
 def run_suite(parent: Path, timeout: float = 90.0) -> Scorecard:
-    rows = []
-    for scenario in scenarios():
-        rows.append(run_one(scenario, Path(parent) / scenario.program.name,
-                            timeout=timeout))
-    return scorecard(tuple(rows), label_source=_LABELS, horizon=_HORIZON)
+    rows = [run_one(s, Path(parent) / s.program.name, timeout=timeout)
+            for s in scenarios()]
+    extra = run_one(spend_ceiling(), Path(parent) / "spend-ceiling", timeout)
+    return scorecard(tuple(rows) + (extra,), label_source=_LABELS, horizon=_HORIZON)
