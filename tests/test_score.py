@@ -7,7 +7,7 @@ import pytest
 
 from operator_bench.observe import Observation
 from operator_bench.scenario import (
-    DETECTION, FALSE_ALARM, MISS, TRUE_NEGATIVE, Oracle,
+    DETECTION, FALSE_ALARM, INVALID, MISS, TRUE_NEGATIVE, Oracle,
 )
 from operator_bench.score import (
     Estimated, Exact, Latency, Measurement, NoEstimate, Scorecard,
@@ -532,7 +532,7 @@ def test_spend_ceiling_fidelity_is_one_when_launching_stops_at_the_ceiling():
     )
     row = score_run(
         "spend-ceiling",
-        _obs(exit_code=2, error="ClockExhausted", launch_polls=(0, 1),
+        _obs(exit_code=0, launch_polls=(0, 1),
              session_exits=exits,
              records=exits + (
                  {"event": "session_cost", "session": 1, "amount": 1},
@@ -540,11 +540,39 @@ def test_spend_ceiling_fidelity_is_one_when_launching_stops_at_the_ceiling():
              )),
         oracle,
     )
+    assert row.outcome == TRUE_NEGATIVE
     assert row.ceiling_held is True
     card = scorecard((row,), label_source="fixture", horizon="unit1")
     m = card.spend_ceiling_fidelity
     assert m.estimate.value == 1
     assert m.n == 1
+    assert m.n + m.censored <= m.eligible
+
+
+def test_spend_ceiling_fidelity_is_noestimate_when_every_run_is_invalid():
+    oracle = Oracle(
+        stalled_from=None, stop_required_by=None, any_stop_is_false_alarm=False,
+        expected=TRUE_NEGATIVE, label_source="fixture", horizon_sessions=4,
+        spend_ceiling=2.0,
+    )
+    row = score_run(
+        "spend-ceiling",
+        _obs(exit_code=2, error="ClockExhausted", launch_polls=(0, 1),
+             session_exits=(
+                 {"event": "session_exit", "session": 1},
+                 {"event": "session_exit", "session": 2},
+             )),
+        oracle,
+    )
+    assert row.outcome == INVALID
+    assert row.ceiling_held is True
+    card = scorecard((row,), label_source="fixture", horizon="unit1")
+    m = card.spend_ceiling_fidelity
+    assert isinstance(m.estimate, NoEstimate)
+    assert "valid" in m.estimate.reason
+    assert m.n == 0
+    assert m.eligible == 1
+    assert m.censored == 1
     assert m.n + m.censored <= m.eligible
 
 
