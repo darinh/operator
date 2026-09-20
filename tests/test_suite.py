@@ -93,3 +93,9 @@ def test_unaccounted_endings_are_detected(tmp_path):
     row = run_one(unaccounted_endings(), tmp_path)
     assert row.outcome == DETECTION, _why(row)
     assert row.exit_code == op.EXIT_UNACCOUNTED
+
+
+def test_crash_loop_declares_the_kernels_raise_based_give_up():
+    """supervisor.py re-raises MuxSessionError after MAX_LAUNCH_FAILURES rather
+    than returning, so the exit code alone cannot describe that give-up."""
+    assert crash_loop().oracle.expected_error == "MuxSessionError"
