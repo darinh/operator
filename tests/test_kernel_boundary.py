@@ -51,6 +51,7 @@ CLI = REPO / "operator_cli"
 #: tests grade the wrong repository. It is imported as `operator_memory.journal`
 #: and nothing else may spell it.
 MEMORY = REPO / "operator_memory"
+BENCH = REPO / "operator_bench"
 
 #: What the kernel may import beyond the standard library and itself. Empty on
 #: purpose: a supervision kernel that needs a third-party package has stopped
@@ -74,6 +75,7 @@ FORBIDDEN = frozenset({
     "project_instructions", "backlog_tool", "handoff_tool", "conversation_log",
     "conversation_viewer", "operator_mail", "mail_affiliation", "setup_tools",
     "operator_session", "operator_work", "operator_worktree",
+    "operator_bench",
 })
 
 #: The ceiling on a single kernel module. `copilot_operator.py` reached 9,120
@@ -264,7 +266,7 @@ def _source_package_names() -> set[str]:
     does not count, which is what keeps a stray folder from silently widening
     what the suite may import.
     """
-    return {path.name for path in (EXTENSIONS, CLI, MEMORY)
+    return {path.name for path in (EXTENSIONS, CLI, MEMORY, BENCH)
             if (path / "__init__.py").exists()}
 
 
@@ -414,7 +416,7 @@ def test_the_test_suite_imports_nothing_from_outside_this_repository():
     offenders: list[str] = []
     for path in suite_modules():
         for name in imported_names(path.read_text(encoding="utf-8")):
-            if name in FORBIDDEN:
+            if name in FORBIDDEN and name not in packages:
                 offenders.append(
                     f"{path.relative_to(REPO)}: {name} (forbidden)")
             elif (name not in stdlib and name not in kernel
@@ -449,7 +451,7 @@ def test_the_source_packages_the_suite_may_import_are_the_two_expected():
     an edit somebody makes on purpose.
     """
     assert _source_package_names() == {"operator_extensions", "operator_cli",
-                                       "operator_memory"}
+                                       "operator_memory", "operator_bench"}
 
 
 def test_only_top_level_test_modules_count_as_importable():
@@ -961,5 +963,6 @@ def test_the_forbidden_list_is_not_vacuous():
                     + " or ".join(str(c) for c in candidates))
     old = found[0]
     existing = {p.stem for p in old.glob("*.py")}
-    unreal = sorted(FORBIDDEN - existing)
+    here = _source_package_names()
+    unreal = sorted(FORBIDDEN - existing - here)
     assert unreal == [], f"FORBIDDEN names modules that do not exist: {unreal}"
