@@ -12,7 +12,7 @@ from operator_bench.scenario import (
 from operator_bench.score import (
     Estimated, Exact, Latency, Measurement, NoEstimate, Scorecard,
     WILSON, classify, format_measurement, format_scorecard, kernel_stopped,
-    rate, score_run, scorecard, wilson,
+    ledger_verdict_counts, rate, score_run, scorecard, wilson,
 )
 
 
@@ -292,6 +292,7 @@ def test_format_scorecard_is_ascii():
     text.encode("ascii")
     assert "miss_rate" in text
     assert "false_alarm_rate" in text
+    assert "verdict_in_ledger_coverage" in text
     assert math.isfinite(row.latency.bound_polls)
 
 
@@ -327,3 +328,73 @@ def test_an_unexpected_error_is_invalid_even_when_a_give_up_error_was_declared()
         "broke", _obs(exit_code=1, error="ImportError: no module"), oracle)
     assert declared.outcome == DETECTION
     assert other.outcome == "invalid"
+
+
+def test_ledger_verdict_counts_match_session_numbers_not_event_totals():
+    """A spare progress_verdict must not cover a session_exit it does not name."""
+    obs = _obs(
+        session_exits=(
+            {"event": "session_exit", "session": 1},
+            {"event": "session_exit", "session": 2},
+        ),
+        records=(
+            {"event": "session_exit", "session": 1},
+            {"event": "session_exit", "session": 2},
+            {"event": "progress_verdict", "session": 1},
+            {"event": "progress_verdict", "session": 99},
+        ),
+    )
+    assert ledger_verdict_counts(obs) == (2, 1)
+
+
+def test_verdict_in_ledger_coverage_is_zero_when_no_verdict_was_written():
+    required = Oracle(
+        stalled_from=1, stop_required_by=3, any_stop_is_false_alarm=False,
+        expected=DETECTION, label_source="fixture", horizon_sessions=3,
+        expected_exit=3,
+    )
+    row = score_run(
+        "silent",
+        _obs(exit_code=3, session_exits=({"event": "session_exit", "session": 1},),
+             records=({"event": "session_exit", "session": 1},)),
+        required,
+    )
+    card = scorecard((row,), label_source="fixture", horizon="unit1")
+    m = card.verdict_in_ledger_coverage
+    assert m.n == 1
+    assert m.eligible == 1
+    assert m.censored == 0
+    assert m.n + m.censored <= m.eligible
+    assert isinstance(m.estimate, Estimated)
+    assert m.estimate.value == 0
+    assert m.coverage == 1.0
+
+
+def test_verdict_in_ledger_coverage_is_one_when_every_exit_has_a_verdict():
+    required = Oracle(
+        stalled_from=1, stop_required_by=3, any_stop_is_false_alarm=False,
+        expected=DETECTION, label_source="fixture", horizon_sessions=3,
+        expected_exit=3,
+    )
+    exits = (
+        {"event": "session_exit", "session": 1},
+        {"event": "session_exit", "session": 2},
+    )
+    records = exits + (
+        {"event": "progress_verdict", "session": 1},
+        {"event": "progress_verdict", "session": 2},
+    )
+    row = score_run(
+        "covered",
+        _obs(exit_code=3, session_exits=exits, records=records),
+        required,
+    )
+    card = scorecard((row,), label_source="fixture", horizon="unit1")
+    m = card.verdict_in_ledger_coverage
+    assert m.n == 2
+    assert m.eligible == 2
+    assert m.censored == 0
+    assert m.n + m.censored <= m.eligible
+    assert isinstance(m.estimate, Estimated)
+    assert m.estimate.value == 1
+    assert m.coverage == 1.0

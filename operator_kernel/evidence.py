@@ -578,3 +578,36 @@ def record_session_exit(operator_home: Path, *, instance: str, session: int,
         })
     except Exception:
         return
+
+
+def record_progress_verdict(
+        operator_home, instance, session, verdict, before, after,
+        accounted, nochange_streak, unaccounted_streak,
+        limit_nochange, limit_unaccounted) -> None:
+    """Record what the supervisor concluded about a finished session.
+
+    Never raises. The verdict used to live only in probes.log and the streak
+    files, so the ledger could not say what was concluded or from which
+    fingerprints. Both hashes travel with it so a later reader can recompute
+    the verdict, and so a later record whose before differs from this after
+    shows the tree moved underneath the conclusion.
+    """
+    try:
+        _append(trace_path(Path(operator_home)), {
+            "ts": _utcnow(),
+            "event": "progress_verdict",
+            "pid": os.getpid(),
+            "instance": str(instance),
+            "session": session,
+            "verdict": str(verdict),
+            "before": before,
+            "after": after,
+            "accounted": bool(accounted),
+            "session_num": session,
+            "nochange_streak": nochange_streak,
+            "unaccounted_streak": unaccounted_streak,
+            "limit_nochange": limit_nochange,
+            "limit_unaccounted": limit_unaccounted,
+        })
+    except Exception:
+        return

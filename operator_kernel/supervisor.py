@@ -630,6 +630,8 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                         nochange, baseline, current,
                         ending_accounted_for=ending_accounted_for)
                     unaccounted = evaluate_unaccounted(unaccounted, verdict)
+                    evidence.record_progress_verdict(
+                        OPERATOR_HOME, instance.id, session_num, verdict, baseline, current, ending_accounted_for, nochange, unaccounted, MAX_NOCHANGE_SESSIONS, MAX_UNACCOUNTED_SESSIONS)
                     if verdict == "unknown":
                         log(f"Session #{session_num}: cannot tell whether "
                             f"anything changed — progress breaker not advanced")
