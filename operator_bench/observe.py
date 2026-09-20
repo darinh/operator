@@ -13,6 +13,7 @@ class Observation:
     records: tuple[dict, ...]
     session_exits: tuple[dict, ...]
     polls: int
+    launch_polls: tuple[int, ...]
     virtual_seconds: float
     sleeps: int
     log_text: str
@@ -33,6 +34,7 @@ def observe(home: Path) -> Observation:
         records=records,
         session_exits=exits,
         polls=int(raw.get("polls", 0)),
+        launch_polls=tuple(int(x) for x in raw.get("launch_polls", ())),
         virtual_seconds=float(raw.get("virtual_seconds", 0)),
         sleeps=int(raw.get("sleeps", 0)),
         log_text=log_text,
