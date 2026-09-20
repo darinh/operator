@@ -23,9 +23,20 @@ whatever was written.
 from __future__ import annotations
 
 import json
+import multiprocessing
+from pathlib import Path
 
 import evidence
 from ledger_chain import Broken, Gap, NoChain, TruncatedTail, Verified, verify
+
+
+def _write_chained_records(path_str, count, tag):
+    import evidence as ev
+    ev._chain_writer = None
+    path = Path(path_str)
+    for i in range(count):
+        assert ev._append(path, {"event": "probe", "tag": tag, "i": i},
+                          chain=True) is True
 
 
 def budgeted_size(record: dict) -> int:
@@ -160,6 +171,34 @@ def test_recording_a_progress_verdict_never_raises(tmp_path, monkeypatch):
                         lambda *a, **k: (_ for _ in ()).throw(OSError("nope")))
     evidence.record_progress_verdict(tmp_path, **_verdict_kwargs())
     assert not (tmp_path / "trace.jsonl").exists()
+
+
+def test_two_concurrent_writers_interleaving_both_verify(tmp_path):
+    ctx = multiprocessing.get_context("spawn")
+    path_a = tmp_path / "a.jsonl"
+    path_b = tmp_path / "b.jsonl"
+    a = ctx.Process(target=_write_chained_records, args=(str(path_a), 40, "a"))
+    b = ctx.Process(target=_write_chained_records, args=(str(path_b), 40, "b"))
+    a.start()
+    b.start()
+    a.join(30)
+    b.join(30)
+    assert a.exitcode == 0
+    assert b.exitcode == 0
+    lines_a = path_a.read_bytes().splitlines(True)
+    lines_b = path_b.read_bytes().splitlines(True)
+    assert len(lines_a) == 40
+    assert len(lines_b) == 40
+    path = tmp_path / "trace.jsonl"
+    mixed = []
+    for left, right in zip(lines_a, lines_b):
+        mixed.append(left)
+        mixed.append(right)
+    path.write_bytes(b"".join(mixed))
+    result = verify([path])
+    assert isinstance(result, Verified)
+    assert result.writers == 2
+    assert result.records == 80
 
 
 def test_ledger_recorders_write_a_chain_field(tmp_path):
