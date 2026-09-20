@@ -80,33 +80,54 @@ def spawn(world: World, argv: list[str]) -> subprocess.Popen:
     kwargs: dict = {}
     if os.name == "nt":
         kwargs["creationflags"] = _CREATE_NO_WINDOW
-    return subprocess.Popen(
-        argv,
-        cwd=str(world.repo),
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        **kwargs,
-    )
+    out = (world.home / "child.stdout").open("w", encoding="utf-8", errors="replace")
+    err = (world.home / "child.stderr").open("w", encoding="utf-8", errors="replace")
+    try:
+        proc = subprocess.Popen(
+            argv,
+            cwd=str(world.repo),
+            env=env,
+            stdout=out,
+            stderr=err,
+            **kwargs,
+        )
+    except Exception:
+        out.close()
+        err.close()
+        raise
+    proc._bench_out = out
+    proc._bench_err = err
+    return proc
+
+
+def _close_stdio(proc: subprocess.Popen) -> None:
+    for handle in (getattr(proc, "_bench_out", None),
+                   getattr(proc, "_bench_err", None)):
+        if handle is not None:
+            try:
+                handle.close()
+            except OSError:
+                pass
+    proc._bench_out = None
+    proc._bench_err = None
 
 
 def kill(proc: subprocess.Popen, timeout: float = 10.0) -> None:
-    if proc.poll() is not None:
-        return
-    proc.kill()
-    try:
-        proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        proc.terminate()
-        proc.wait(timeout=timeout)
+    if proc.poll() is None:
+        proc.kill()
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+            proc.wait(timeout=timeout)
+    _close_stdio(proc)
 
 
 def wait(proc: subprocess.Popen, timeout: float) -> int:
     try:
-        return int(proc.wait(timeout=timeout))
+        rc = int(proc.wait(timeout=timeout))
+        _close_stdio(proc)
+        return rc
     except subprocess.TimeoutExpired:
         kill(proc)
         raise
