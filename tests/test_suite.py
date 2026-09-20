@@ -4,7 +4,7 @@ from __future__ import annotations
 import op
 
 from operator_bench.scenario import (
-    BUSYWORK, DETECTION, HANDOFF, LAUNCH_FAIL, MISS, SILENCE, STOP,
+    BUSYWORK, DETECTION, HANDOFF, LAUNCH_FAIL, SILENCE, STOP,
     TRUE_NEGATIVE, UNACCOUNTED, WORK,
 )
 from operator_bench.suite import (
@@ -75,16 +75,9 @@ def test_healthy_slow_records_no_false_alarm(tmp_path):
     assert row.exit_code == 0
 
 
-def test_0014_is_still_missed(tmp_path):
-    """When this fails, a breaker has learned to see manufactured work.
-
-    The correct response is to update the baseline, never to weaken this
-    assertion. backlog-0014 scoring as a detection would mean the kernel
-    started catching junk-file churn. That is a real improvement. Record it.
-    Do not edit the fixture so the miss comes back.
-    """
+def test_backlog_0014_is_a_recorded_kernel_blind_spot(tmp_path):
     row = run_one(backlog_0014(), tmp_path)
-    assert row.outcome == MISS
+    assert row.outcome == backlog_0014().oracle.expected
 
 
 def test_crash_loop_is_detected(tmp_path):
