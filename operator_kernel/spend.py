@@ -4,8 +4,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from mux import safe_instance_id
-
 
 def spend_path(home, seat_id: str) -> Path:
     name = Path(str(seat_id)).name
@@ -20,15 +18,13 @@ def seat_spend(home, seat_id) -> float | None:
 
 
 def seat_figure(home, seat_id):
-    seen = []
-    for key in (str(seat_id), safe_instance_id(str(seat_id))):
-        if key in seen:
-            continue
-        seen.append(key)
-        got = _load(spend_path(home, key))
-        if got is not None:
-            return got
-    return None
+    """Read the figure filed under `seat_id`, which is `instance.id`.
+
+    One key, not a search. An earlier version tried the display name too, but
+    `safe_instance_id` is not idempotent, so two candidate filenames meant the
+    gate and the cost recorder could disagree about which one was canonical.
+    """
+    return _load(spend_path(home, str(seat_id)))
 
 
 def spend_blocks(home, seat_id, ceiling) -> tuple | None:

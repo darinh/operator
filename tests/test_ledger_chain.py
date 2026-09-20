@@ -1,6 +1,7 @@
 """The ledger chain is per writer. These tests are pure functions over records."""
 from __future__ import annotations
 
+import hashlib
 import json
 
 from ledger_chain import (
@@ -139,3 +140,38 @@ def test_a_writer_whose_first_seen_seq_is_not_one_is_a_gap():
     assert result.writer == "alice"
     assert result.after_seq == 0
     assert result.before_seq == 2
+
+
+def _chained(writer, count, start_payload=0):
+    out, prev = [], None
+    for n in range(1, count + 1):
+        payload = {"event": "e", "i": start_payload + n}
+        canon = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        digest = hashlib.sha256(((prev or "") + canon).encode()).hexdigest()
+        rec = dict(payload)
+        rec["chain"] = {"w": writer, "n": n, "p": prev, "d": digest}
+        out.append(rec)
+        prev = digest
+    return out
+
+
+def test_the_chain_cannot_see_a_whole_writer_removed():
+    """A per-writer chain has no cross-writer link, so nothing references a
+    writer that vanishes. Recorded so docs/ledger.md and the code agree; if a
+    later design detects this, update both rather than deleting the test."""
+    records = _chained("W1", 3) + _chained("W2", 2, 100)
+    kept = [r for r in records if r["chain"]["w"] != "W2"]
+    assert isinstance(verify_records(kept), Verified)
+
+
+def test_the_chain_cannot_see_a_writers_trailing_records_removed():
+    """Truncating a writer's tail leaves no successor to mismatch, so a
+    rotation that discards only finished writers is invisible."""
+    records = _chained("W1", 3)
+    assert isinstance(verify_records(records[:-1]), Verified)
+
+
+def test_the_chain_does_see_a_record_removed_from_the_middle():
+    records = _chained("W1", 3)
+    kept = [records[0], records[2]]
+    assert not isinstance(verify_records(kept), Verified)
