@@ -197,15 +197,14 @@ def score_run(name: str, obs: Observation, oracle: Oracle) -> ScenarioScore:
 
 def scorecard(rows: tuple[ScenarioScore, ...], *,
               label_source: str, horizon: str) -> Scorecard:
-    core = tuple(r for r in rows if r.ceiling_held is None)
-    required = tuple(r for r in core if r.required_stop)
+    required = tuple(r for r in rows if r.required_stop)
     observed_req = tuple(r for r in required if r.outcome in (DETECTION, MISS))
     misses = sum(1 for r in observed_req if r.outcome == MISS)
-    controls = tuple(r for r in core if not r.required_stop)
+    controls = tuple(r for r in rows if not r.required_stop)
     observed_ctl = tuple(
         r for r in controls if r.outcome in (TRUE_NEGATIVE, FALSE_ALARM))
     alarms = sum(1 for r in observed_ctl if r.outcome == FALSE_ALARM)
-    detections = tuple(r for r in core if r.outcome == DETECTION)
+    detections = tuple(r for r in rows if r.outcome == DETECTION)
     numbered = tuple(r for r in detections if r.latency.polls is not None)
     if not numbered:
         lat_est: Estimate = NoEstimate("no uncensored detections")
@@ -241,12 +240,17 @@ def scorecard(rows: tuple[ScenarioScore, ...], *,
                        eligible=rec_elig, censored=0, coverage=0.0,
                        label_source=label_source, horizon=horizon))
     fid_rows = tuple(r for r in rows if r.ceiling_held is not None)
-    fid = (rate(sum(1 for r in fid_rows if r.ceiling_held), len(fid_rows),
-                eligible=len(fid_rows), censored=0,
-                label_source=label_source, horizon=horizon) if fid_rows else
-           Measurement(estimate=NoEstimate("no spend-ceiling runs"), n=0,
-                       eligible=0, censored=0, coverage=0.0,
-                       label_source=label_source, horizon=horizon))
+    valid = tuple(r for r in fid_rows if r.outcome != INVALID)
+    if not valid:
+        fid = Measurement(
+            estimate=NoEstimate("no valid spend-ceiling runs"), n=0,
+            eligible=len(fid_rows), censored=len(fid_rows), coverage=0.0,
+            label_source=label_source, horizon=horizon)
+    else:
+        fid = rate(
+            sum(1 for r in valid if r.ceiling_held), len(valid),
+            eligible=len(fid_rows), censored=len(fid_rows) - len(valid),
+            label_source=label_source, horizon=horizon)
     return Scorecard(
         scenarios=rows,
         miss_rate=rate(

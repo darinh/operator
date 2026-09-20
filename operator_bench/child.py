@@ -212,6 +212,22 @@ class _Seat:
         self.pending = keep
         for name, spec in due:
             self._end(name, spec)
+        self._stop_if_launch_refused()
+
+    def _stop_if_launch_refused(self) -> None:
+        path = self.home / "trace.jsonl"
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            return
+        for line in text.splitlines():
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if rec.get("event") == "launch_admission" and rec.get("admit") is False:
+                self._paths()[0].touch()
+                return
 
     def _end(self, name: str, spec: dict) -> None:
         stop, restart, exit_file = self._paths()

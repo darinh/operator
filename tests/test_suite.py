@@ -109,6 +109,9 @@ def test_unaccounted_endings_are_detected(tmp_path):
 def test_spend_ceiling_stops_launching_at_the_cap(tmp_path):
     from operator_bench.suite import spend_ceiling, run_one
     row = run_one(spend_ceiling(), tmp_path)
+    assert row.outcome == TRUE_NEGATIVE, _why(row)
+    assert row.exit_code == 0
+    assert row.error is None
     assert row.ceiling_held is True, _why(row)
 
 

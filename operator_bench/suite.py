@@ -77,8 +77,7 @@ def unaccounted_endings() -> Scenario:
 def spend_ceiling() -> Scenario:
     sessions = tuple([Session(0, WORK, HANDOFF, 1.0)] * 4)
     return Scenario(
-        Program("spend-ceiling", "spend-ceiling", sessions,
-                max_virtual_seconds=8_000.0, max_sleeps=8_000),
+        Program("spend-ceiling", "spend-ceiling", sessions),
         Oracle(stalled_from=None, stop_required_by=None,
                any_stop_is_false_alarm=False, expected=TRUE_NEGATIVE,
                label_source=_LABELS, horizon_sessions=4, spend_ceiling=2.0),
