@@ -219,3 +219,31 @@ def test_a_drifted_pr_head_is_refused_even_when_local_ci_is_green(monkeypatch):
     ok, detail = preflight.ci_is_green_on_head("18")
     assert ok is False
     assert "not the one merging" in detail
+
+
+def test_omitting_pr_cannot_report_gate_one_passed(monkeypatch, capsys):
+    """Without --pr the PR head is never read, so a green run on local HEAD
+    would otherwise certify a SHA that is not the one merging. Missing evidence
+    must not become success, which is the shape of every hole found here."""
+    import json as _json
+
+    def fake(*argv, cwd=None):
+        if argv[:2] == ("git", "rev-parse") and "--abbrev-ref" in argv:
+            return 0, "feat/pr-gate\n"
+        if argv[:2] == ("git", "rev-parse"):
+            return 0, "aaaaaaaaaaaa\n"
+        if argv[:2] == ("git", "status"):
+            return 0, ""
+        if argv[:2] == ("git", "diff"):
+            return 0, ""
+        return 0, _json.dumps([
+            {"headSha": "aaaaaaaaaaaa", "status": "completed",
+             "conclusion": "success", "workflowName": preflight.WORKFLOW},
+        ])
+
+    monkeypatch.setattr(preflight, "run", fake)
+    code = preflight.main(["--skip-tests"])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "Gate 1 passed" not in out
+    assert "no --pr was given" in out

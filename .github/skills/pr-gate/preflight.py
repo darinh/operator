@@ -177,6 +177,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="acknowledge a moved MAX_* ceiling, with why")
     args = parser.parse_args(argv)
 
+    ci_ok, ci_detail = ci_is_green_on_head(args.pr)
+    if args.pr is None:
+        ci_ok = False
+        ci_detail = (f"{ci_detail}; but no --pr was given, so the PR head is "
+                     f"unverified and the gate is incomplete")
+
     files = changed_files(args.base)
     checks = [
         ("working tree clean", tree_is_clean()),
@@ -184,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
         ("kernel modules bound in op shim", kernel_modules_are_bound(files)),
         ("no budget ceiling moved silently",
          budgets_not_raised(files, args.base, args.budget_raised)),
-        ("test workflow green on the merging SHA", ci_is_green_on_head(args.pr)),
+        ("test workflow green on the merging SHA", (ci_ok, ci_detail)),
     ]
     if args.skip_tests:
         checks.append(("suite green", (False, "skipped, so the gate is incomplete")))
