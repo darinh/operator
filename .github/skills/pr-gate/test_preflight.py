@@ -242,8 +242,10 @@ def test_omitting_pr_cannot_report_gate_one_passed(monkeypatch, capsys):
         ])
 
     monkeypatch.setattr(preflight, "run", fake)
-    code = preflight.main(["--skip-tests"])
-    out = capsys.readouterr().out
-    assert code == 1
-    assert "Gate 1 passed" not in out
-    assert "no --pr was given" in out
+    monkeypatch.setattr(preflight, "suite_is_green", lambda: (True, "mocked green"))
+    for argv in ([], ["--pr="], ["--pr", "  "]):
+        code = preflight.main(argv)
+        out = capsys.readouterr().out
+        assert code == 1, argv
+        assert "Gate 1 passed" not in out, argv
+        assert "no --pr was given" in out, argv
