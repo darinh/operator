@@ -169,7 +169,10 @@ def ci_is_green_on_head(pr: str | None = None) -> tuple[bool, str]:
         if code != 0:
             return False, f"cannot read PR {pr} head: {out.strip()[:120]}"
         remote = out.strip()
-        if remote and remote != sha:
+        if not remote:
+            return False, (f"PR {pr} returned no head, so identity is not "
+                           f"established")
+        if remote != sha:
             return False, (f"local HEAD {sha[:8]} is not PR {pr} head "
                            f"{remote[:8]}, so the checked SHA is not the one merging")
 
@@ -198,6 +201,64 @@ def suite_is_green() -> tuple[bool, str]:
     code, out = run(sys.executable, "-m", "pytest", "-q")
     tail = [line for line in out.splitlines() if line.strip()]
     return code == 0, (tail[-1] if tail else "no output")
+
+
+def _own_nodes(func: ast.FunctionDef):
+    """Nodes belonging to `func` itself, not to functions nested inside it.
+
+    A reviewer defeated an earlier version by putting the check in an uncalled
+    nested function. Pruning has to be manual: `ast.walk` has already queued a
+    nested definition's children by the time you see the definition, so
+    skipping that one node prunes nothing.
+    """
+    stack = list(func.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        yield node
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def unchecked_run_callers(source: str, skip=("run", "main")) -> list[str]:
+    """Functions calling `run` without branching on that call's own status.
+
+    The rule this enforces, narrowly: every `run(...)` result must be unpacked
+    into a tuple whose first element is a name, and that name must appear in a
+    comparison or an `if` condition in the same function body.
+
+    Not proven, and deliberately so. It does not follow aliases of `run`, and
+    it skips `main`, which orchestrates rather than probes. It is a lint, and
+    it does not replace injecting a failure into each check and watching it
+    refuse.
+    """
+    tree = ast.parse(source)
+    offenders: list[str] = []
+    for func in ast.walk(tree):
+        if not isinstance(func, ast.FunctionDef) or func.name in skip:
+            continue
+        own = list(_own_nodes(func))
+        tested = {n.id for node in own if isinstance(node, ast.Compare)
+                  for n in ast.walk(node) if isinstance(n, ast.Name)}
+        tested |= {n.id for node in own if isinstance(node, ast.If)
+                   for n in ast.walk(node.test) if isinstance(n, ast.Name)}
+        assigned = {id(node.value): node.targets[0]
+                    for node in own if isinstance(node, ast.Assign)}
+        for node in own:
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "run"):
+                continue
+            target = assigned.get(id(node))
+            if target is None:
+                offenders.append(f"{func.name} (result discarded or indexed)")
+                continue
+            if not isinstance(target, ast.Tuple) or not target.elts:
+                offenders.append(f"{func.name} (status not unpacked)")
+                continue
+            status = target.elts[0]
+            if not isinstance(status, ast.Name) or status.id not in tested:
+                offenders.append(f"{func.name} (status {getattr(status, 'id', '?')!r} never compared)")
+    return offenders
 
 
 def main(argv: list[str] | None = None) -> int:

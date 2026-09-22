@@ -270,95 +270,57 @@ def test_an_unreadable_op_shim_is_not_a_bound_module(monkeypatch):
     assert "nothing is established" in detail
 
 
-def test_every_run_call_branches_on_its_own_status():
-    """Structural guard, rewritten after a reviewer broke the first version.
-
-    That one asked whether the name `code` appeared anywhere in the function,
-    which accepted a deleted error branch, a second unchecked run() call beside
-    a checked one, and a binding used only in a nested scope.
-
-    This walks each run() call, takes the status it was unpacked into, and
-    requires that exact name to appear in an `if` test in the same function.
-
-    Known limits, stated rather than implied: it does not follow aliases of
-    `run`, and it skips `main`, which orchestrates rather than probes. It is a
-    lint, not a proof, and it does not replace per-function failure injection.
-    """
-    import ast
+def test_the_lint_finds_nothing_unchecked_in_preflight_itself():
     import inspect
-
-    tree = ast.parse(inspect.getsource(preflight))
-    offenders = []
-    for func in ast.walk(tree):
-        if not isinstance(func, ast.FunctionDef) or func.name in ("run", "main"):
-            continue
-        tested = {n.id
-                  for node in ast.walk(func)
-                  if isinstance(node, (ast.If, ast.Compare, ast.BoolOp))
-                  for n in ast.walk(node) if isinstance(n, ast.Name)}
-        for node in ast.walk(func):
-            if not isinstance(node, ast.Assign):
-                continue
-            call = node.value
-            if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
-                    and call.func.id == "run"):
-                continue
-            target = node.targets[0]
-            if not isinstance(target, ast.Tuple) or not target.elts:
-                offenders.append(f"{func.name} (status not unpacked)")
-                continue
-            status = target.elts[0]
-            if not isinstance(status, ast.Name) or status.id not in tested:
-                shown = getattr(status, "id", "?")
-                offenders.append(f"{func.name} (status {shown!r} never tested)")
-    assert not offenders, "run() calls whose status is not branched on: " + str(offenders)
+    assert preflight.unchecked_run_callers(inspect.getsource(preflight)) == []
 
 
-def test_the_guard_rejects_the_reviewers_counterexamples():
-    """The counterexamples that defeated the first guard, kept as fixtures so a
-    future rewrite cannot quietly regress to a name-presence check."""
-    import ast
-
-    def offenders_in(source: str) -> list[str]:
-        tree = ast.parse(source)
-        found = []
-        for func in ast.walk(tree):
-            if not isinstance(func, ast.FunctionDef) or func.name in ("run", "main"):
-                continue
-            tested = {n.id
-                      for node in ast.walk(func)
-                      if isinstance(node, (ast.If, ast.Compare, ast.BoolOp))
-                      for n in ast.walk(node) if isinstance(n, ast.Name)}
-            for node in ast.walk(func):
-                if not isinstance(node, ast.Assign):
-                    continue
-                call = node.value
-                if not (isinstance(call, ast.Call)
-                        and isinstance(call.func, ast.Name)
-                        and call.func.id == "run"):
-                    continue
-                target = node.targets[0]
-                if not isinstance(target, ast.Tuple) or not target.elts:
-                    found.append(func.name)
-                    continue
-                status = target.elts[0]
-                if not isinstance(status, ast.Name) or status.id not in tested:
-                    found.append(func.name)
-        return found
-
-    second_call_unchecked = '''
+def test_the_lint_rejects_every_defeat_a_reviewer_demonstrated():
+    """These fixtures now exercise the shipped checker. The earlier version
+    kept a private copy of the algorithm, so reverting the real one left them
+    green, which is the failure they existed to prevent."""
+    cases = {
+        "branch_deleted": '''
+def branch_deleted():
+    code, out = run("git", "status", "--porcelain")
+    return not out.strip(), "clean"
+''',
+        "unchecked_second": '''
 def unchecked_second():
     code, _ = run("git", "rev-parse", "HEAD")
     if code:
         return False, "cannot resolve HEAD"
     _second, out = run("git", "status", "--porcelain")
     return not out.strip(), "clean"
-'''
-    branch_deleted = '''
-def branch_deleted():
-    code, out = run("git", "status", "--porcelain")
+''',
+        "assignment_in_if": '''
+def assignment_in_if():
+    if True:
+        status, out = run("git", "status", "--porcelain")
     return not out.strip(), "clean"
-'''
+''',
+        "result_discarded": '''
+def result_discarded():
+    run("git", "status", "--porcelain")
+    return True, "clean"
+''',
+        "indexed_result": '''
+def indexed_result():
+    out = run("git", "status", "--porcelain")[1]
+    return not out.strip(), "clean"
+''',
+        "check_in_nested_scope": '''
+def check_in_nested_scope():
+    code, out = run("git", "status", "--porcelain")
+    def never_called():
+        if code != 0:
+            return False
+    return not out.strip(), "clean"
+''',
+    }
+    for name, source in cases.items():
+        assert preflight.unchecked_run_callers(source), f"{name} slipped through"
+
     honest = '''
 def honest():
     code, out = run("git", "status", "--porcelain")
@@ -366,10 +328,13 @@ def honest():
         return False, "unknown"
     return not out.strip(), "clean"
 '''
-    assert offenders_in(second_call_unchecked) == ["unchecked_second"]
-    assert offenders_in(branch_deleted) == ["branch_deleted"]
-    assert offenders_in(honest) == []
-
+    compared = '''
+def compared():
+    code, out = run("x")
+    return code == 0, out
+'''
+    assert preflight.unchecked_run_callers(honest) == []
+    assert preflight.unchecked_run_callers(compared) == []
 
 def test_a_quoted_mention_does_not_register_a_module(monkeypatch):
     """A substring search over the shim accepts a name in a comment. tests/op.py
@@ -397,3 +362,34 @@ def test_an_unparseable_shim_establishes_nothing(monkeypatch):
         ["operator_kernel/ledger_chain.py"])
     assert ok is False
     assert "nothing is established" in detail
+
+
+def test_an_empty_pr_head_response_is_not_a_verified_head(monkeypatch):
+    """Eighth instance of unknown-becoming-fine. `if remote and remote != sha`
+    skipped the comparison when the lookup succeeded but returned nothing, so a
+    green local run certified a head nobody read."""
+    import json as _json
+
+    def fake_with(head_response):
+        def fake(*argv, cwd=None):
+            if argv[:2] == ("git", "rev-parse") and "--abbrev-ref" in argv:
+                return 0, "feat/pr-gate\n"
+            if argv[:2] == ("git", "rev-parse"):
+                return 0, "aaaaaaaaaaaa\n"
+            if argv[:3] == ("gh", "pr", "view"):
+                return head_response
+            return 0, _json.dumps([
+                {"headSha": "aaaaaaaaaaaa", "status": "completed",
+                 "conclusion": "success", "workflowName": preflight.WORKFLOW},
+            ])
+        return fake
+
+    for response in ((0, ""), (0, "  \n")):
+        monkeypatch.setattr(preflight, "run", fake_with(response))
+        ok, detail = preflight.ci_is_green_on_head("18")
+        assert ok is False, response
+        assert "no head" in detail
+
+    monkeypatch.setattr(preflight, "run", fake_with((0, "aaaaaaaaaaaa\n")))
+    ok, _detail = preflight.ci_is_green_on_head("18")
+    assert ok is True
