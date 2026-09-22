@@ -18,10 +18,16 @@ def run(*argv: str, cwd: Path | None = None) -> tuple[int, str]:
     return done.returncode, (done.stdout or "") + (done.stderr or "")
 
 
-def changed_files(base: str) -> list[str]:
+def changed_files(base: str) -> list[str] | None:
+    """Paths changed against `base`, or None when git could not tell us.
+
+    None is not an empty list. An empty list means nothing changed; None means
+    the question went unanswered, and a gate that passes when it cannot see the
+    diff is worse than no gate.
+    """
     code, out = run("git", "diff", "--name-only", f"{base}...HEAD")
     if code != 0:
-        return []
+        return None
     return [line.strip() for line in out.splitlines() if line.strip()]
 
 
@@ -31,8 +37,18 @@ def tree_is_clean() -> tuple[bool, str]:
     return (not dirty), ("clean" if not dirty else f"{len(dirty)} uncommitted path(s)")
 
 
-def sources_have_tests(files: list[str]) -> tuple[bool, str]:
-    missing = []
+def sources_have_tests(files: list[str] | None) -> tuple[bool, str]:
+    """Every changed source must have its test file changed in the same diff.
+
+    Existence is too weak. Adding two hundred lines to a module whose test file
+    was written a year ago satisfies "a test file exists" without a single new
+    assertion, which is the `test-enforcer` hook's rule at commit time and has
+    to be the rule here too.
+    """
+    if files is None:
+        return False, "could not read the diff, so nothing is established"
+    changed = set(files)
+    unguarded = []
     for path in files:
         parts = Path(path).parts
         if not parts or parts[0] not in SOURCE_DIRS or not path.endswith(".py"):
@@ -40,13 +56,36 @@ def sources_have_tests(files: list[str]) -> tuple[bool, str]:
         stem = Path(path).stem
         if stem == "__init__":
             continue
-        if not (REPO / "tests" / f"test_{stem}.py").exists():
-            missing.append(path)
-    return (not missing), ("every changed source has one" if not missing
-                           else "no test file for " + ", ".join(missing))
+        test = f"tests/test_{stem}.py"
+        if test not in changed:
+            unguarded.append(f"{path} (wanted {test} in this diff)")
+    return (not unguarded), ("each changed source changed its test too"
+                             if not unguarded else "; ".join(unguarded))
 
 
-def kernel_modules_are_bound(files: list[str]) -> tuple[bool, str]:
+def budgets_not_raised(files: list[str] | None) -> tuple[bool, str]:
+    """A raised ceiling is a decision to state, never a side effect."""
+    if files is None:
+        return False, "could not read the diff, so nothing is established"
+    guards = [p for p in files if p.startswith("tests/")
+              and "boundary" in p or p.endswith("test_extension_packaging.py")]
+    if not guards:
+        return True, "no budget guard touched"
+    raised = []
+    for path in guards:
+        code, out = run("git", "diff", "-U0", "main...HEAD", "--", path)
+        if code != 0:
+            continue
+        for line in out.splitlines():
+            if line.startswith("+") and "MAX_" in line and "=" in line:
+                raised.append(f"{path}: {line[1:].strip()}")
+    return (not raised), ("no ceiling moved" if not raised
+                          else "state why in the PR: " + "; ".join(raised))
+
+
+def kernel_modules_are_bound(files: list[str] | None) -> tuple[bool, str]:
+    if files is None:
+        return False, "could not read the diff, so nothing is established"
     new = [Path(p).stem for p in files
            if p.startswith("operator_kernel/") and p.endswith(".py")
            and Path(p).stem != "__init__"]
@@ -97,11 +136,14 @@ def main(argv: list[str] | None = None) -> int:
     files = changed_files(args.base)
     checks = [
         ("working tree clean", tree_is_clean()),
-        ("changed sources have tests", sources_have_tests(files)),
+        ("changed sources changed their tests", sources_have_tests(files)),
         ("kernel modules bound in op shim", kernel_modules_are_bound(files)),
+        ("no budget ceiling moved silently", budgets_not_raised(files)),
         ("CI green on exact head SHA", ci_is_green_on_head()),
     ]
-    if not args.skip_tests:
+    if args.skip_tests:
+        checks.append(("suite green", (False, "skipped, so the gate is incomplete")))
+    else:
         checks.append(("suite green", suite_is_green()))
 
     failed = 0
