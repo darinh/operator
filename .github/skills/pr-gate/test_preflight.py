@@ -249,3 +249,43 @@ def test_omitting_pr_cannot_report_gate_one_passed(monkeypatch, capsys):
         assert code == 1, argv
         assert "Gate 1 passed" not in out, argv
         assert "no --pr was given" in out, argv
+
+
+def test_a_failed_git_status_is_not_a_clean_tree(monkeypatch):
+    """Fifth instance of one pattern: a value meaning unknown treated as fine.
+    git status exiting non-zero with no output looks exactly like a clean tree
+    unless the exit code is read."""
+    monkeypatch.setattr(preflight, "run", lambda *a, **k: (128, ""))
+    ok, detail = preflight.tree_is_clean()
+    assert ok is False
+    assert "nothing is established" in detail
+
+
+def test_an_unreadable_op_shim_is_not_a_bound_module(monkeypatch):
+    monkeypatch.setattr(preflight.Path, "read_text",
+                        lambda self, **kw: (_ for _ in ()).throw(OSError("nope")))
+    ok, detail = preflight.kernel_modules_are_bound(
+        ["operator_kernel/ledger_chain.py"])
+    assert ok is False
+    assert "nothing is established" in detail
+
+
+def test_every_run_caller_reads_the_exit_code():
+    """Structural guard for the pattern, so a sixth instance cannot be added
+    quietly. Any helper invoking run() must branch on its status."""
+    import ast
+    import inspect
+
+    source = inspect.getsource(preflight)
+    tree = ast.parse(source)
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef) or node.name in ("run", "main"):
+            continue
+        body = ast.dump(node)
+        if "'run'" not in body and '"run"' not in body:
+            continue
+        if "code" not in {t.id for n in ast.walk(node)
+                          for t in ast.walk(n) if isinstance(t, ast.Name)}:
+            offenders.append(node.name)
+    assert not offenders, f"these call run() without reading its status: {offenders}"
