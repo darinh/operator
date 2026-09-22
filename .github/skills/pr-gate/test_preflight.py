@@ -145,3 +145,39 @@ def test_a_local_head_that_drifted_from_the_pr_head_fails(monkeypatch):
     ok, detail = preflight.ci_is_green_on_head("18")
     assert ok is False
     assert "not the one merging" in detail
+
+
+def test_a_moved_ceiling_blocks_until_a_reason_is_given(monkeypatch):
+    """Without a reason a raised budget is a side effect. With one it is a
+    decision, and the reason lands in the output rather than in nobody's head."""
+    def fake(*argv, cwd=None):
+        return 0, "+MAX_KERNEL_CODE_LINES = 9999\n"
+
+    monkeypatch.setattr(preflight, "run", fake)
+    files = ["tests/test_kernel_boundary.py"]
+
+    ok, detail = preflight.budgets_not_raised(files)
+    assert ok is False
+    assert "--budget-raised" in detail
+    assert "9999" in detail
+
+    ok, detail = preflight.budgets_not_raised(files, reason="extracted a seam first")
+    assert ok is True
+    assert "extracted a seam first" in detail
+
+
+def test_the_guard_filter_does_not_leak_outside_tests(monkeypatch):
+    """`a and b or c` without parentheses matched any path ending in the
+    packaging test, anywhere in the tree."""
+    monkeypatch.setattr(preflight, "run", lambda *a, **k: (0, ""))
+    ok, detail = preflight.budgets_not_raised(
+        ["vendor/somewhere/test_extension_packaging.py"])
+    assert ok is True
+    assert "no budget guard touched" in detail
+
+
+def test_a_failed_guard_diff_does_not_silently_report_no_ceiling_moved(monkeypatch):
+    monkeypatch.setattr(preflight, "run", lambda *a, **k: (128, "fatal"))
+    ok, detail = preflight.budgets_not_raised(["tests/test_kernel_boundary.py"])
+    assert ok is False
+    assert "nothing is established" in detail

@@ -13,8 +13,11 @@ approve, everything builds, and your changes have test coverage, then you can se
 
 ## Gate 1, mechanical
 
-Run `python .github/skills/pr-gate/preflight.py` and fix what it reports. It owns the checks
-that need no judgement.
+Run `python .github/skills/pr-gate/preflight.py --pr <number>` and fix what it reports. It owns
+the checks that need no judgement.
+
+**Always pass `--pr`.** Without it the CI check reads local `HEAD`, which may no longer be the
+PR head, so it certifies a SHA that is not the one merging.
 
 | Check | Why |
 | --- | --- |
@@ -22,7 +25,7 @@ that need no judgement.
 | Full suite green | `python -m pytest -q` from the repo root |
 | Every changed source **changed its test file too** | Existence is too weak. Adding two hundred lines to a module whose test was written a year ago would otherwise pass without one new assertion |
 | A new kernel module appears in `tests/op.py` `_MODULE_NAMES` | Absent, the suite's monkeypatching silently misses it, which has bitten this repo before |
-| No budget ceiling moved silently | Raising one is allowed as a stated decision. The check reports the moved line so the PR has to say why |
+| No budget ceiling moved silently | Raising one blocks the gate until you pass `--budget-raised "<reason>"`, which prints the reason so it lands in the record rather than in nobody's memory |
 | CI concluded success on the exact head SHA | Not "auto-merge armed", see below |
 
 `--skip-tests` exists for iterating. It reports the gate as incomplete and exits non-zero, so it
@@ -32,11 +35,12 @@ is never a way to print a pass.
 `None` rather than an empty list on a git error, and every check that depends on it refuses. A
 gate that passes because it could not see is worse than no gate.
 
-**What this does not do.** It does not measure line coverage. It establishes that a changed
-source had its test changed in the same diff, which is a weaker claim than a percentage in one
-direction and a stronger one in another, because a percentage cannot tell you whether the test
-exercises the line that changed. Question 6 below is what actually carries coverage here, and
-it wants evidence, not a number.
+**What this does not do.** It does not measure line coverage, and co-changing a test file is not
+a substitute for it. Requiring `tests/test_foo.py` in the same diff as `foo.py` establishes one
+thing only, that both paths appeared in `git diff --name-only`. It does not establish that the
+test gained an assertion, or that any test exercises the line that moved. A blank line appended
+to the test file satisfies it. Question 6 below is what actually carries coverage here, and it
+wants evidence rather than a number.
 
 **The CI trap.** `gh pr merge --auto` merges as soon as the PR is mergeable. If no workflow run
 exists yet for the head SHA there is nothing to wait on, so it merges unchecked. That happened
