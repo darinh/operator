@@ -11,10 +11,17 @@ REPO = Path(__file__).resolve().parent.parent.parent.parent
 SOURCE_DIRS = ("operator_kernel", "operator_fleet", "operator_cli",
                "operator_extensions", "operator_memory", "operator_bench")
 
+#: The workflow that actually runs the tests, from .github/workflows/tests.yml.
+#: Matching on any workflow would let an unrelated green run certify the tests.
+WORKFLOW = "tests"
+
 
 def run(*argv: str, cwd: Path | None = None) -> tuple[int, str]:
-    done = subprocess.run(argv, cwd=str(cwd or REPO), capture_output=True,
-                          text=True, encoding="utf-8", errors="replace")
+    try:
+        done = subprocess.run(argv, cwd=str(cwd or REPO), capture_output=True,
+                              text=True, encoding="utf-8", errors="replace")
+    except (FileNotFoundError, OSError) as exc:
+        return 127, f"could not run {argv[0]}: {exc}"
     return done.returncode, (done.stdout or "") + (done.stderr or "")
 
 
@@ -97,27 +104,47 @@ def kernel_modules_are_bound(files: list[str] | None) -> tuple[bool, str]:
                           else "absent from _MODULE_NAMES: " + ", ".join(absent))
 
 
-def ci_is_green_on_head() -> tuple[bool, str]:
+def ci_is_green_on_head(pr: str | None = None) -> tuple[bool, str]:
+    """The named workflow concluded success on the SHA this PR will merge.
+
+    Three things this deliberately does not accept. Any workflow succeeding on
+    the SHA, because an unrelated one proves nothing about the tests. A run on
+    an earlier SHA, because a rebase makes a new one. And local HEAD when it
+    has drifted from the PR head, because the PR is what merges.
+    """
     code, head = run("git", "rev-parse", "HEAD")
     if code != 0:
         return False, "cannot resolve HEAD"
     sha = head.strip()
-    code, out = run("gh", "run", "list", "--limit", "25", "--json",
-                    "headSha,status,conclusion,databaseId")
+
+    if pr:
+        code, out = run("gh", "pr", "view", pr, "--json", "headRefOid",
+                        "--jq", ".headRefOid")
+        if code != 0:
+            return False, f"cannot read PR {pr} head: {out.strip()[:120]}"
+        remote = out.strip()
+        if remote and remote != sha:
+            return False, (f"local HEAD {sha[:8]} is not PR {pr} head "
+                           f"{remote[:8]}, so the checked SHA is not the one merging")
+
+    code, out = run("gh", "run", "list", "--limit", "60", "--json",
+                    "headSha,status,conclusion,workflowName")
     if code != 0:
-        return False, "gh unavailable, check CI by hand"
+        return False, out.strip()[:160]
     try:
         runs = json.loads(out)
     except json.JSONDecodeError:
         return False, "could not parse gh output"
-    mine = [r for r in runs if r.get("headSha") == sha]
+    mine = [r for r in runs if r.get("headSha") == sha
+            and r.get("workflowName") == WORKFLOW]
     if not mine:
-        return False, f"no workflow run exists for {sha[:8]}, so --auto would merge unchecked"
+        return False, (f"no {WORKFLOW!r} run for {sha[:8]}; --auto would merge "
+                       f"unchecked, and an unrelated workflow does not count")
     bad = [r for r in mine if r.get("status") != "completed"
            or r.get("conclusion") != "success"]
     if bad:
-        return False, f"{len(bad)} run(s) on {sha[:8]} not successful"
-    return True, f"{len(mine)} run(s) green on {sha[:8]}"
+        return False, f"{WORKFLOW!r} on {sha[:8]} is {bad[0].get('conclusion') or bad[0].get('status')}"
+    return True, f"{WORKFLOW!r} green on {sha[:8]}"
 
 
 def suite_is_green() -> tuple[bool, str]:
@@ -130,6 +157,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="preflight",
                                      description="Mechanical PR gate checks.")
     parser.add_argument("--base", default="main")
+    parser.add_argument("--pr", default=None,
+                        help="PR number, so the checked SHA is bound to its head")
     parser.add_argument("--skip-tests", action="store_true")
     args = parser.parse_args(argv)
 
@@ -139,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
         ("changed sources changed their tests", sources_have_tests(files)),
         ("kernel modules bound in op shim", kernel_modules_are_bound(files)),
         ("no budget ceiling moved silently", budgets_not_raised(files)),
-        ("CI green on exact head SHA", ci_is_green_on_head()),
+        ("test workflow green on the merging SHA", ci_is_green_on_head(args.pr)),
     ]
     if args.skip_tests:
         checks.append(("suite green", (False, "skipped, so the gate is incomplete")))
