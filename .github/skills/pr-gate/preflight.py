@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import subprocess
 import sys
@@ -102,6 +103,35 @@ def budgets_not_raised(files: list[str] | None, base: str = "main",
     return False, ("pass --budget-raised with a reason: " + "; ".join(raised))
 
 
+def _module_names() -> tuple[set[str], str | None]:
+    """The real `_MODULE_NAMES` tuple, parsed rather than grepped.
+
+    A substring search over the shim text accepts a name mentioned in a comment
+    or an unrelated literal. `tests/op.py` already contains such a mention, so
+    this is not hypothetical.
+    """
+    try:
+        source = (REPO / "tests" / "op.py").read_text(encoding="utf-8")
+    except OSError as exc:
+        return set(), f"could not read tests/op.py: {exc}"
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        return set(), f"could not parse tests/op.py: {exc}"
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "_MODULE_NAMES"
+                   for t in node.targets):
+            continue
+        if not isinstance(node.value, (ast.Tuple, ast.List)):
+            return set(), "_MODULE_NAMES is not a literal sequence"
+        names = {e.value for e in node.value.elts
+                 if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+        return names, None
+    return set(), "no _MODULE_NAMES assignment found in tests/op.py"
+
+
 def kernel_modules_are_bound(files: list[str] | None) -> tuple[bool, str]:
     if files is None:
         return False, "could not read the diff, so nothing is established"
@@ -110,11 +140,10 @@ def kernel_modules_are_bound(files: list[str] | None) -> tuple[bool, str]:
            and Path(p).stem != "__init__"]
     if not new:
         return True, "no kernel modules touched"
-    try:
-        shim = (REPO / "tests" / "op.py").read_text(encoding="utf-8")
-    except OSError as exc:
-        return False, f"could not read tests/op.py, so nothing is established: {exc}"
-    absent = [name for name in new if f'"{name}"' not in shim]
+    bound, problem = _module_names()
+    if problem:
+        return False, f"{problem}, so nothing is established"
+    absent = [name for name in new if name not in bound]
     return (not absent), ("all bound in tests/op.py" if not absent
                           else "absent from _MODULE_NAMES: " + ", ".join(absent))
 

@@ -270,22 +270,130 @@ def test_an_unreadable_op_shim_is_not_a_bound_module(monkeypatch):
     assert "nothing is established" in detail
 
 
-def test_every_run_caller_reads_the_exit_code():
-    """Structural guard for the pattern, so a sixth instance cannot be added
-    quietly. Any helper invoking run() must branch on its status."""
+def test_every_run_call_branches_on_its_own_status():
+    """Structural guard, rewritten after a reviewer broke the first version.
+
+    That one asked whether the name `code` appeared anywhere in the function,
+    which accepted a deleted error branch, a second unchecked run() call beside
+    a checked one, and a binding used only in a nested scope.
+
+    This walks each run() call, takes the status it was unpacked into, and
+    requires that exact name to appear in an `if` test in the same function.
+
+    Known limits, stated rather than implied: it does not follow aliases of
+    `run`, and it skips `main`, which orchestrates rather than probes. It is a
+    lint, not a proof, and it does not replace per-function failure injection.
+    """
     import ast
     import inspect
 
-    source = inspect.getsource(preflight)
-    tree = ast.parse(source)
+    tree = ast.parse(inspect.getsource(preflight))
     offenders = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef) or node.name in ("run", "main"):
+    for func in ast.walk(tree):
+        if not isinstance(func, ast.FunctionDef) or func.name in ("run", "main"):
             continue
-        body = ast.dump(node)
-        if "'run'" not in body and '"run"' not in body:
-            continue
-        if "code" not in {t.id for n in ast.walk(node)
-                          for t in ast.walk(n) if isinstance(t, ast.Name)}:
-            offenders.append(node.name)
-    assert not offenders, f"these call run() without reading its status: {offenders}"
+        tested = {n.id
+                  for node in ast.walk(func)
+                  if isinstance(node, (ast.If, ast.Compare, ast.BoolOp))
+                  for n in ast.walk(node) if isinstance(n, ast.Name)}
+        for node in ast.walk(func):
+            if not isinstance(node, ast.Assign):
+                continue
+            call = node.value
+            if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                    and call.func.id == "run"):
+                continue
+            target = node.targets[0]
+            if not isinstance(target, ast.Tuple) or not target.elts:
+                offenders.append(f"{func.name} (status not unpacked)")
+                continue
+            status = target.elts[0]
+            if not isinstance(status, ast.Name) or status.id not in tested:
+                shown = getattr(status, "id", "?")
+                offenders.append(f"{func.name} (status {shown!r} never tested)")
+    assert not offenders, "run() calls whose status is not branched on: " + str(offenders)
+
+
+def test_the_guard_rejects_the_reviewers_counterexamples():
+    """The counterexamples that defeated the first guard, kept as fixtures so a
+    future rewrite cannot quietly regress to a name-presence check."""
+    import ast
+
+    def offenders_in(source: str) -> list[str]:
+        tree = ast.parse(source)
+        found = []
+        for func in ast.walk(tree):
+            if not isinstance(func, ast.FunctionDef) or func.name in ("run", "main"):
+                continue
+            tested = {n.id
+                      for node in ast.walk(func)
+                      if isinstance(node, (ast.If, ast.Compare, ast.BoolOp))
+                      for n in ast.walk(node) if isinstance(n, ast.Name)}
+            for node in ast.walk(func):
+                if not isinstance(node, ast.Assign):
+                    continue
+                call = node.value
+                if not (isinstance(call, ast.Call)
+                        and isinstance(call.func, ast.Name)
+                        and call.func.id == "run"):
+                    continue
+                target = node.targets[0]
+                if not isinstance(target, ast.Tuple) or not target.elts:
+                    found.append(func.name)
+                    continue
+                status = target.elts[0]
+                if not isinstance(status, ast.Name) or status.id not in tested:
+                    found.append(func.name)
+        return found
+
+    second_call_unchecked = '''
+def unchecked_second():
+    code, _ = run("git", "rev-parse", "HEAD")
+    if code:
+        return False, "cannot resolve HEAD"
+    _second, out = run("git", "status", "--porcelain")
+    return not out.strip(), "clean"
+'''
+    branch_deleted = '''
+def branch_deleted():
+    code, out = run("git", "status", "--porcelain")
+    return not out.strip(), "clean"
+'''
+    honest = '''
+def honest():
+    code, out = run("git", "status", "--porcelain")
+    if code != 0:
+        return False, "unknown"
+    return not out.strip(), "clean"
+'''
+    assert offenders_in(second_call_unchecked) == ["unchecked_second"]
+    assert offenders_in(branch_deleted) == ["branch_deleted"]
+    assert offenders_in(honest) == []
+
+
+def test_a_quoted_mention_does_not_register_a_module(monkeypatch):
+    """A substring search over the shim accepts a name in a comment. tests/op.py
+    really does mention "is_repo_module", which is a function and not a module,
+    so this was not hypothetical."""
+    bound, problem = preflight._module_names()
+    assert problem is None
+    assert "is_repo_module" not in bound
+    assert "evidence" in bound
+
+    real = (preflight.REPO / "tests" / "op.py").read_text(encoding="utf-8")
+    salted = real + '\n# "new_guard" has not been registered yet\n'
+    monkeypatch.setattr(preflight.Path, "read_text",
+                        lambda self, **kw: salted)
+    ok, detail = preflight.kernel_modules_are_bound(
+        ["operator_kernel/new_guard.py"])
+    assert ok is False
+    assert "new_guard" in detail
+
+
+def test_an_unparseable_shim_establishes_nothing(monkeypatch):
+    monkeypatch.setattr(preflight.Path, "read_text",
+                        lambda self, **kw: "def broken(:\n")
+    ok, detail = preflight.kernel_modules_are_bound(
+        ["operator_kernel/ledger_chain.py"])
+    assert ok is False
+    assert "nothing is established" in detail
