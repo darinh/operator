@@ -70,24 +70,34 @@ def sources_have_tests(files: list[str] | None) -> tuple[bool, str]:
                              if not unguarded else "; ".join(unguarded))
 
 
-def budgets_not_raised(files: list[str] | None) -> tuple[bool, str]:
-    """A raised ceiling is a decision to state, never a side effect."""
+def budgets_not_raised(files: list[str] | None, base: str = "main",
+                       reason: str | None = None) -> tuple[bool, str]:
+    """A raised ceiling has to be a stated decision, so state it.
+
+    `reason` is how you state it. Without one a moved `MAX_*` blocks the gate;
+    with one it passes and the reason is printed, which is the difference
+    between a decision and a side effect.
+    """
     if files is None:
         return False, "could not read the diff, so nothing is established"
-    guards = [p for p in files if p.startswith("tests/")
-              and "boundary" in p or p.endswith("test_extension_packaging.py")]
+    guards = [p for p in files
+              if p.startswith("tests/")
+              and ("boundary" in p or p.endswith("test_extension_packaging.py"))]
     if not guards:
         return True, "no budget guard touched"
     raised = []
     for path in guards:
-        code, out = run("git", "diff", "-U0", "main...HEAD", "--", path)
+        code, out = run("git", "diff", "-U0", f"{base}...HEAD", "--", path)
         if code != 0:
-            continue
+            return False, f"could not diff {path}, so nothing is established"
         for line in out.splitlines():
             if line.startswith("+") and "MAX_" in line and "=" in line:
                 raised.append(f"{path}: {line[1:].strip()}")
-    return (not raised), ("no ceiling moved" if not raised
-                          else "state why in the PR: " + "; ".join(raised))
+    if not raised:
+        return True, "no ceiling moved"
+    if reason:
+        return True, f"raised deliberately ({reason}): " + "; ".join(raised)
+    return False, ("pass --budget-raised with a reason: " + "; ".join(raised))
 
 
 def kernel_modules_are_bound(files: list[str] | None) -> tuple[bool, str]:
@@ -160,6 +170,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--pr", default=None,
                         help="PR number, so the checked SHA is bound to its head")
     parser.add_argument("--skip-tests", action="store_true")
+    parser.add_argument("--budget-raised", default=None, metavar="REASON",
+                        help="acknowledge a moved MAX_* ceiling, with why")
     args = parser.parse_args(argv)
 
     files = changed_files(args.base)
@@ -167,7 +179,8 @@ def main(argv: list[str] | None = None) -> int:
         ("working tree clean", tree_is_clean()),
         ("changed sources changed their tests", sources_have_tests(files)),
         ("kernel modules bound in op shim", kernel_modules_are_bound(files)),
-        ("no budget ceiling moved silently", budgets_not_raised(files)),
+        ("no budget ceiling moved silently",
+         budgets_not_raised(files, args.base, args.budget_raised)),
         ("test workflow green on the merging SHA", ci_is_green_on_head(args.pr)),
     ]
     if args.skip_tests:
