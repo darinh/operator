@@ -20,10 +20,23 @@ that need no judgement.
 | --- | --- |
 | Working tree clean | An uncommitted file is not in the PR and nobody reviews it |
 | Full suite green | `python -m pytest -q` from the repo root |
-| Every changed source file has a matching test file | `foo.py` needs `tests/test_foo.py`, the rule `test-enforcer` already applies per commit |
+| Every changed source **changed its test file too** | Existence is too weak. Adding two hundred lines to a module whose test was written a year ago would otherwise pass without one new assertion |
 | A new kernel module appears in `tests/op.py` `_MODULE_NAMES` | Absent, the suite's monkeypatching silently misses it, which has bitten this repo before |
+| No budget ceiling moved silently | Raising one is allowed as a stated decision. The check reports the moved line so the PR has to say why |
 | CI concluded success on the exact head SHA | Not "auto-merge armed", see below |
-| No line budget raised without saying so | Raising one is allowed as a stated decision, never as a side effect |
+
+`--skip-tests` exists for iterating. It reports the gate as incomplete and exits non-zero, so it
+is never a way to print a pass.
+
+**When the script cannot read the diff it fails, it does not pass.** `changed_files` returns
+`None` rather than an empty list on a git error, and every check that depends on it refuses. A
+gate that passes because it could not see is worse than no gate.
+
+**What this does not do.** It does not measure line coverage. It establishes that a changed
+source had its test changed in the same diff, which is a weaker claim than a percentage in one
+direction and a stronger one in another, because a percentage cannot tell you whether the test
+exercises the line that changed. Question 6 below is what actually carries coverage here, and
+it wants evidence, not a number.
 
 **The CI trap.** `gh pr merge --auto` merges as soon as the PR is mergeable. If no workflow run
 exists yet for the head SHA there is nothing to wait on, so it merges unchecked. That happened
@@ -51,6 +64,9 @@ pointing at a genuine problem underneath.
 Answer each in the PR description or a comment. "No" is fine. Silence is not, because noticing
 is the point.
 
+0. **What authorised this?** Name the human request, issue, or approved item this traces to. An
+   agent that satisfies every mechanical check while doing work nobody asked for is the failure
+   `docs/plan.md` section 3.2 exists to prevent, and no other question here would catch it.
 1. Does this change a contract something else depends on? Ledger record shape, exit codes, file
    names, console script names, a seam another package reaches through.
 2. Which documents name the behaviour I changed? On 2026-09-20 `docs/ledger.md` claimed a
@@ -77,11 +93,22 @@ is the point.
 All three gates passed, then `gh pr merge <n> --rebase`. This repo allows only rebase merges
 and auto-deletes branches.
 
+**A rebase merge makes a SHA that CI never saw.** If `main` moved since the branch went green,
+the rebased commit landing on `main` is new. Check the post-merge run on `main` and be ready to
+revert, or rebase onto current `main` and let CI go green there first, which is the cheaper
+habit. Verifying `main` after a merge is not optional, because nothing else does it.
+
+**Record the Gate 2 reviews where a human can see them**, with `gh pr review` or a PR comment
+quoting each reviewer's verdict and model. A review that exists only in an agent's context did
+not happen as far as any reader is concerned.
+
 **Do not stack PRs.** Rebase-merging rewrites the SHAs above it, so each land forces a rebase
 cascade on everything stacked on top. One combined PR instead. Large PRs are fine here.
 
 ## Growing this file
 
 Question 10 is the mechanism. When something gets missed, add the question that would have
-caught it. Where a check can replace a question, write it into `preflight.py` instead. A
-question never once answered "yes" is a candidate for deletion.
+caught it. Where a check can replace a question, write it into `preflight.py` instead.
+
+Do not delete a question because it keeps being answered "no". A question about an invariant
+that still holds is doing its job; that is what maintained looks like.

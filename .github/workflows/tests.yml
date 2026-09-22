@@ -50,6 +50,10 @@ jobs:
         # kernel suite or its line budgets. Which also means nothing ran it.
         run: python -m pytest .github/skills/verify-operator/test_control_operator.py -q
 
+      - name: PR gate's own checks
+        # Same reasoning, same trap. A gate nobody runs is a gate that rots.
+        run: python -m pytest .github/skills/pr-gate/test_preflight.py -q
+
       - name: Console scripts answer for themselves
         # The suite substitutes the multiplexer, the home and the catalog, so it
         # can be green while the installed commands are broken. This is the
