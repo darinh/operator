@@ -39,7 +39,9 @@ def changed_files(base: str) -> list[str] | None:
 
 
 def tree_is_clean() -> tuple[bool, str]:
-    _code, out = run("git", "status", "--porcelain")
+    code, out = run("git", "status", "--porcelain")
+    if code != 0:
+        return False, f"could not read the tree, so nothing is established: {out.strip()[:80]}"
     dirty = [line for line in out.splitlines() if line.strip()]
     return (not dirty), ("clean" if not dirty else f"{len(dirty)} uncommitted path(s)")
 
@@ -108,7 +110,10 @@ def kernel_modules_are_bound(files: list[str] | None) -> tuple[bool, str]:
            and Path(p).stem != "__init__"]
     if not new:
         return True, "no kernel modules touched"
-    shim = (REPO / "tests" / "op.py").read_text(encoding="utf-8")
+    try:
+        shim = (REPO / "tests" / "op.py").read_text(encoding="utf-8")
+    except OSError as exc:
+        return False, f"could not read tests/op.py, so nothing is established: {exc}"
     absent = [name for name in new if f'"{name}"' not in shim]
     return (not absent), ("all bound in tests/op.py" if not absent
                           else "absent from _MODULE_NAMES: " + ", ".join(absent))
