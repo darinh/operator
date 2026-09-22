@@ -181,3 +181,41 @@ def test_a_failed_guard_diff_does_not_silently_report_no_ceiling_moved(monkeypat
     ok, detail = preflight.budgets_not_raised(["tests/test_kernel_boundary.py"])
     assert ok is False
     assert "nothing is established" in detail
+
+
+def test_changed_files_returns_none_when_git_fails(monkeypatch):
+    """The earlier test handed None straight to the consumers, so reverting the
+    producer to return [] still passed it. This exercises the producer."""
+    monkeypatch.setattr(preflight, "run", lambda *a, **k: (128, "fatal: bad revision"))
+    assert preflight.changed_files("no-such-base") is None
+
+
+def test_changed_files_distinguishes_no_changes_from_no_answer(monkeypatch):
+    monkeypatch.setattr(preflight, "run", lambda *a, **k: (0, ""))
+    assert preflight.changed_files("main") == []
+
+
+def test_a_drifted_pr_head_is_refused_even_when_local_ci_is_green(monkeypatch):
+    """The earlier version of this test left the run list empty, so ok was
+    False whether or not the PR-head check existed. Local HEAD now has a green
+    test-workflow run, so only the head comparison can produce the refusal."""
+    import json as _json
+
+    def fake(*argv, cwd=None):
+        if argv[:2] == ("git", "rev-parse") and "--abbrev-ref" in argv:
+            return 0, "feat/pr-gate\n"
+        if argv[:2] == ("git", "rev-parse"):
+            return 0, "aaaaaaaaaaaa\n"
+        if argv[:3] == ("gh", "pr", "view"):
+            return 0, "bbbbbbbbbbbb\n"
+        return 0, _json.dumps([
+            {"headSha": "aaaaaaaaaaaa", "status": "completed",
+             "conclusion": "success", "workflowName": preflight.WORKFLOW},
+        ])
+
+    monkeypatch.setattr(preflight, "run", fake)
+    assert preflight.ci_is_green_on_head() == (
+        True, f"{preflight.WORKFLOW!r} green on aaaaaaaa")
+    ok, detail = preflight.ci_is_green_on_head("18")
+    assert ok is False
+    assert "not the one merging" in detail
