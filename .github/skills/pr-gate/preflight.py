@@ -176,9 +176,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--budget-raised", default=None, metavar="REASON",
                         help="acknowledge a moved MAX_* ceiling, with why")
     args = parser.parse_args(argv)
+    pr = (args.pr or "").strip() or None
 
-    ci_ok, ci_detail = ci_is_green_on_head(args.pr)
-    if args.pr is None:
+    ci_ok, ci_detail = ci_is_green_on_head(pr)
+    if pr is None:
         ci_ok = False
         ci_detail = (f"{ci_detail}; but no --pr was given, so the PR head is "
                      f"unverified and the gate is incomplete")
