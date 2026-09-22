@@ -85,3 +85,63 @@ def test_skipping_the_suite_cannot_report_gate_one_passed(capsys):
     assert code == 1
     assert "Gate 1 passed" not in out
     assert "skipped, so the gate is incomplete" in out
+
+
+def test_a_missing_executable_is_reported_not_raised():
+    """subprocess.run raises FileNotFoundError when the binary is absent, so
+    the nonzero-exit handler never sees it. The PR description claimed this
+    degraded gracefully and a reviewer proved it crashed."""
+    code, detail = preflight.run("definitely-not-an-executable-xyz", "--help")
+    assert code == 127
+    assert "could not run" in detail
+
+
+def test_an_unrelated_green_workflow_does_not_certify_the_tests(monkeypatch):
+    """A successful run of some other workflow on the same SHA proves nothing
+    about the test suite."""
+    import json as _json
+
+    def fake(*argv, cwd=None):
+        if argv[:2] == ("git", "rev-parse"):
+            return 0, "abc123def456\n"
+        return 0, _json.dumps([
+            {"headSha": "abc123def456", "status": "completed",
+             "conclusion": "success", "workflowName": "codeql"},
+        ])
+
+    monkeypatch.setattr(preflight, "run", fake)
+    ok, detail = preflight.ci_is_green_on_head()
+    assert ok is False
+    assert "unrelated workflow does not count" in detail
+
+
+def test_the_test_workflow_green_on_the_sha_passes(monkeypatch):
+    import json as _json
+
+    def fake(*argv, cwd=None):
+        if argv[:2] == ("git", "rev-parse"):
+            return 0, "abc123def456\n"
+        return 0, _json.dumps([
+            {"headSha": "abc123def456", "status": "completed",
+             "conclusion": "success", "workflowName": preflight.WORKFLOW},
+        ])
+
+    monkeypatch.setattr(preflight, "run", fake)
+    ok, _detail = preflight.ci_is_green_on_head()
+    assert ok is True
+
+
+def test_a_local_head_that_drifted_from_the_pr_head_fails(monkeypatch):
+    """The PR head is what merges. Checking local HEAD alone certifies a SHA
+    that may no longer be the one going in."""
+    def fake(*argv, cwd=None):
+        if argv[:2] == ("git", "rev-parse"):
+            return 0, "aaaaaaaaaaaa\n"
+        if argv[:3] == ("gh", "pr", "view"):
+            return 0, "bbbbbbbbbbbb\n"
+        return 0, "[]"
+
+    monkeypatch.setattr(preflight, "run", fake)
+    ok, detail = preflight.ci_is_green_on_head("18")
+    assert ok is False
+    assert "not the one merging" in detail
