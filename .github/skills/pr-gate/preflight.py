@@ -126,6 +126,8 @@ def ci_is_green_on_head(pr: str | None = None) -> tuple[bool, str]:
     if code != 0:
         return False, "cannot resolve HEAD"
     sha = head.strip()
+    code, out = run("git", "rev-parse", "--abbrev-ref", "HEAD")
+    branch = out.strip() if code == 0 and out.strip() != "HEAD" else ""
 
     if pr:
         code, out = run("gh", "pr", "view", pr, "--json", "headRefOid",
@@ -138,7 +140,8 @@ def ci_is_green_on_head(pr: str | None = None) -> tuple[bool, str]:
                            f"{remote[:8]}, so the checked SHA is not the one merging")
 
     code, out = run("gh", "run", "list", "--limit", "60", "--json",
-                    "headSha,status,conclusion,workflowName")
+                    "headSha,status,conclusion,workflowName",
+                    *(("--branch", branch) if branch else ()))
     if code != 0:
         return False, out.strip()[:160]
     try:
