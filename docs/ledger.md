@@ -70,6 +70,28 @@ not `Broken`.
 Ledgers written before this chain exist. Those files report `NoChain`. Mixing
 an unchained prefix with chained records is normal and must verify.
 
+## Reading it
+
+`operator verify` runs the verifier over both generations and prints the sum
+type above. `operator trace [-n N]` prints records, newest first, from the same
+pair of files.
+
+Both read `trace.jsonl.1` then `trace.jsonl`, from one list, because a reader
+that takes only the live file is wrong in a way that looks like an empty
+ledger: after a rotation with nothing written since, every record is in the
+rotated file. That shipped once, and the two verbs disagreeing about how many
+records exist is what exposed it.
+
+`operator trace` takes each file as a snapshot through a single held handle
+rather than as a tail. A tail follows a rotation by name, and rotation renames
+the live file *onto* `trace.jsonl.1`, so a tail reading the rotated file loses
+the rest of it when that happens mid-read. It reports lines it could not parse
+on stderr instead of dropping them, for the reason this whole document exists:
+a gap in the evidence is itself evidence.
+
+Neither verb is a witness outside the file, so neither escapes the limits
+above. `Verified` still does not mean nothing was lost.
+
 ## What would actually change the threat model
 
 Escape the digest. Periodically copy `(writer, seq, digest)` somewhere the
