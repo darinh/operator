@@ -131,6 +131,43 @@ class LedgerTail:
                 handle.close()
         return self._records(lines)
 
+    def snapshot(self) -> "list[dict]":
+        """Every record in this file, read through one handle held open.
+
+        `read` re-opens by name for each batch so it can follow a rotation,
+        which is right for the live ledger and wrong for a file that has
+        already rotated. The writer renames the live file *onto*
+        `trace.jsonl.1` and never creates `trace.jsonl.1.1`, so a tail
+        positioned in the rotated file sees its identity change, goes looking
+        for a successor that does not exist, counts a gap and abandons the
+        unread remainder. Measured through `operator trace`: a 1200-record
+        rotated file rotated again mid-drain printed 504 of 1204 and exited 0.
+
+        One handle, opened once, is what closes that. The bytes come from the
+        file that was there at open, whatever happens to the name afterwards,
+        and on Windows the held handle makes the rename fail and retry rather
+        than land behind this reader.
+
+        For a one-shot reader rather than a poller: it takes no `limit`, and
+        it leaves `offset` and `identity` alone so a later `read` still starts
+        where the cursor says.
+        """
+        handle, _ = self._open_identified(self.path)
+        if handle is None:
+            return []
+        try:
+            lines, offset = [], 0
+            while True:
+                batch, moved = self._read_handle(handle, offset,
+                                                 MAX_FACTS_PER_POLL)
+                if moved == offset:
+                    break
+                lines.extend(batch)
+                offset = moved
+            return self._records(lines)
+        finally:
+            handle.close()
+
     def _records(self, lines) -> "list[dict]":
         return [r for r in (self._parse(line) for line in lines)
                 if r is not None]
