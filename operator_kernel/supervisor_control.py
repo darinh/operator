@@ -290,7 +290,7 @@ def restart_loop(target: str | None) -> int:
 
     if not MUX.has_session(instance.session):
         print(f"No running session '{target}'. Nothing to keep alive -- "
-              f"start it with: operator --loop --name {target}", file=sys.stderr)
+              f"start it with: operator start --name {target}", file=sys.stderr)
         return 1
     if not instance.owns_live_session():
         print(f"A session named '{instance.session}' is running but was not "
@@ -311,9 +311,8 @@ def restart_loop(target: str | None) -> int:
               "safer to restart it yourself. Run this from "
               f"{instance.display_name}'s working directory -- --adopt is what "
               "keeps the running session alive:", file=sys.stderr)
-        print(f"    operator stop-loop {instance.display_name}", file=sys.stderr)
-        print(f"    operator --loop --headless --adopt "
-              f"--name {instance.display_name} [original args]", file=sys.stderr)
+        print(f"    operator start --name {instance.display_name} "
+              "[original args]", file=sys.stderr)
         print("  That records the arguments, so future restarts can just use: "
               f"operator restart-loop {instance.display_name}", file=sys.stderr)
         return 1

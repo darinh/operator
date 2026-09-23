@@ -67,9 +67,11 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
     atexit.register(remove_file, instance.loop_startup_file)
     copilot_args = with_experimental(
         ["--yolo", "--autopilot", "--no-ask-user", "--effort", "high"])
-    agent = extract_agent_from_args(user_args)
-    if not has_agent_flag(user_args):
-        copilot_args += ["--agent", agent]
+    # No `--agent` unless the caller passed one. `anvil:anvil` was this
+    # developer's custom agent, and injecting it made every unconfigured start
+    # crash-loop on a machine that only has stock Copilot CLI.
+    agent = (extract_agent_from_args(user_args)
+             if has_agent_flag(user_args) else "copilot")
     copilot_args += user_args
 
     start_session_num = 1

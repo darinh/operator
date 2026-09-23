@@ -109,7 +109,7 @@ def test_the_verb_table_is_not_empty():
     """Otherwise the two loops below pass over nothing."""
     names = {verb.tokens[0] for verb in cli.VERBS}
     assert len(cli.VERBS) >= 10
-    assert names >= {"start", "list", "join", "stop", "trace", "verify"}
+    assert names >= {"doctor", "start", "list", "join", "stop", "trace", "verify"}
 
 
 def test_every_menu_entry_maps_to_a_verb():
@@ -159,6 +159,58 @@ def test_menu_offers_recover_all():
     assert any(item.argv == ("recover", "--all") for item in cli.menu_items())
 
 
+def test_doctor_is_first_on_the_menu():
+    assert cli.menu_items()[0].argv == ("doctor",)
+
+
+def test_menu_start_does_not_inject_an_agent(monkeypatch, capsys):
+    import supervisor
+    seen = {}
+
+    def fake(instance, copilot_args, is_fresh, adopt=False, cwd=None):
+        seen.update(name=instance.display_name, args=list(copilot_args))
+        return 9
+
+    monkeypatch.setattr(supervisor, "_spawn_background_loop", fake)
+    _tty(monkeypatch, f"{_choice_for(('start',))}\ndemo\nfix the parser\n\nn\n")
+    assert cli.main([]) == 0
+    assert seen["name"] == "demo"
+    assert "--agent" not in seen["args"]
+    assert "anvil:anvil" not in seen["args"]
+    assert "fix the parser" in seen["args"]
+    out = capsys.readouterr().out
+    assert "Running: operator start --name demo" in out
+    assert "fix the parser" in out
+
+
+def test_menu_start_passes_an_agent_and_can_attach(monkeypatch):
+    import supervisor
+    spawned = {}
+    attached = []
+
+    def fake(instance, copilot_args, is_fresh, adopt=False, cwd=None):
+        spawned.update(name=instance.display_name, args=list(copilot_args))
+        return 3
+
+    monkeypatch.setattr(supervisor, "_spawn_background_loop", fake)
+    monkeypatch.setattr(op.MUX, "has_session", lambda session: True)
+    monkeypatch.setattr(op.MUX, "attach", lambda session: attached.append(session) or 0)
+    _tty(monkeypatch, f"{_choice_for(('start',))}\ndemo\n\nmy-agent\ny\n")
+    assert cli.main([]) == 0
+    assert spawned["args"] == ["--agent", "my-agent"]
+    assert attached == ["demo"]
+
+
+def test_menu_reprompts_for_a_missing_seat_name(monkeypatch, capsys):
+    seen = []
+    monkeypatch.setattr(op.MUX, "has_session", lambda session: True)
+    monkeypatch.setattr(op.MUX, "attach", lambda session: seen.append(session) or 0)
+    _tty(monkeypatch, f"{_choice_for(('join',))}\n\nalpha\n")
+    assert cli.main([]) == 0
+    assert seen == ["alpha"]
+    assert "A seat name is needed." in capsys.readouterr().out
+
+
 def test_menu_quit_does_not_dispatch(monkeypatch, capsys):
     _tty(monkeypatch, "0\n")
     assert cli.main([]) == 0
@@ -184,7 +236,7 @@ def test_a_menu_started_seat_exports_the_home_its_child_reads(monkeypatch):
 
     monkeypatch.setattr(supervisor, "_spawn_background_loop", fake)
     monkeypatch.delenv("COPILOT_OPERATOR_HOME", raising=False)
-    _tty(monkeypatch, f"{_choice_for(('start',))}\nalpha\n")
+    _tty(monkeypatch, f"{_choice_for(('start',))}\nalpha\n\n\nn\n")
     assert cli.main([]) == 0
     assert seen["home"] == str(Path.home() / ".operator")
 
@@ -276,6 +328,22 @@ def test_join_attaches(monkeypatch):
     assert seen == ["alpha"]
 
 
+def test_join_without_a_multiplexer_explains(monkeypatch, capsys):
+    from mux import MuxNotFoundError
+
+    def boom(*a, **k):
+        raise MuxNotFoundError(
+            "No terminal multiplexer found. Install psmux:\n"
+            "    winget install --id marlocarlo.psmux")
+
+    monkeypatch.setattr(op.MUX, "has_session", boom)
+    assert cli.main(["join", "alpha"]) == 1
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+    assert "multiplexer" in err.lower()
+    assert "Install" in err
+
+
 def test_join_without_a_name_refuses(capsys):
     assert cli.main(["join"]) == 2
     assert "Usage: operator join NAME" in capsys.readouterr().err
@@ -284,11 +352,41 @@ def test_join_without_a_name_refuses(capsys):
 def test_stop_requests_the_supervisor_stop(monkeypatch, capsys):
     import supervisor_control
     seen = []
+    inst = op.Instance("alpha")
+    inst.managed_file.parent.mkdir(parents=True, exist_ok=True)
+    inst.managed_file.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(supervisor_control, "_request_supervisor_stop",
                         lambda inst: seen.append(inst.display_name))
     assert cli.main(["stop", "alpha"]) == 0
     assert seen == ["alpha"]
     assert "stop requested for alpha" in capsys.readouterr().out
+
+
+def test_stop_unknown_refuses(monkeypatch, capsys):
+    import supervisor_control
+    called = []
+    monkeypatch.setattr(supervisor_control, "_request_supervisor_stop",
+                        lambda inst: called.append(inst.display_name))
+    assert cli.main(["stop", "nonexistent"]) == 1
+    assert called == []
+    err = capsys.readouterr().err
+    assert "No seat 'nonexistent'" in err
+
+
+def test_doctor_reports_a_missing_copilot(monkeypatch, capsys):
+    monkeypatch.setattr(cli.shutil, "which", lambda name: None)
+    assert cli.main(["doctor"]) == 1
+    out = capsys.readouterr().out
+    assert "copilot: not found on PATH" in out
+    assert "doctor: failed" in out
+
+
+def test_doctor_ok_when_the_machine_is_ready(monkeypatch, capsys):
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "/bin/copilot")
+    assert cli.main(["doctor"]) == 0
+    out = capsys.readouterr().out
+    assert "copilot: /bin/copilot" in out
+    assert "doctor: ok" in out
 
 
 def test_restart_loop_names_one_seat(monkeypatch):
