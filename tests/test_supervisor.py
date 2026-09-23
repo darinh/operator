@@ -148,6 +148,47 @@ def test_seat_watch_ignores_progress_verdict_from_the_live_loop(looping, monkeyp
     assert activation.read_state(seat_watch.NAME).get("seats", {}) == {}
 
 
+RESUME_ID = "3f2a9c1e-1111-2222-3333-444455556666"
+
+
+@pytest.mark.parametrize("tail", [
+    ["--", "some text"],
+    ["--", "--resume=literal"],
+    ["--", "--log-level=info"],
+])
+def test_generated_options_ignore_the_literal_tail(looping, monkeypatch, tail):
+    """run_loop_mode -> start_session, not the helper. Three tails from review."""
+    import launch
+    captured = []
+
+    def save(inst, argv, cwd, n):
+        captured.append(list(argv))
+        inst.stop_marker.touch()
+        return inst.spec_file
+
+    monkeypatch.setattr(launch, "write_launch_spec", save)
+    monkeypatch.setattr(launch, "copilot_executable", lambda: "copilot")
+    monkeypatch.setattr(op.Instance, "copilot_pid", lambda self: 1)
+    monkeypatch.setattr(op, "stop_session_gracefully", lambda instance: None)
+    monkeypatch.delenv("COPILOT_OPERATOR_NO_DEBUG_LOG", raising=False)
+    inst = op.Instance("plain")
+    inst.save_state(1, "2026-01-01T00:00:00Z", RESUME_ID)
+    op.run_loop_mode(inst, tail, is_fresh=False)
+    assert captured, "start_session never wrote a launch spec"
+    argv = captured[0]
+    assert "--" in argv
+    cut = argv.index("--")
+    assert f"--resume={RESUME_ID}" in argv[:cut]
+    assert argv[cut:].count("--log-level=info") == (
+        1 if tail[-1] == "--log-level=info" else 0)
+    assert "--log-level" in argv[:cut]
+    assert "debug" in argv[:cut]
+    if tail[-1] == "--resume=literal":
+        assert "--resume=literal" in argv[cut:]
+    if tail[-1] == "some text":
+        assert "some text" in argv[cut:]
+
+
 def test_resume_is_threaded_through_before_terminator():
     from pathlib import Path
     source = Path(op.supervisor.__file__).read_text(encoding="utf-8")
