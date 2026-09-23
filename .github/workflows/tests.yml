@@ -59,6 +59,7 @@ jobs:
         # can be green while the installed commands are broken. This is the
         # cheapest check that entry-point discovery still resolves.
         run: |
+          operator --help > /dev/null
           operator-fleet --help > /dev/null
           operator-seat --help > /dev/null
 
