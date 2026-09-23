@@ -11,6 +11,7 @@ This calls the same functions they do.
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,7 @@ class Verb:
     help: str
     menu: str
     prompts: tuple[str, ...] = ()
+    extra_menu: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -35,8 +37,10 @@ class Item:
 
 
 VERBS: tuple[Verb, ...] = (
+    Verb(("doctor",), "check that this machine can run operator",
+         "Check this machine"),
     Verb(("start",), "start a supervised seat (start --name NAME)",
-         "Start a supervised seat", ("name",)),
+         "Start a supervised seat"),
     Verb(("list",), "list running seats",
          "List running seats"),
     Verb(("join",), "attach this terminal to a running seat",
@@ -45,9 +49,13 @@ VERBS: tuple[Verb, ...] = (
          "Stop a supervised seat", ("name",)),
     Verb(("restart-loop",),
          "replace a supervisor without stopping the session",
-         "Restart one seat's supervisor", ("name",)),
-    Verb(("recover",), "bring back seats lost to a crash or reboot",
-         "Recover seats after a crash"),
+         "Restart one seat's supervisor", ("name",),
+         extra_menu=(("Restart every running supervisor",
+                      ("restart-loop", "--all")),)),
+    Verb(("recover",), "list seats that need recovering after a crash",
+         "List seats that need recovering",
+         extra_menu=(("Recover every seat that needs it",
+                      ("recover", "--all")),)),
     Verb(("remember",), "record one claim for this seat",
          "Remember something about this seat",
          ("instance", "kind", "text")),
@@ -65,12 +73,12 @@ VERBS: tuple[Verb, ...] = (
          "Verify the ledger chain"),
 )
 
-_PROMPTS = {
-    "name": "Seat name: ",
-    "instance": "Seat name: ",
-    "kind": "Kind (decision, gotcha, disposition, attempt): ",
-    "text": "Text: ",
-    "id": "Entry id: ",
+_PROMPT_LABEL = {
+    "name": ("Seat name: ", "seat name"),
+    "instance": ("Seat name: ", "seat name"),
+    "kind": ("Kind (decision, gotcha, disposition, attempt): ", "kind"),
+    "text": ("Text: ", "note"),
+    "id": ("Entry id: ", "entry id"),
 }
 
 
@@ -78,14 +86,8 @@ def menu_items() -> tuple[Item, ...]:
     items = []
     for verb in VERBS:
         items.append(Item(verb.menu, verb.tokens, verb.prompts))
-        if verb.tokens == ("restart-loop",):
-            items.append(Item(
-                "Restart every running supervisor",
-                ("restart-loop", "--all")))
-        if verb.tokens == ("recover",):
-            items.append(Item(
-                "Recover every seat that needs it",
-                ("recover", "--all")))
+        for label, argv in verb.extra_menu:
+            items.append(Item(label, argv))
     return tuple(items)
 
 
@@ -123,12 +125,22 @@ def _prep() -> None:
     _bootstrap()
 
 
-def _ask(prompt: str) -> str:
+def _ask(prompt: str) -> "str | None":
     try:
         return input(prompt).strip()
     except EOFError:
         print()
-        return ""
+        return None
+
+
+def _ask_needed(prompt: str, what: str) -> "str | None":
+    while True:
+        value = _ask(prompt)
+        if value is None:
+            return None
+        if value:
+            return value
+        print(f"A {what} is needed.")
 
 
 def _quote_argv(argv: list[str]) -> str:
@@ -146,16 +158,36 @@ def _build_argv(item: Item, values: dict[str, str]) -> list[str]:
     if "instance" in values:
         argv = [argv[0], "--instance", values["instance"], *argv[1:]]
     if "name" in values:
-        if item.argv[0] == "start":
-            argv += ["--name", values["name"]]
-        else:
-            argv += [values["name"]]
+        argv += [values["name"]]
     if "kind" in values:
         argv += ["--kind", values["kind"]]
     if "text" in values:
         argv += [values["text"]]
     if "id" in values:
         argv += [values["id"]]
+    return argv
+
+
+def _prompt_start() -> "list[str] | None":
+    name = _ask_needed("Seat name: ", "seat name")
+    if name is None:
+        return None
+    work = _ask("What should it work on: ")
+    if work is None:
+        return None
+    agent = _ask("Agent (Enter for Copilot CLI default): ")
+    if agent is None:
+        return None
+    attach = _ask("Attach now? [y/N]: ")
+    if attach is None:
+        return None
+    argv = ["start", "--name", name]
+    if agent:
+        argv += ["--agent", agent]
+    if attach.lower() in ("y", "yes"):
+        argv.append("--attach")
+    if work:
+        argv.append(work)
     return argv
 
 
@@ -167,23 +199,36 @@ def _menu() -> int:
         print(f"  {index}. {item.label}")
     print("  0. Quit")
     print()
-    choice = _ask("Choice: ")
-    if choice in ("", "0", "q", "Q"):
-        return 0 if choice in ("0", "q", "Q") else 2
-    try:
-        number = int(choice)
-    except ValueError:
-        print("Not a number.", file=sys.stderr)
-        return 2
-    if number < 1 or number > len(items):
-        print("No such choice.", file=sys.stderr)
-        return 2
+    while True:
+        choice = _ask("Choice: ")
+        if choice is None:
+            return 2
+        if choice in ("0", "q", "Q"):
+            return 0
+        if choice == "":
+            print("A choice is needed.")
+            continue
+        try:
+            number = int(choice)
+        except ValueError:
+            print("Not a number.")
+            continue
+        if number < 1 or number > len(items):
+            print("No such choice.")
+            continue
+        break
     item = items[number - 1]
+    if item.argv == ("start",):
+        argv = _prompt_start()
+        if argv is None:
+            return 2
+        print("Running: operator " + _quote_argv(argv))
+        return dispatch(argv)
     values = {}
     for key in item.prompts:
-        value = _ask(_PROMPTS[key])
-        if not value:
-            print(f"A {key} is needed.", file=sys.stderr)
+        prompt, what = _PROMPT_LABEL[key]
+        value = _ask_needed(prompt, what)
+        if value is None:
             return 2
         values[key] = value
     argv = _build_argv(item, values)
@@ -193,16 +238,18 @@ def _menu() -> int:
 
 def _start(rest: list[str]) -> int:
     _prep()
-    name, fresh, copilot = "", False, []
+    name, fresh, attach, copilot = "", False, False, []
     i = 0
     while i < len(rest):
         arg = rest[i]
         if arg in ("-h", "--help"):
-            print("Usage: operator start --name NAME [--fresh] "
-                  "[copilot-args...]")
+            print("Usage: operator start --name NAME [--agent AGENT] "
+                  "[--attach] [--fresh] [prompt...]")
             return 0
         if arg == "--fresh":
             fresh = True
+        elif arg == "--attach":
+            attach = True
         elif arg == "--name":
             i += 1
             if i >= len(rest) or not rest[i].strip():
@@ -211,19 +258,29 @@ def _start(rest: list[str]) -> int:
             name = rest[i]
         elif arg.startswith("--name="):
             name = arg.split("=", 1)[1]
+        elif arg == "--agent":
+            i += 1
+            if i >= len(rest) or not rest[i].strip():
+                print("operator start --agent needs a value", file=sys.stderr)
+                return 2
+            copilot += ["--agent", rest[i]]
+        elif arg.startswith("--agent="):
+            copilot += ["--agent", arg.split("=", 1)[1]]
         else:
             copilot.append(arg)
         i += 1
     if not name.strip() and copilot and not copilot[0].startswith("-"):
         name, copilot = copilot[0], copilot[1:]
     if not name.strip():
-        print("Usage: operator start --name NAME [--fresh] [copilot-args...]",
-              file=sys.stderr)
+        print("Usage: operator start --name NAME [--agent AGENT] [--attach] "
+              "[--fresh] [prompt...]", file=sys.stderr)
         return 2
     from instance import Instance
     from supervisor import _spawn_background_loop
     pid = _spawn_background_loop(Instance(name), copilot, is_fresh=fresh)
     print(f"started {name} (pid {pid})")
+    if attach:
+        return _join([name])
     return 0
 
 
@@ -254,11 +311,16 @@ def _join(rest: list[str]) -> int:
         return 2
     from config import MUX
     from instance import Instance
+    from mux import MuxNotFoundError
     inst = Instance(name)
-    if not MUX.has_session(inst.session):
-        print(f"No running seat '{name}'.", file=sys.stderr)
+    try:
+        if not MUX.has_session(inst.session):
+            print(f"No running seat '{name}'.", file=sys.stderr)
+            return 1
+        return MUX.attach(inst.session)
+    except MuxNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
         return 1
-    return MUX.attach(inst.session)
 
 
 def _stop(rest: list[str]) -> int:
@@ -269,8 +331,48 @@ def _stop(rest: list[str]) -> int:
         return 2
     from instance import Instance
     from supervisor_control import _request_supervisor_stop
-    _request_supervisor_stop(Instance(name))
+    inst = Instance(name)
+    if not inst.is_managed():
+        print(f"No seat '{name}'.", file=sys.stderr)
+        return 1
+    _request_supervisor_stop(inst)
     print(f"stop requested for {name}")
+    return 0
+
+
+def _doctor(_rest: list[str]) -> int:
+    _prep()
+    failed = 0
+    found = shutil.which("copilot")
+    if found:
+        print(f"copilot: {found}")
+    else:
+        print("copilot: not found on PATH")
+        print("  Install GitHub Copilot CLI and make sure copilot runs.")
+        failed = 1
+    from config import MUX
+    if MUX.available():
+        print(f"multiplexer: {MUX.binary}")
+    else:
+        from mux import _install_hint
+        print("multiplexer: not found")
+        print(_install_hint())
+        failed = 1
+    home = _home(None)
+    try:
+        home.mkdir(parents=True, exist_ok=True)
+        probe = home / ".doctor-write"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+        print(f"home: writable at {home}")
+    except OSError as exc:
+        print(f"home: cannot write {home} ({exc})")
+        print("  Pass --home to a directory you can write.")
+        failed = 1
+    if failed:
+        print("doctor: failed")
+        return 1
+    print("doctor: ok")
     return 0
 
 
@@ -382,16 +484,17 @@ def _trace(rest: list[str]) -> int:
         print(f"no ledger at {_home(None) / 'trace.jsonl'}")
         return 0
     records: list[dict] = []
+    lost = 0
     for each in paths:
         tail = ledger_tail.LedgerTail(each, state=None)
-        while True:
-            batch = tail.read()
-            if not batch:
-                break
-            records.extend(batch)
+        records.extend(tail.snapshot())
+        lost += tail.unreadable
     records.reverse()
     for record in records[:n]:
         print(json.dumps(record, ensure_ascii=True, default=str))
+    if lost:
+        print(f"{lost} line(s) in the ledger could not be read",
+              file=sys.stderr)
     return 0
 
 
@@ -422,6 +525,7 @@ def _verify(_rest: list[str]) -> int:
 
 
 HANDLERS = {
+    "doctor": _doctor,
     "start": _start,
     "list": _list,
     "join": _join,
@@ -440,11 +544,17 @@ HANDLERS = {
 def dispatch(argv: list[str], home: "str | None" = None) -> int:
     """Run one verb, with the home settled first.
 
-    `_settle_home` is called here and nowhere else, because it used to sit in
-    `main` only: a verb reached through the menu spawned its child without the
-    export, so parent and child agreed on the home by coincidence rather than
-    by construction. One call site means a third entry point cannot reintroduce
-    that.
+    Every verb reaches its handler through here, from typed argv and from the
+    menu alike, so settling here is what makes the export unskippable. It used
+    to sit in `main` only: a seat started from the menu spawned its child
+    without the export, and the two agreed on the home by coincidence rather
+    than by construction.
+
+    This is the only settle on the *routing* path, not in the package.
+    `fleet.py` and `recover.py` settle again inside the delegated CLIs, which
+    still have their own `--home` and are still reachable as their own console
+    scripts. Settling twice is harmless -- it resolves and exports the same
+    string -- and removing it would leave `operator-fleet` unsettled.
     """
     _settle_home(home)
     verb = argv[0]

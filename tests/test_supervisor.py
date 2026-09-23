@@ -146,3 +146,20 @@ def test_seat_watch_ignores_progress_verdict_from_the_live_loop(looping, monkeyp
     bait["giving_up"] = True
     seat_watch.on_fact(facts=verdicts + [bait])
     assert activation.read_state(seat_watch.NAME).get("seats", {}) == {}
+
+
+def test_a_start_without_an_agent_does_not_inject_anvil(looping, monkeypatch):
+    """Stock Copilot CLI has no anvil:anvil agent. Injecting one crash-loops."""
+    seen = []
+
+    def start_session(instance, args, session_num, remain_on_exit=False,
+                      preamble=""):
+        seen.append(list(args))
+        instance.stop_marker.touch()
+
+    monkeypatch.setattr(op, "start_session", start_session)
+    monkeypatch.setattr(op, "stop_session_gracefully", lambda instance: None)
+    op.run_loop_mode(op.Instance("plain"), [], is_fresh=True)
+    assert seen, "the loop never launched"
+    assert "--agent" not in seen[0]
+    assert "anvil:anvil" not in seen[0]

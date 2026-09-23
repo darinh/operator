@@ -204,3 +204,11 @@ def test_a_spawn_that_fails_is_reported_rather_than_raised(home, monkeypatch):
     monkeypatch.setattr(op.supervisor_control, "_spawn_background_loop", explode)
     inst = _crashed("unspawnable", home / "work")
     assert recover_loop(inst) == 1
+
+
+def test_a_missing_session_names_operator_start(home, capsys):
+    from supervisor_control import restart_loop
+    assert restart_loop("ghost") == 1
+    err = capsys.readouterr().err
+    assert "operator start --name ghost" in err
+    assert "operator --loop" not in err

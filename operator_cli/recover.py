@@ -41,8 +41,8 @@ def _recover(args) -> int:
               f"stopped:")
         for inst in found:
             print(f"  {inst.display_name}")
-        print("\n  Bring them all back with: operator-recover --all")
-        print("  Or one at a time with:    operator-recover <name>")
+        print("\n  Bring them all back with: operator recover --all")
+        print("  Or one at a time with:    operator recover <name>")
         return 0
 
     # One that cannot be recovered must not decide the fate of the others: a

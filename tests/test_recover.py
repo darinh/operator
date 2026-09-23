@@ -61,7 +61,9 @@ def test_it_lists_rather_than_starting_anything(cli, capsys):
 def test_the_listing_says_how_to_act_on_it(cli, capsys):
     cli["listed"].append(_seat("alpha"))
     recover.main([])
-    assert "--all" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "operator recover --all" in out
+    assert "operator-recover" not in out
 
 
 # ── acting ───────────────────────────────────────────────────────
