@@ -76,8 +76,12 @@ MAX_EXTENSION_TOTAL_LINES = 1600
 #: would be the edit `test_kernel_boundary.py` names as the most damaging
 #: available. Re-set at the measured size plus room for a couple of verbs.
 #: The per-module ceilings are unchanged; `entry.py` is still well under them.
-MAX_CLI_CODE_LINES = 850
-MAX_CLI_TOTAL_LINES = 1200
+#:
+#: Raised from 850 / 1200 when the front door had to stop reading options
+#: past `--`, quote argv so a paste does not expand `$HOME`, and treat a
+#: missing stdin as not a TTY. Measured 866 / 1219.
+MAX_CLI_CODE_LINES = 950
+MAX_CLI_TOTAL_LINES = 1400
 
 #: The two closed hook sets, unioned. An extension may implement hooks from
 #: either host; no *host* will ask it something outside its own set, which is

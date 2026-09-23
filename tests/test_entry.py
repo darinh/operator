@@ -87,6 +87,24 @@ def test_no_tty_prints_help_and_exits_nonzero(monkeypatch, capsys):
         assert " ".join(verb.tokens) in err, verb.tokens
 
 
+def test_absent_stdin_prints_help(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "stdin", None)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    rc = cli.main([])
+    assert rc != 0
+    assert "Usage: operator" in capsys.readouterr().err
+
+
+def test_closed_stdin_prints_help(monkeypatch, capsys):
+    closed = io.StringIO()
+    closed.close()
+    monkeypatch.setattr(sys, "stdin", closed)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    rc = cli.main([])
+    assert rc != 0
+    assert "Usage: operator" in capsys.readouterr().err
+
+
 def test_a_pipe_on_stdin_does_not_open_the_menu(monkeypatch, capsys):
     monkeypatch.setattr(sys, "stdin", Boom())
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
@@ -145,6 +163,38 @@ def test_menu_prompts_then_joins(monkeypatch, capsys):
     assert "Running: operator join alpha" in capsys.readouterr().out
 
 
+def _split_printed(command: str) -> list[str]:
+    if os.name != "nt":
+        import shlex
+        return shlex.split(command)
+    out, i, n = [], 0, len(command)
+    while i < n:
+        if command[i].isspace():
+            i += 1
+            continue
+        if command[i] == "'":
+            i += 1
+            buf = []
+            while i < n:
+                if command[i] == "'" and i + 1 < n and command[i + 1] == "'":
+                    buf.append("'")
+                    i += 2
+                    continue
+                if command[i] == "'":
+                    i += 1
+                    break
+                buf.append(command[i])
+                i += 1
+            out.append("".join(buf))
+            continue
+        j = i
+        while j < n and not command[j].isspace():
+            j += 1
+        out.append(command[i:j])
+        i = j
+    return out
+
+
 def test_menu_quotes_a_name_with_spaces(monkeypatch, capsys):
     seen = []
     monkeypatch.setattr(op.MUX, "has_session", lambda session: True)
@@ -152,7 +202,19 @@ def test_menu_quotes_a_name_with_spaces(monkeypatch, capsys):
     _tty(monkeypatch, f"{_choice_for(('join',))}\nalpha beta\n")
     assert cli.main([]) == 0
     assert seen == ["alpha beta"]
-    assert 'Running: operator join "alpha beta"' in capsys.readouterr().out
+    out = capsys.readouterr().out
+    line = [row for row in out.splitlines() if "Running:" in row]
+    assert line, out
+    assert _split_printed(line[0].split("operator ", 1)[1]) == ["join", "alpha beta"]
+
+
+def test_printed_command_round_trips_a_quote_and_a_dollar():
+    argv = ["remember", "--kind", "gotcha", "can't look at $HOME"]
+    quoted = cli._argv.quote_argv(argv)
+    assert _split_printed(quoted) == argv
+    assert "$HOME" in quoted
+    if os.name == "nt":
+        assert "can''t look at $HOME" in quoted
 
 
 def test_menu_offers_recover_all():
@@ -415,6 +477,43 @@ def test_recover_delegates(monkeypatch):
     monkeypatch.setattr(cli.recover, "main", lambda argv: seen.append(argv) or 0)
     assert cli.main(["recover", "--all"]) == 0
     assert seen == [["--all"]]
+
+
+def test_remember_stops_options_at_the_terminator(monkeypatch):
+    seen = []
+    monkeypatch.setattr(cli.seat, "main", lambda argv: seen.append(list(argv)) or 0)
+    assert cli.main([
+        "remember", "--instance", "alpha", "--kind", "decision",
+        "--", "--instance=beta", "some text",
+    ]) == 0
+    assert seen == [[
+        "--instance", "alpha", "remember", "--kind", "decision",
+        "--", "--instance=beta", "some text",
+    ]]
+
+
+def test_session_after_terminator_is_journal_text(monkeypatch):
+    seen = []
+    monkeypatch.setattr(cli.seat, "main", lambda argv: seen.append(list(argv)) or 0)
+    assert cli.main([
+        "remember", "--instance", "alpha", "--kind", "decision",
+        "--", "--session=99", "note",
+    ]) == 0
+    assert seen[0][-3:] == ["--", "--session=99", "note"]
+    assert seen[0][0:2] == ["--instance", "alpha"]
+
+
+def test_home_after_terminator_is_journal_text(monkeypatch, tmp_path):
+    seen = []
+    monkeypatch.setattr(cli.seat, "main", lambda argv: seen.append(list(argv)) or 0)
+    assert cli.main([
+        "--home", str(tmp_path),
+        "remember", "--instance", "alpha", "--kind", "decision",
+        "--", "--home=/elsewhere", "note",
+    ]) == 0
+    assert "--home=/elsewhere" in seen[0]
+    assert seen[0][-1] == "note"
+    assert os.environ["COPILOT_OPERATOR_HOME"] == str(tmp_path)
 
 
 def test_remember_delegates_to_seat(monkeypatch):
