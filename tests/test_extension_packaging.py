@@ -69,12 +69,15 @@ MAX_EXTENSION_TOTAL_LINES = 1600
 #: any one of them growing a brain are unchanged. Re-set at the measured size
 #: plus room for the next few commands, which is how the number was set in the
 #: first place.
-MAX_CLI_CODE_LINES = 450
-#: Left where it was. It is the same shape of measure as the kernel-wide total
-#: line ceiling that `test_kernel_boundary.py` removed on the evidence, and it
-#: would go the same way if it ever bound -- but it does not (the package
-#: measures 606), so removing it here would be a change nobody can observe.
-MAX_CLI_TOTAL_LINES = 700
+#:
+#: Raised again from 450 / 700 when `operator` itself became a console script.
+#: A numbered menu plus the verbs it dispatches cannot fit in the leftover
+#: 105 / 89 lines, and deleting the existing command docstrings to make room
+#: would be the edit `test_kernel_boundary.py` names as the most damaging
+#: available. Re-set at the measured size plus room for a couple of verbs.
+#: The per-module ceilings are unchanged; `entry.py` is still well under them.
+MAX_CLI_CODE_LINES = 850
+MAX_CLI_TOTAL_LINES = 1200
 
 #: The two closed hook sets, unioned. An extension may implement hooks from
 #: either host; no *host* will ask it something outside its own set, which is

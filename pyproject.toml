@@ -8,6 +8,7 @@ requires-python = ">=3.10"
 dev = ["pytest>=7.0"]
 
 [project.scripts]
+operator = "operator_cli.entry:main"
 operator-fleet = "operator_cli.fleet:main"
 operator-seat = "operator_cli.seat:main"
 operator-recover = "operator_cli.recover:main"
