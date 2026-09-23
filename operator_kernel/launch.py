@@ -22,7 +22,7 @@ import instance
 from config import (COPILOT_LOG_DIR, MUX, RESTART_DIR, SESSION_ARG_RE)
 from presence import path_present
 from instance import Instance
-from argtail import before_terminator
+from argtail import at_dashdash, before_terminator
 from probes import die, log, remove_file
 
 def write_launch_spec(instance: Instance, argv: list[str], cwd: Path,
@@ -69,7 +69,8 @@ def _ensure_usage_logging(argv: list[str]) -> list[str]:
     """
     if os.environ.get("COPILOT_OPERATOR_NO_DEBUG_LOG"):
         return argv
-    if any(a == "--log-level" or a.startswith("--log-level=") for a in argv):
+    options, _ = at_dashdash(argv)
+    if any(a == "--log-level" or a.startswith("--log-level=") for a in options):
         return argv
     return before_terminator(argv, ["--log-level", "debug"])
 
@@ -122,6 +123,7 @@ def start_session(instance: Instance, copilot_args: list[str], session_num: int,
 
 # ── argument helpers ────────────────────────────────────────────
 def extract_agent_from_args(args: list[str]) -> str:
+    args, _ = at_dashdash(args)
     for i, arg in enumerate(args):
         if arg.startswith("--agent="):
             return arg.split("=", 1)[1]
@@ -131,10 +133,12 @@ def extract_agent_from_args(args: list[str]) -> str:
 
 
 def args_have_explicit_session(args: list[str]) -> bool:
+    args, _ = at_dashdash(args)
     return any(SESSION_ARG_RE.match(a) for a in args)
 
 
 def has_agent_flag(args: list[str]) -> bool:
+    args, _ = at_dashdash(args)
     return any(a == "--agent" or a.startswith("--agent=") for a in args)
 
 
