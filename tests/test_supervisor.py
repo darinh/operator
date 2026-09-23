@@ -148,6 +148,13 @@ def test_seat_watch_ignores_progress_verdict_from_the_live_loop(looping, monkeyp
     assert activation.read_state(seat_watch.NAME).get("seats", {}) == {}
 
 
+def test_resume_is_threaded_through_before_terminator():
+    from pathlib import Path
+    source = Path(op.supervisor.__file__).read_text(encoding="utf-8")
+    assert "before_terminator(" in source
+    assert 'launch_args.append(f"--resume' not in source
+
+
 def test_a_start_without_an_agent_does_not_inject_anvil(looping, monkeypatch):
     """Stock Copilot CLI has no anvil:anvil agent. Injecting one crash-loops."""
     seen = []

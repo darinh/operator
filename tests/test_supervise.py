@@ -75,6 +75,44 @@ def test_the_entry_point_reaches_the_supervision_loop(home, monkeypatch):
     assert seen["args"] == ["--agent", "test:agent"]
 
 
+def test_parse_keeps_the_parent_name_when_the_tail_looks_like_flags():
+    name, rest, fresh, adopt = supervise.parse([
+        "--_supervise", "--loop", "--name", "alpha",
+        "--", "--name=beta", "some text",
+    ])
+    assert name == "alpha"
+    assert rest == ["--", "--name=beta", "some text"]
+    assert fresh is False
+    assert adopt is False
+
+
+def test_parse_does_not_take_fresh_from_the_tail():
+    name, rest, fresh, adopt = supervise.parse([
+        "--_supervise", "--loop", "--name", "alpha", "--", "--fresh",
+    ])
+    assert name == "alpha"
+    assert rest == ["--", "--fresh"]
+    assert fresh is False
+
+
+def test_main_uses_the_spawner_argv_and_ignores_a_name_in_the_tail(
+        home, monkeypatch):
+    import supervisor
+    seen = {}
+
+    def record(instance, user_args, is_fresh, adopt=False):
+        seen.update(name=instance.display_name, args=list(user_args),
+                    fresh=is_fresh, adopt=adopt)
+        return 0
+
+    monkeypatch.setattr(supervisor, "run_loop_mode", record)
+    argv = ["--_supervise", "--loop", "--name", "alpha",
+            "--", "--name=beta", "some text"]
+    assert supervise.main(argv) == 0
+    assert seen["name"] == "alpha"
+    assert seen["args"] == ["--", "--name=beta", "some text"]
+
+
 def test_the_module_is_runnable_as_a_script():
     """`_spawn_background_loop` runs `-m operator_cli.supervise`.
 

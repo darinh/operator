@@ -22,6 +22,7 @@ import instance
 from config import (COPILOT_LOG_DIR, MUX, RESTART_DIR, SESSION_ARG_RE)
 from presence import path_present
 from instance import Instance
+from argtail import before_terminator
 from probes import die, log, remove_file
 
 def write_launch_spec(instance: Instance, argv: list[str], cwd: Path,
@@ -70,7 +71,7 @@ def _ensure_usage_logging(argv: list[str]) -> list[str]:
         return argv
     if any(a == "--log-level" or a.startswith("--log-level=") for a in argv):
         return argv
-    return [*argv, "--log-level", "debug"]
+    return before_terminator(argv, ["--log-level", "debug"])
 
 
 def start_session(instance: Instance, copilot_args: list[str], session_num: int,
@@ -81,9 +82,8 @@ def start_session(instance: Instance, copilot_args: list[str], session_num: int,
         die("GitHub Copilot CLI ('copilot') was not found on PATH.\n"
             "  Install it: https://docs.github.com/en/copilot/how-tos/copilot-cli")
 
-    argv = [exe, *copilot_args]
-    if preamble:
-        argv += ["-i", preamble]
+    extra = ["-i", preamble] if preamble else []
+    argv = [exe, *before_terminator(copilot_args, extra)]
     argv = _ensure_usage_logging(argv)
 
     remove_file(instance.restart_marker)

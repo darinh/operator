@@ -16,6 +16,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from operator_kernel.argtail import at_dashdash
+
 from . import argv as _argv
 from . import fleet, recover, seat
 from .fleet import _bootstrap, _home, _settle_home
@@ -102,7 +104,7 @@ def _print_help(stream) -> None:
 
 
 def _peel_home(argv: list[str]) -> tuple["str | None", list[str]]:
-    options, literal = _argv.at_dashdash(argv)
+    options, literal = at_dashdash(argv)
     home, rest = None, []
     i = 0
     while i < len(options):
@@ -228,9 +230,10 @@ def _menu() -> int:
 def _start(rest: list[str]) -> int:
     _bootstrap()
     name, fresh, attach, copilot = "", False, False, []
+    options, literal = at_dashdash(rest)
     i = 0
-    while i < len(rest):
-        arg = rest[i]
+    while i < len(options):
+        arg = options[i]
         if arg in ("-h", "--help"):
             print("Usage: operator start --name NAME [--agent AGENT] "
                   "[--attach] [--fresh] [prompt...]")
@@ -241,26 +244,24 @@ def _start(rest: list[str]) -> int:
             attach = True
         elif arg == "--name":
             i += 1
-            if i >= len(rest) or not rest[i].strip():
+            if i >= len(options) or not options[i].strip():
                 print("operator start --name needs a value", file=sys.stderr)
                 return 2
-            name = rest[i]
+            name = options[i]
         elif arg.startswith("--name="):
             name = arg.split("=", 1)[1]
         elif arg == "--agent":
             i += 1
-            if i >= len(rest) or not rest[i].strip():
+            if i >= len(options) or not options[i].strip():
                 print("operator start --agent needs a value", file=sys.stderr)
                 return 2
-            copilot += ["--agent", rest[i]]
+            copilot += ["--agent", options[i]]
         elif arg.startswith("--agent="):
             copilot += ["--agent", arg.split("=", 1)[1]]
-        elif arg == "--":
-            copilot.extend(rest[i:])
-            break
         else:
             copilot.append(arg)
         i += 1
+    copilot.extend(literal)
     if not name.strip() and copilot and not copilot[0].startswith("-"):
         name, copilot = copilot[0], copilot[1:]
     if not name.strip():
@@ -371,9 +372,12 @@ def _doctor(_rest: list[str]) -> int:
 def _restart_loop(rest: list[str]) -> int:
     _bootstrap()
     from supervisor_control import restart_all_loops, restart_loop
-    if "--all" in rest:
+    options, literal = at_dashdash(rest)
+    if "--all" in options:
         return restart_all_loops()
-    name = _named(rest)
+    name = _named(options)
+    if not name and len(literal) > 1:
+        name = literal[1]
     return restart_loop(name or None)
 
 
@@ -382,7 +386,7 @@ def _recover(rest: list[str]) -> int:
 
 
 def _seat_cmd(verb: str, rest: list[str]) -> int:
-    options, literal = _argv.at_dashdash(rest)
+    options, literal = at_dashdash(rest)
     parent: list[str] = []
     child: list[str] = []
     i = 0
