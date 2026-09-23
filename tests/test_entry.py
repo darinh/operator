@@ -57,6 +57,13 @@ def test_help_lists_every_verb(capsys):
         assert " ".join(verb.tokens) in out, verb.tokens
 
 
+def test_help_after_home_is_still_help(capsys):
+    assert cli.main(["--home", "/somewhere", "--help"]) == 0
+    out = capsys.readouterr().out
+    assert "unknown command" not in out
+    assert "start" in out
+
+
 def test_help_does_not_read_stdin(monkeypatch, capsys):
     monkeypatch.setattr(sys, "stdin", Boom())
     assert cli.main(["--help"]) == 0
@@ -137,6 +144,20 @@ def test_menu_prompts_then_joins(monkeypatch, capsys):
     assert "Running: operator join alpha" in capsys.readouterr().out
 
 
+def test_menu_quotes_a_name_with_spaces(monkeypatch, capsys):
+    seen = []
+    monkeypatch.setattr(op.MUX, "has_session", lambda session: True)
+    monkeypatch.setattr(op.MUX, "attach", lambda session: seen.append(session) or 0)
+    _tty(monkeypatch, f"{_choice_for(('join',))}\nalpha beta\n")
+    assert cli.main([]) == 0
+    assert seen == ["alpha beta"]
+    assert 'Running: operator join "alpha beta"' in capsys.readouterr().out
+
+
+def test_menu_offers_recover_all():
+    assert any(item.argv == ("recover", "--all") for item in cli.menu_items())
+
+
 def test_menu_quit_does_not_dispatch(monkeypatch, capsys):
     _tty(monkeypatch, "0\n")
     assert cli.main([]) == 0
@@ -162,6 +183,19 @@ def test_start_spawns_the_background_supervisor(monkeypatch, capsys):
     assert seen == {"name": "alpha", "args": ["--agent", "test:agent"],
                     "fresh": False}
     assert "started alpha (pid 4242)" in capsys.readouterr().out
+
+
+def test_start_accepts_a_positional_name(monkeypatch, capsys):
+    import supervisor
+    seen = {}
+
+    def fake(instance, copilot_args, is_fresh, adopt=False, cwd=None):
+        seen.update(name=instance.display_name, args=list(copilot_args))
+        return 1
+
+    monkeypatch.setattr(supervisor, "_spawn_background_loop", fake)
+    assert cli.main(["start", "alpha", "--agent", "test:agent"]) == 0
+    assert seen == {"name": "alpha", "args": ["--agent", "test:agent"]}
 
 
 def test_start_without_a_name_refuses(capsys):
