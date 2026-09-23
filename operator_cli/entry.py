@@ -34,7 +34,7 @@ class Item:
 
 
 VERBS: tuple[Verb, ...] = (
-    Verb(("start",), "start a supervised seat in the background",
+    Verb(("start",), "start a supervised seat (start --name NAME)",
          "Start a supervised seat", ("name",)),
     Verb(("list",), "list running seats",
          "List running seats"),
@@ -81,6 +81,10 @@ def menu_items() -> tuple[Item, ...]:
             items.append(Item(
                 "Restart every running supervisor",
                 ("restart-loop", "--all")))
+        if verb.tokens == ("recover",):
+            items.append(Item(
+                "Recover every seat that needs it",
+                ("recover", "--all")))
     return tuple(items)
 
 
@@ -124,6 +128,16 @@ def _ask(prompt: str) -> str:
     except EOFError:
         print()
         return ""
+
+
+def _quote_argv(argv: list[str]) -> str:
+    parts = []
+    for arg in argv:
+        if arg == "" or any(ch.isspace() for ch in arg):
+            parts.append('"' + arg.replace('"', '\\"') + '"')
+        else:
+            parts.append(arg)
+    return " ".join(parts)
 
 
 def _build_argv(item: Item, values: dict[str, str]) -> list[str]:
@@ -172,7 +186,7 @@ def _menu() -> int:
             return 2
         values[key] = value
     argv = _build_argv(item, values)
-    print("Running: operator " + " ".join(argv))
+    print("Running: operator " + _quote_argv(argv))
     return dispatch(argv)
 
 
@@ -199,6 +213,8 @@ def _start(rest: list[str]) -> int:
         else:
             copilot.append(arg)
         i += 1
+    if not name.strip() and copilot and not copilot[0].startswith("-"):
+        name, copilot = copilot[0], copilot[1:]
     if not name.strip():
         print("Usage: operator start --name NAME [--fresh] [copilot-args...]",
               file=sys.stderr)
@@ -443,6 +459,9 @@ def main(argv: "list[str] | None" = None) -> int:
     if not rest:
         _print_help(sys.stderr)
         return 2
+    if rest[0] in ("-h", "--help", "help"):
+        _print_help(sys.stdout)
+        return 0
     return dispatch(rest)
 
 
