@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 from . import fleet, recover, seat
 from .fleet import _bootstrap, _home, _settle_home
@@ -327,6 +328,20 @@ def _fleet(rest: list[str]) -> int:
     return fleet.main(rest)
 
 
+def _ledger_paths() -> "list[Path]":
+    """Every file holding ledger records, oldest first.
+
+    Rotation is a rename, so `trace.jsonl.1` holds records no less real than
+    the live file's. `trace` and `verify` each built this list once and drifted:
+    `trace` guarded on the rotated file existing and then read only the live
+    one, so a home that had rotated with nothing written since printed nothing
+    and exited zero. One list, so a third reader cannot miss the same half.
+    """
+    path = _home(None) / "trace.jsonl"
+    rotated = path.with_suffix(path.suffix + ".1")
+    return [p for p in (rotated, path) if p.exists()]
+
+
 def _trace(rest: list[str]) -> int:
     _prep()
     n = 20
@@ -362,17 +377,18 @@ def _trace(rest: list[str]) -> int:
               file=sys.stderr)
         return 2
     import ledger_tail
-    path = _home(None) / "trace.jsonl"
-    if not path.exists() and not path.with_suffix(path.suffix + ".1").exists():
-        print(f"no ledger at {path}")
+    paths = _ledger_paths()
+    if not paths:
+        print(f"no ledger at {_home(None) / 'trace.jsonl'}")
         return 0
-    tail = ledger_tail.LedgerTail(path, state=None)
     records: list[dict] = []
-    while True:
-        batch = tail.read()
-        if not batch:
-            break
-        records.extend(batch)
+    for each in paths:
+        tail = ledger_tail.LedgerTail(each, state=None)
+        while True:
+            batch = tail.read()
+            if not batch:
+                break
+            records.extend(batch)
     records.reverse()
     for record in records[:n]:
         print(json.dumps(record, ensure_ascii=True, default=str))
@@ -382,10 +398,7 @@ def _trace(rest: list[str]) -> int:
 def _verify(_rest: list[str]) -> int:
     _prep()
     import ledger_chain
-    path = _home(None) / "trace.jsonl"
-    rotated = path.with_suffix(path.suffix + ".1")
-    paths = [p for p in (rotated, path) if p.exists()]
-    result = ledger_chain.verify(paths)
+    result = ledger_chain.verify(_ledger_paths())
     if isinstance(result, ledger_chain.Verified):
         print(f"verified: {result.records} record(s), "
               f"{result.writers} writer(s)")
@@ -424,7 +437,16 @@ HANDLERS = {
 }
 
 
-def dispatch(argv: list[str]) -> int:
+def dispatch(argv: list[str], home: "str | None" = None) -> int:
+    """Run one verb, with the home settled first.
+
+    `_settle_home` is called here and nowhere else, because it used to sit in
+    `main` only: a verb reached through the menu spawned its child without the
+    export, so parent and child agreed on the home by coincidence rather than
+    by construction. One call site means a third entry point cannot reintroduce
+    that.
+    """
+    _settle_home(home)
     verb = argv[0]
     handler = HANDLERS.get(verb)
     if handler is None:
@@ -455,14 +477,13 @@ def main(argv: "list[str] | None" = None) -> int:
     except SystemExit as exc:
         code = exc.code
         return 2 if code is None else (code if isinstance(code, int) else 2)
-    _settle_home(home)
     if not rest:
         _print_help(sys.stderr)
         return 2
     if rest[0] in ("-h", "--help", "help"):
         _print_help(sys.stdout)
         return 0
-    return dispatch(rest)
+    return dispatch(rest, home)
 
 
 if __name__ == "__main__":  # pragma: no cover - exercised through main()

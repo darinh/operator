@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -164,6 +165,54 @@ def test_menu_quit_does_not_dispatch(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "Running:" not in out
     assert "Quit" in out
+
+
+def test_a_menu_started_seat_exports_the_home_its_child_reads(monkeypatch):
+    """A seat chosen from the menu must be as defended as a typed one.
+
+    `_settle_home` exports unconditionally so that parent and child read the
+    same string instead of independently agreeing on a default. Reaching a verb
+    through the menu used to skip it, so the agreement was a coincidence of
+    both sides resolving `Path.home()` the same way.
+    """
+    import supervisor
+    seen = {}
+
+    def fake(instance, copilot_args, is_fresh, adopt=False, cwd=None):
+        seen["home"] = os.environ.get("COPILOT_OPERATOR_HOME")
+        return 7
+
+    monkeypatch.setattr(supervisor, "_spawn_background_loop", fake)
+    monkeypatch.delenv("COPILOT_OPERATOR_HOME", raising=False)
+    _tty(monkeypatch, f"{_choice_for(('start',))}\nalpha\n")
+    assert cli.main([]) == 0
+    assert seen["home"] == str(Path.home() / ".operator")
+
+
+def test_dispatch_settles_the_home_for_every_caller(monkeypatch):
+    """The guard for the defect, at the seam rather than at one caller.
+
+    Both entry points reach a verb through `dispatch`, so settling there is
+    what makes the export unskippable. A third caller added later inherits it.
+    """
+    import supervisor_control
+    monkeypatch.setattr(supervisor_control, "active_instances", lambda: [])
+    monkeypatch.delenv("COPILOT_OPERATOR_HOME", raising=False)
+    assert cli.dispatch(["list"]) == 0
+    assert os.environ["COPILOT_OPERATOR_HOME"] == str(Path.home() / ".operator")
+
+
+def test_a_typed_home_still_reaches_the_child(monkeypatch, tmp_path):
+    import supervisor
+    seen = {}
+
+    def fake(instance, copilot_args, is_fresh, adopt=False, cwd=None):
+        seen["home"] = os.environ.get("COPILOT_OPERATOR_HOME")
+        return 7
+
+    monkeypatch.setattr(supervisor, "_spawn_background_loop", fake)
+    assert cli.main(["--home", str(tmp_path), "start", "--name", "alpha"]) == 0
+    assert seen["home"] == str(tmp_path)
 
 
 # ── verbs ───────────────────────────────────────────────────────
@@ -328,6 +377,60 @@ def test_trace_prints_newest_first_with_a_limit(tmp_path, capsys):
 def test_trace_says_so_when_the_ledger_is_missing(tmp_path, capsys):
     assert cli.main(["--home", str(tmp_path), "trace"]) == 0
     assert "no ledger" in capsys.readouterr().out
+
+
+def test_trace_reads_the_rotated_half_when_the_live_file_is_empty(tmp_path,
+                                                                 capsys):
+    """The case where the old reader returned success with no output at all.
+
+    `trace.jsonl` rotates by rename, so every record can be in `trace.jsonl.1`
+    with nothing written since. The guard already knew that file could hold
+    records; the reader ignored it and printed nothing, which reads as an
+    empty ledger rather than as a reader that did not look.
+    """
+    (tmp_path / "trace.jsonl.1").write_text(
+        json.dumps({"n": 1}) + "\n"
+        + json.dumps({"n": 2}) + "\n"
+        + json.dumps({"n": 3}) + "\n",
+        encoding="utf-8")
+    (tmp_path / "trace.jsonl").write_text("", encoding="utf-8")
+    assert cli.main(["--home", str(tmp_path), "trace"]) == 0
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()
+             if line.strip()]
+    assert [row["n"] for row in lines] == [3, 2, 1]
+
+
+def test_trace_spans_the_rotation_oldest_in_the_rotated_file(tmp_path, capsys):
+    (tmp_path / "trace.jsonl.1").write_text(
+        json.dumps({"n": 1}) + "\n" + json.dumps({"n": 2}) + "\n",
+        encoding="utf-8")
+    (tmp_path / "trace.jsonl").write_text(
+        json.dumps({"n": 3}) + "\n" + json.dumps({"n": 4}) + "\n",
+        encoding="utf-8")
+    assert cli.main(["--home", str(tmp_path), "trace"]) == 0
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()
+             if line.strip()]
+    assert [row["n"] for row in lines] == [4, 3, 2, 1]
+
+
+def test_trace_and_verify_count_the_same_records(tmp_path, capsys):
+    """`verify` reading five while `trace` shows two is the reportable shape."""
+    import ledger_chain
+    writer = ledger_chain.Writer("w1")
+    (tmp_path / "trace.jsonl.1").write_text(
+        "".join(json.dumps(writer.stamp({"event": str(i)})) + "\n"
+                for i in range(3)),
+        encoding="utf-8")
+    (tmp_path / "trace.jsonl").write_text(
+        "".join(json.dumps(writer.stamp({"event": str(i)})) + "\n"
+                for i in range(3, 5)),
+        encoding="utf-8")
+    assert cli.main(["--home", str(tmp_path), "trace", "-n", "100"]) == 0
+    shown = len([line for line in capsys.readouterr().out.splitlines()
+                 if line.strip()])
+    assert cli.main(["--home", str(tmp_path), "verify"]) == 0
+    assert "5 record(s)" in capsys.readouterr().out
+    assert shown == 5
 
 
 def test_verify_prints_a_verified_chain(tmp_path, capsys):
