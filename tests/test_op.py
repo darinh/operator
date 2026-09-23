@@ -18,3 +18,9 @@ def test_ledger_chain_is_bound_by_the_shim():
     assert "ledger_chain" in op._MODULE_NAMES
     assert op.is_repo_module(op.ledger_chain) is True
     assert hasattr(op.ledger_chain, "verify_records")
+
+
+def test_argtail_is_bound_by_the_shim():
+    assert "argtail" in op._MODULE_NAMES
+    assert op.is_repo_module(op.argtail) is True
+    assert hasattr(op.argtail, "before_terminator")

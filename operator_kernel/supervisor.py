@@ -31,6 +31,7 @@ from extension_seam import held_pause, launch_gate
 from exits import (_record_session_exit, crash_recovery_verdict, ending_was_observed,
                    handoff_state, HANDOFF_MISSING, HANDOFF_UNKNOWN, HANDOFF_WAITING)
 from instance import Instance
+from argtail import before_terminator
 from launch import (args_have_explicit_session, extract_agent_from_args, handle_existing_session, has_agent_flag, start_session, with_experimental)
 from mux import MuxError
 from preamble import build_preamble
@@ -346,7 +347,8 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                         if args_have_explicit_session(launch_args):
                             log("  Skipping automatic --resume; user args already choose a session")
                         else:
-                            launch_args.append(f"--resume={resume_id}")
+                            launch_args = before_terminator(
+                                launch_args, [f"--resume={resume_id}"])
                             resume_id_used = resume_id
                         resume_id = ""
 

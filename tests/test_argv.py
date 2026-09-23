@@ -4,7 +4,8 @@ from __future__ import annotations
 import io
 import os
 
-from operator_cli.argv import at_dashdash, isatty, quote_argv
+from operator_cli.argv import isatty, quote_argv
+from argtail import at_dashdash
 
 
 def _split_printed(command: str) -> list[str]:

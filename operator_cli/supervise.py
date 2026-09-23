@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import sys
 
+from operator_kernel.argtail import at_dashdash
+
 from .fleet import _bootstrap
 
 #: Flags addressed to the supervisor. Everything else belongs to Copilot and is
@@ -31,10 +33,11 @@ _IGNORED = ("--_supervise", "--loop", "--headless", "--detached")
 
 def parse(args: "list[str]") -> "tuple[str, list[str], bool, bool]":
     """Returns (name, copilot_args, is_fresh, adopt)."""
+    options, literal = at_dashdash(args)
     name, rest, fresh, adopt = "", [], False, False
     i = 0
-    while i < len(args):
-        arg = args[i]
+    while i < len(options):
+        arg = options[i]
         if arg in _IGNORED:
             pass
         elif arg == "--fresh":
@@ -42,9 +45,9 @@ def parse(args: "list[str]") -> "tuple[str, list[str], bool, bool]":
         elif arg == "--adopt":
             adopt = True
         elif arg == "--name":
-            if i + 1 >= len(args) or not args[i + 1].strip():
+            if i + 1 >= len(options) or not options[i + 1].strip():
                 raise SystemExit("--name requires a value")
-            name = args[i + 1]
+            name = options[i + 1]
             i += 1
         elif arg.startswith("--name="):
             name = arg.split("=", 1)[1]
@@ -53,6 +56,7 @@ def parse(args: "list[str]") -> "tuple[str, list[str], bool, bool]":
         else:
             rest.append(arg)
         i += 1
+    rest.extend(literal)
     return name, rest, fresh, adopt
 
 

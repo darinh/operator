@@ -361,6 +361,22 @@ def test_start_accepts_a_positional_name(monkeypatch, capsys):
     assert seen == {"name": "alpha", "args": ["--agent", "test:agent"]}
 
 
+def test_start_keeps_the_parent_name_past_the_terminator(monkeypatch):
+    import supervisor
+    seen = {}
+
+    def fake(instance, copilot_args, is_fresh, adopt=False, cwd=None):
+        seen.update(name=instance.display_name, args=list(copilot_args))
+        return 1
+
+    monkeypatch.setattr(supervisor, "_spawn_background_loop", fake)
+    assert cli.main([
+        "start", "--name", "alpha", "--", "--name=beta", "some text",
+    ]) == 0
+    assert seen["name"] == "alpha"
+    assert seen["args"] == ["--", "--name=beta", "some text"]
+
+
 def test_start_without_a_name_refuses(capsys):
     assert cli.main(["start"]) == 2
     assert "Usage: operator start" in capsys.readouterr().err
@@ -458,6 +474,19 @@ def test_restart_loop_names_one_seat(monkeypatch):
                         lambda target: seen.append(target) or 0)
     assert cli.main(["restart-loop", "alpha"]) == 0
     assert seen == ["alpha"]
+
+
+def test_restart_loop_all_after_terminator_is_not_a_sweep(monkeypatch):
+    import supervisor_control
+    swept = []
+    named = []
+    monkeypatch.setattr(supervisor_control, "restart_all_loops",
+                        lambda: swept.append(True) or 0)
+    monkeypatch.setattr(supervisor_control, "restart_loop",
+                        lambda target: named.append(target) or 0)
+    assert cli.main(["restart-loop", "--", "--all"]) == 0
+    assert swept == []
+    assert named == ["--all"]
 
 
 def test_restart_loop_all_sweeps(monkeypatch):

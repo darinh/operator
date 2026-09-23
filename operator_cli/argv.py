@@ -1,15 +1,7 @@
-"""Argv helpers for the front door: `--`, TTY, and paste-safe quoting."""
+"""Argv helpers for the front door: TTY and paste-safe quoting."""
 from __future__ import annotations
 
 import os
-
-
-def at_dashdash(argv: list[str]) -> tuple[list[str], list[str]]:
-    try:
-        i = argv.index("--")
-    except ValueError:
-        return argv, []
-    return argv[:i], argv[i:]
 
 
 def isatty(stream) -> bool:
