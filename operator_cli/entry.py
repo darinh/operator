@@ -16,6 +16,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import argv as _argv
 from . import fleet, recover, seat
 from .fleet import _bootstrap, _home, _settle_home
 
@@ -101,15 +102,16 @@ def _print_help(stream) -> None:
 
 
 def _peel_home(argv: list[str]) -> tuple["str | None", list[str]]:
+    options, literal = _argv.at_dashdash(argv)
     home, rest = None, []
     i = 0
-    while i < len(argv):
-        arg = argv[i]
+    while i < len(options):
+        arg = options[i]
         if arg == "--home":
-            if i + 1 >= len(argv):
+            if i + 1 >= len(options):
                 print("operator --home needs a directory", file=sys.stderr)
                 raise SystemExit(2)
-            home = argv[i + 1]
+            home = options[i + 1]
             i += 2
             continue
         if arg.startswith("--home="):
@@ -118,11 +120,8 @@ def _peel_home(argv: list[str]) -> tuple["str | None", list[str]]:
             continue
         rest.append(arg)
         i += 1
+    rest.extend(literal)
     return home, rest
-
-
-def _prep() -> None:
-    _bootstrap()
 
 
 def _ask(prompt: str) -> "str | None":
@@ -141,16 +140,6 @@ def _ask_needed(prompt: str, what: str) -> "str | None":
         if value:
             return value
         print(f"A {what} is needed.")
-
-
-def _quote_argv(argv: list[str]) -> str:
-    parts = []
-    for arg in argv:
-        if arg == "" or any(ch.isspace() for ch in arg):
-            parts.append('"' + arg.replace('"', '\\"') + '"')
-        else:
-            parts.append(arg)
-    return " ".join(parts)
 
 
 def _build_argv(item: Item, values: dict[str, str]) -> list[str]:
@@ -222,7 +211,7 @@ def _menu() -> int:
         argv = _prompt_start()
         if argv is None:
             return 2
-        print("Running: operator " + _quote_argv(argv))
+        print("Running: operator " + _argv.quote_argv(argv))
         return dispatch(argv)
     values = {}
     for key in item.prompts:
@@ -232,12 +221,12 @@ def _menu() -> int:
             return 2
         values[key] = value
     argv = _build_argv(item, values)
-    print("Running: operator " + _quote_argv(argv))
+    print("Running: operator " + _argv.quote_argv(argv))
     return dispatch(argv)
 
 
 def _start(rest: list[str]) -> int:
-    _prep()
+    _bootstrap()
     name, fresh, attach, copilot = "", False, False, []
     i = 0
     while i < len(rest):
@@ -266,6 +255,9 @@ def _start(rest: list[str]) -> int:
             copilot += ["--agent", rest[i]]
         elif arg.startswith("--agent="):
             copilot += ["--agent", arg.split("=", 1)[1]]
+        elif arg == "--":
+            copilot.extend(rest[i:])
+            break
         else:
             copilot.append(arg)
         i += 1
@@ -285,7 +277,7 @@ def _start(rest: list[str]) -> int:
 
 
 def _list(_rest: list[str]) -> int:
-    _prep()
+    _bootstrap()
     from supervisor_control import active_instances
     found = active_instances()
     if not found:
@@ -304,7 +296,7 @@ def _named(rest: list[str]) -> str:
 
 
 def _join(rest: list[str]) -> int:
-    _prep()
+    _bootstrap()
     name = _named(rest)
     if not name:
         print("Usage: operator join NAME", file=sys.stderr)
@@ -324,7 +316,7 @@ def _join(rest: list[str]) -> int:
 
 
 def _stop(rest: list[str]) -> int:
-    _prep()
+    _bootstrap()
     name = _named(rest)
     if not name:
         print("Usage: operator stop NAME", file=sys.stderr)
@@ -341,7 +333,7 @@ def _stop(rest: list[str]) -> int:
 
 
 def _doctor(_rest: list[str]) -> int:
-    _prep()
+    _bootstrap()
     failed = 0
     found = shutil.which("copilot")
     if found:
@@ -377,7 +369,7 @@ def _doctor(_rest: list[str]) -> int:
 
 
 def _restart_loop(rest: list[str]) -> int:
-    _prep()
+    _bootstrap()
     from supervisor_control import restart_all_loops, restart_loop
     if "--all" in rest:
         return restart_all_loops()
@@ -390,16 +382,17 @@ def _recover(rest: list[str]) -> int:
 
 
 def _seat_cmd(verb: str, rest: list[str]) -> int:
+    options, literal = _argv.at_dashdash(rest)
     parent: list[str] = []
     child: list[str] = []
     i = 0
-    while i < len(rest):
-        arg = rest[i]
+    while i < len(options):
+        arg = options[i]
         if arg in ("--instance", "--session"):
-            if i + 1 >= len(rest):
+            if i + 1 >= len(options):
                 print(f"operator {verb} {arg} needs a value", file=sys.stderr)
                 return 2
-            parent += [arg, rest[i + 1]]
+            parent += [arg, options[i + 1]]
             i += 2
             continue
         if arg.startswith("--instance=") or arg.startswith("--session="):
@@ -408,6 +401,7 @@ def _seat_cmd(verb: str, rest: list[str]) -> int:
             continue
         child.append(arg)
         i += 1
+    child.extend(literal)
     return seat.main([*parent, verb, *child])
 
 
@@ -445,7 +439,7 @@ def _ledger_paths() -> "list[Path]":
 
 
 def _trace(rest: list[str]) -> int:
-    _prep()
+    _bootstrap()
     n = 20
     i = 0
     while i < len(rest):
@@ -499,7 +493,7 @@ def _trace(rest: list[str]) -> int:
 
 
 def _verify(_rest: list[str]) -> int:
-    _prep()
+    _bootstrap()
     import ledger_chain
     result = ledger_chain.verify(_ledger_paths())
     if isinstance(result, ledger_chain.Verified):
@@ -575,7 +569,7 @@ def dispatch(argv: list[str], home: "str | None" = None) -> int:
 def main(argv: "list[str] | None" = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
     if not raw:
-        if sys.stdin.isatty() and sys.stdout.isatty():
+        if _argv.isatty(sys.stdin) and _argv.isatty(sys.stdout):
             return _menu()
         _print_help(sys.stderr)
         return 2
