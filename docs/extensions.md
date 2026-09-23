@@ -417,11 +417,17 @@ process, which no test could report.
 | `propose_work` | `FleetHost.propose` | live, once a fleet host is running |
 
 `operator-fleet run` is what makes the bottom three true; before it, `FleetHost`
-was complete and reachable only from its own tests. The top three are asked by
-the per-seat supervisor, which is started by the command-line interface this
-kernel was extracted from — and that interface is still in `copilot-tools`.
-**So `admit_launch` is live in the code and unreachable from this repository
-alone**, which is the honest statement of where the extraction has got to.
+was complete and reachable only from its own tests. `admit_launch` was in the
+same position for longer: it is asked by the per-seat supervisor, and the only
+thing that started that supervisor was the command-line interface this kernel
+was extracted from, which still lives in `copilot-tools`.
+
+`operator start` ends that. It spawns the supervisor loop from this repository,
+so `supervisor.py`'s call to `gate.admits` is now reached without
+`copilot-tools` installed, and a seat started here writes a `launch_admission`
+record like any other. `gate_change` and `detect_repo` are unaffected and still
+have no call site anywhere, which is the honest statement of where the
+extraction has got to.
 
 `operator_extensions/` ships three reference extensions — `worktree-guard`
 (`admit_launch`), `worktree-janitor` (`propose_work`) and `seat-watch`
