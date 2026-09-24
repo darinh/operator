@@ -10,8 +10,8 @@ Extensions ship registered but inert. Installing a package must not change how t
 fleet behaves: `admit_launch` sits on the launch path of every seat and its
 refusals are honoured, so an extension that started answering the moment `pip`
 finished would be one install away from holding every seat closed. A human turns
-each one on by writing `<home>/extensions.json`, and **every** failure to read that
-file means "not enabled".
+each one on with `operator ext enable NAME`, which writes `<home>/extensions.json`,
+and **every** failure to read that file means "not enabled".
 
 `control_operator.py` knows nothing about any specific extension. `enable` takes a
 name and settings; `seed-ledger` takes whatever record shape the extension reads.
@@ -31,7 +31,8 @@ Verifying a new extension means writing a recipe here, not changing the helper.
 
 ## How to get to it (user POV)
 
-- Write `~/.operator/extensions.json` by hand:
+- Run `operator ext enable seat-watch --set failures=3`.
+- Or write `~/.operator/extensions.json` by hand:
   `{"seat-watch": {"enabled": true, "failures": 3}}`.
 - Point `COPILOT_OPERATOR_HOME` elsewhere to use a different config.
 - Delete the file, or the entry, to turn an extension back off.

@@ -228,6 +228,13 @@ def test_menu_offers_project_verbs():
     assert ("project", "forget") in items
 
 
+def test_menu_offers_ext_verbs():
+    items = {item.argv for item in cli.menu_items()}
+    assert ("ext", "list") in items
+    assert ("ext", "enable") in items
+    assert ("ext", "disable") in items
+
+
 def test_doctor_is_first_on_the_menu():
     assert cli.menu_items()[0].argv == ("doctor",)
 
