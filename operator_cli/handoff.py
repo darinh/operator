@@ -41,14 +41,14 @@ def parse(options: list[str]) -> "dict[str, str] | None":
                 continue
             following = options[i + 1] if i + 1 < len(options) else ""
             if i + 1 >= len(options) or following.startswith("-"):
-                # A status may legitimately open with a dash, and "needs a
-                # value" is a lie to a user who supplied one. Quoted when it
-                # must be: a hint that does not survive being typed is worse
-                # than none.
-                shown = (f'"{following}"'
-                         if any(c.isspace() for c in following) else following)
+                # A value may legitimately open with a dash, and "needs a
+                # value" is a lie to a user who supplied one. The shape is
+                # described rather than printed as a literal to paste: no
+                # quoting is correct for every shell once the value carries
+                # quotes of its own, and two review rounds went on proving it.
                 hint = (f", and {following!r} looks like an option. To mean it "
-                        f"literally, write {name}={shown}" if following else "")
+                        f"literally, pass it as one argument starting {name}=, "
+                        f"quoted for your shell" if following else "")
                 print(f"operator handoff {name} needs a value{hint}",
                       file=sys.stderr)
                 return None
