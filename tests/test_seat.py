@@ -5,6 +5,16 @@ import paths
 from operator_cli import seat as cli
 
 
+def test_remember_help_lists_instance(capsys):
+    from operator_cli import seat as seat_cli
+    try:
+        seat_cli.main(["remember", "--help"])
+    except SystemExit as exc:
+        assert exc.code in (0, None)
+    out = capsys.readouterr().out.lower()
+    assert "--instance" in out
+
+
 def test_recall_on_an_unregistered_directory_exits_nonzero(tmp_path, monkeypatch,
                                                            capsys):
     monkeypatch.chdir(tmp_path)

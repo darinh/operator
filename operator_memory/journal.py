@@ -166,8 +166,10 @@ def remember(cwd, instance: str, kind: str, text: str, *,
         # reviewer pointed out was also what the first test asserted -- the
         # test pinned the bug rather than the bound.
         current = path.stat().st_size if path.exists() else 0
-        if current + len(json.dumps(record).encode("utf-8")) + 1 > \
-                MAX_JOURNAL_BYTES:
+        growing = current + len(json.dumps(record).encode("utf-8")) + 1
+        # A tombstone is tiny and bounded. At the limit the user must still
+        # be able to forget, or the journal cannot be pruned.
+        if kind != TOMBSTONE and growing > MAX_JOURNAL_BYTES:
             return None
     except (OSError, ValueError, TypeError):
         return None

@@ -45,13 +45,9 @@ VERBS: tuple[Verb, ...] = (
     Verb(("list",), "list running seats", "List running seats"),
     Verb(("join",), "attach this terminal to a running seat", "Join a running seat", ("name",)),
     Verb(("stop",), "ask a seat's supervisor to stop", "Stop a supervised seat", ("name",)),
-    Verb(("restart-loop",),
-         "replace a supervisor without stopping the session",
-         "Restart one seat's supervisor", ("name",),
-         extra_menu=(("Restart every running supervisor", ("restart-loop", "--all")),)),
-    Verb(("recover",), "list seats that need recovering after a crash",
-         "List seats that need recovering",
-         extra_menu=(("Recover every seat that needs it", ("recover", "--all")),)),
+    Verb(("restart-loop",), "replace a supervisor without stopping the session",
+         "Restart one seat's supervisor", ("name",), extra_menu=(("Restart every running supervisor", ("restart-loop", "--all")),)),
+    Verb(("recover",), "list seats that need recovering after a crash", "List seats that need recovering", extra_menu=(("Recover every seat that needs it", ("recover", "--all")),)),
     Verb(("project", "register"), "register this directory as a project", "Register this directory as a project"),
     Verb(("project", "list"), "list registered projects", "List registered projects"),
     Verb(("project", "forget"), "remove a registration, keep the journal", "Forget a project registration", ("path",)),
@@ -259,18 +255,22 @@ def _start(rest: list[str]) -> int:
         return 2
     from instance import Instance
     from supervisor import _spawn_background_loop
-    from supervisor_control import launch_status
+    from supervisor_control import launch_status, wait_for_session
+    rc, guid, created = project.ensure_registered()
+    if rc:
+        return rc
+    if created:
+        print(f"registered this directory as a project ({guid})")
     inst = Instance(name)
     pid = _spawn_background_loop(inst, copilot, is_fresh=fresh)
     status = launch_status(inst, pid)
     if status == "dead":
         print(f"seat {name} (pid {pid}) exited before the supervisor published", file=sys.stderr)
         return 1
-    if status == "starting":
-        print(f"starting {name} (pid {pid}); supervisor not yet published")
-    else:
-        print(f"started {name} (pid {pid})")
+    print(f"starting {name} (pid {pid}); supervisor not yet published"
+          if status == "starting" else f"started {name} (pid {pid})")
     if attach:
+        wait_for_session(inst)
         return _join([name])
     return 0
 
@@ -404,7 +404,7 @@ def _seat_cmd(verb: str, rest: list[str]) -> int:
         child.append(arg)
         i += 1
     child.extend(literal)
-    return seat.main([*parent, verb, *child])
+    return seat.main([*parent, verb, *child], prog="operator")
 
 
 def _remember(rest: list[str]) -> int:

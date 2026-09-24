@@ -500,6 +500,20 @@ def recover_loop(instance: Instance) -> int:
     return 0
 
 
+def wait_for_session(instance: Instance, timeout: float = 2.0) -> bool:
+    """True when the mux session exists. Brief wait, then the caller joins."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            if MUX.available() and MUX.has_session(instance.session):
+                return True
+        except MuxError:
+            pass
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+
+
 def launch_status(instance: Instance, pid: int, timeout: float = 0.4) -> str:
     """ready, starting, or dead, after a short wait.
 

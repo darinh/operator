@@ -27,7 +27,8 @@ import pytest
 
 import op
 from conftest import FakeMux
-from supervisor_control import launch_status, recover_loop, recoverable_instances
+from supervisor_control import (launch_status, recover_loop,
+                                recoverable_instances, wait_for_session)
 
 
 @pytest.fixture
@@ -236,6 +237,20 @@ def test_launch_status_is_starting_when_the_pid_file_has_not_landed(monkeypatch)
     monkeypatch.setattr(sc, "_running_loop_pid", lambda inst: None)
     monkeypatch.setattr(sc, "_supervisor_present", lambda inst: False)
     assert launch_status(op.Instance("alpha"), 99, timeout=0) == "starting"
+
+
+def test_wait_for_session_returns_when_the_mux_has_it(monkeypatch):
+    import supervisor_control as sc
+    monkeypatch.setattr(sc.MUX, "available", lambda: True)
+    monkeypatch.setattr(sc.MUX, "has_session", lambda session: True)
+    assert wait_for_session(op.Instance("alpha"), timeout=0) is True
+
+
+def test_wait_for_session_times_out_when_the_session_never_appears(monkeypatch):
+    import supervisor_control as sc
+    monkeypatch.setattr(sc.MUX, "available", lambda: True)
+    monkeypatch.setattr(sc.MUX, "has_session", lambda session: False)
+    assert wait_for_session(op.Instance("alpha"), timeout=0) is False
 
 
 def test_launch_status_does_not_call_a_dead_shim_a_dead_supervisor(monkeypatch):

@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 import op
+import paths
 from operator_cli import entry as cli
 
 REPO = Path(__file__).resolve().parent.parent
@@ -355,6 +356,26 @@ def test_a_typed_home_still_reaches_the_child(monkeypatch, tmp_path):
 # ── verbs ───────────────────────────────────────────────────────
 
 
+def test_start_registers_an_unregistered_directory(tmp_path, monkeypatch, capsys):
+    import supervisor
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(supervisor, "_spawn_background_loop",
+                        lambda *a, **k: 11)
+    assert paths.catalog_guid(tmp_path).guid is None
+    assert cli.main(["start", "--name", "alpha"]) == 0
+    out = capsys.readouterr().out
+    assert "registered this directory as a project" in out
+    assert paths.catalog_guid(tmp_path).guid
+
+
+def test_operator_remember_help_names_instance(capsys):
+    assert cli.main(["remember", "--help"]) == 0
+    out = capsys.readouterr().out.lower()
+    assert "--instance" in out
+    assert "usage: operator remember" in out
+    assert "operator-seat" not in out
+
+
 def test_start_spawns_the_background_supervisor(monkeypatch, capsys):
     import supervisor
     seen = {}
@@ -561,7 +582,7 @@ def test_recover_delegates(monkeypatch):
 
 def test_remember_stops_options_at_the_terminator(monkeypatch):
     seen = []
-    monkeypatch.setattr(cli.seat, "main", lambda argv: seen.append(list(argv)) or 0)
+    monkeypatch.setattr(cli.seat, "main", lambda argv, **k: seen.append(list(argv)) or 0)
     assert cli.main([
         "remember", "--instance", "alpha", "--kind", "decision",
         "--", "--instance=beta", "some text",
@@ -574,7 +595,7 @@ def test_remember_stops_options_at_the_terminator(monkeypatch):
 
 def test_session_after_terminator_is_journal_text(monkeypatch):
     seen = []
-    monkeypatch.setattr(cli.seat, "main", lambda argv: seen.append(list(argv)) or 0)
+    monkeypatch.setattr(cli.seat, "main", lambda argv, **k: seen.append(list(argv)) or 0)
     assert cli.main([
         "remember", "--instance", "alpha", "--kind", "decision",
         "--", "--session=99", "note",
@@ -585,7 +606,7 @@ def test_session_after_terminator_is_journal_text(monkeypatch):
 
 def test_home_after_terminator_is_journal_text(monkeypatch, tmp_path):
     seen = []
-    monkeypatch.setattr(cli.seat, "main", lambda argv: seen.append(list(argv)) or 0)
+    monkeypatch.setattr(cli.seat, "main", lambda argv, **k: seen.append(list(argv)) or 0)
     assert cli.main([
         "--home", str(tmp_path),
         "remember", "--instance", "alpha", "--kind", "decision",
@@ -598,7 +619,7 @@ def test_home_after_terminator_is_journal_text(monkeypatch, tmp_path):
 
 def test_remember_delegates_to_seat(monkeypatch):
     seen = []
-    monkeypatch.setattr(cli.seat, "main", lambda argv: seen.append(argv) or 0)
+    monkeypatch.setattr(cli.seat, "main", lambda argv, **k: seen.append(argv) or 0)
     assert cli.main(["remember", "--instance", "prism", "--kind", "gotcha",
                      "tail by inode"]) == 0
     assert seen == [["--instance", "prism", "remember", "--kind", "gotcha",
@@ -607,14 +628,14 @@ def test_remember_delegates_to_seat(monkeypatch):
 
 def test_recall_delegates_to_seat(monkeypatch):
     seen = []
-    monkeypatch.setattr(cli.seat, "main", lambda argv: seen.append(argv) or 0)
+    monkeypatch.setattr(cli.seat, "main", lambda argv, **k: seen.append(argv) or 0)
     assert cli.main(["recall", "--instance", "prism"]) == 0
     assert seen == [["--instance", "prism", "recall"]]
 
 
 def test_forget_delegates_to_seat(monkeypatch):
     seen = []
-    monkeypatch.setattr(cli.seat, "main", lambda argv: seen.append(argv) or 0)
+    monkeypatch.setattr(cli.seat, "main", lambda argv, **k: seen.append(argv) or 0)
     assert cli.main(["forget", "--instance", "prism", "abc"]) == 0
     assert seen == [["--instance", "prism", "forget", "abc"]]
 
