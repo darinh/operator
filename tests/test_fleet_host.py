@@ -1149,3 +1149,40 @@ def test_a_real_extension_is_tailed_woken_and_proposed_from(tmp_path, home,
     assert record["text"] == ("[extension fleetext, unverified] raise the "
                               "flaky-test backlog item")
     assert record["approved"] is False
+
+
+# ── watching vs inert ───────────────────────────────────────────
+
+class _Named:
+    def __init__(self, name):
+        self.name = name
+
+
+def test_nothing_enabled_does_not_claim_anything_is_watching(home, monkeypatch,
+                                                             capsys):
+    monkeypatch.setattr(extensions, "discover",
+                        lambda: ([_Named("seat-watch"),
+                                  _Named("worktree-guard")], []))
+    fleet_host.fleet_host(home)
+    err = capsys.readouterr().err
+    assert "watching the fleet" not in err
+    assert "Installed but inert" in err
+    assert "seat-watch" in err
+    assert "worktree-guard" in err
+    assert "operator ext enable" in err
+
+
+def test_enabled_extensions_are_the_ones_reported_as_watching(home, monkeypatch,
+                                                              capsys):
+    (home / "extensions.json").write_text(json.dumps({
+        "seat-watch": {"enabled": True},
+        "worktree-guard": {"enabled": "true"},
+    }), encoding="utf-8")
+    monkeypatch.setattr(extensions, "discover",
+                        lambda: ([_Named("seat-watch"),
+                                  _Named("worktree-guard")], []))
+    fleet_host.fleet_host(home)
+    err = capsys.readouterr().err
+    assert "Extensions watching the fleet: seat-watch" in err
+    assert "Installed but inert: worktree-guard" in err
+    assert "operator ext enable" in err

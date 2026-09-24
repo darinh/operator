@@ -38,10 +38,10 @@ Preconditions:
   `control_operator.py fleet --run <run> --label round-one -- run --rounds 1 --interval 0.1`.
   Exit `0`. stdout reads `fleet host watching <home>`, `stopping after 1 round(s)`
   and `fleet host stopped after 1 round(s)`.
-- **Prove discovery.** The same call's **stderr** carries
-  `Extensions watching the fleet: ...` naming every registered entry point. This
-  appears even when none are enabled: discovery is not activation, and the list
-  reflects what `pip` installed, not what a human turned on.
+- **Prove discovery is not watching.** The same call's **stderr** does not
+  claim `Extensions watching the fleet` when nothing is enabled. It names
+  installed-but-inert extensions and `operator ext enable NAME`. Discovery is
+  not activation.
 - **Prove inert by default.** Seed a ledger record, run a round, and read the
   queue. Run
   `control_operator.py seed-ledger --run <run> --record '{"event":"session_exit","instance":"verify-seat","consecutive":3}'`,

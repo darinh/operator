@@ -54,8 +54,8 @@ needs a different `seed-ledger` payload and its own section here.
   `control_operator.py seed-ledger --run <run> --record '{"event":"session_exit","instance":"verify-seat","session":1,"consecutive":1,"limit":5,"markers":{},"giving_up":false}' --record '{"event":"session_exit","instance":"verify-seat","session":2,"consecutive":2,"limit":5,"markers":{},"giving_up":false}' --record '{"event":"session_exit","instance":"verify-seat","session":3,"consecutive":3,"limit":5,"markers":{},"giving_up":false}'`,
   then `control_operator.py fleet --run <run> --label inert -- run --rounds 1 --interval 0.1`,
   then `proposals`. stdout is `no proposals waiting`.
-- **Prove discovery is not activation.** That round's stderr still lists every
-  registered extension. Being listed is not being enabled.
+- **Prove discovery is not activation.** That round's stderr names installed
+  extensions as inert, not as watching. Being installed is not being enabled.
 - **Enable one.** Run
   `control_operator.py enable --run <run> --extension seat-watch --setting failures=3`.
   stdout confirms `{"enabled": true, "failures": 3}`.
