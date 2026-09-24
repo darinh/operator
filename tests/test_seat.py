@@ -126,80 +126,84 @@ def test_a_seat_named_twice_takes_the_one_nearest_the_text(project):
 
 # ── the preamble and the parser, bound together ─────────────────
 
-#: An advertised command example: the CLI's name, *however it is spelled*, with
-#: one of its verbs after it. A misspelling matches deliberately, so that
-#: `operator-seat-bogus recall` is extracted and rejected by name below rather
-#: than never being seen -- the failure mode of every earlier version of this
-#: scan was skipping, not misjudging.
+#: A command example the preamble offers: a backtick span whose first token
+#: claims to be this program. Deliberately permissive about everything after
+#: that -- a misspelled verb, a quoted verb, flags before the verb, a
+#: misspelled *name* -- because the failure mode of every earlier version of
+#: this scan was not seeing a broken example rather than misjudging one.
 #:
-#: A verb is required, so prose naming the program, and a seat id with the name
-#: inside it, are not miscounted as commands nobody ran. That was the cost of
-#: counting the bare substring: three legitimate preambles failed.
-ADVERTISED = re.compile(r"operator-seat\S*\s+(?:remember|recall|forget)\b")
-
-
+#: Extraction and judgement were the same rule for two rounds, and both
+#: reviewers found the same consequence independently: a command outside the
+#: rule's grammar disappeared from the scan and from the count of what the scan
+#: should have found, so the two agreed with each other about nothing. They are
+#: separate now. This says what to look at; the test says what is acceptable.
 def advertised_commands(text: str) -> "list[list[str]]":
     """Every `operator-seat` command example the preamble offers, tokenised.
 
-    A helper rather than three lines inline, so the extraction itself can be
-    put under test below. It failed three times in review, each time by
-    *skipping* rather than by misjudging: `str.split` could not carry a quoted
-    operand; matching an unstripped segment dropped a command indented by one
-    space; and matching a prefix accepted a command whose executable was not
-    this one.
-
-    So it counts rather than filters. Every command-shaped mention anywhere in
-    the preamble has to come back from here, which is what makes a mention
-    outside backticks a failure instead of a blind spot.
+    Only backtick spans are read. Earlier versions also scanned the prose, to
+    catch an example that escaped its formatting, and that is what made the
+    guard cry wolf: a sentence naming the program, a seat id containing it, an
+    assignment mentioning it, and a note whose own text quoted a command were
+    all reported as commands nobody ran. None of them is. The contract here is
+    over examples a reader would copy, and a preamble that stops offering any
+    fails the verb check below rather than passing quietly.
     """
-    segments = [segment.strip() for segment in re.findall(r"`([^`]*)`", text)]
-    commands = [shlex.split(segment) for segment in segments
-                if ADVERTISED.match(segment)]
-    assert len(commands) == len(ADVERTISED.findall(text)), (
-        f"the preamble advertises {len(ADVERTISED.findall(text))} command(s) "
-        f"and this could reach {len(commands)}: one of them is outside "
-        f"backticks, so nothing below runs it. Segments seen: {segments}")
+    commands = []
+    for segment in re.findall(r"`([^`]*)`", text):
+        argv = shlex.split(segment.strip())
+        if argv and argv[0].startswith("operator-seat"):
+            commands.append(argv)
     return commands
 
 
-def test_the_extraction_cannot_quietly_skip_an_advertised_command():
+def test_the_extraction_hands_back_the_examples_that_are_wrong():
     """The control for the helper above, built from what broke it in review.
 
-    One leading space inside the backticks was enough: the command was dropped
-    before tokenising, the surviving example supplied the same verb, and the
-    test below stayed green while the preamble advertised a command that exits
-    2. A prefix match was enough the next time, because `cli.main` is handed
-    `argv[1:]` and never sees the name it was called by.
+    Each of these was found passing. One leading space inside the backticks
+    dropped a command before tokenising. A prefix match accepted an executable
+    that was not this program, which then ran it anyway because `cli.main` is
+    handed `argv[1:]` and never sees the name it was called by. And a scan that
+    required a well-formed verb could not see `remembers`, a quoted verb, or a
+    flag before the verb -- the three shapes a broken example actually takes.
+
+    All of them come back from here now. Judging them is the next test's job,
+    and that is the whole point: a scan that only returns valid commands cannot
+    report an invalid one.
     """
     padded = 'write it with ` operator-seat remember --instance x --kind gotcha "n"`.'
     assert advertised_commands(padded) == [
         ["operator-seat", "remember", "--instance", "x", "--kind", "gotcha", "n"]]
 
-    outside = ('run operator-seat remember yourself, or '
-               '`operator-seat recall --instance x`.')
-    with pytest.raises(AssertionError,
-                       match=r"advertises 2 command\(s\) and this could reach 1"):
-        advertised_commands(outside)
-
-    # Handed back rather than dropped, so the caller rejects it by name.
     assert advertised_commands("`operator-seat-bogus recall --instance x`") == [
         ["operator-seat-bogus", "recall", "--instance", "x"]]
+    assert advertised_commands("`operator-seat remembers --instance x`") == [
+        ["operator-seat", "remembers", "--instance", "x"]]
+    assert advertised_commands('`operator-seat "remember" --instance x`') == [
+        ["operator-seat", "remember", "--instance", "x"]]
+    assert advertised_commands("`operator-seat --instance x remember`") == [
+        ["operator-seat", "--instance", "x", "remember"]]
 
 
 def test_the_extraction_does_not_fire_on_a_preamble_that_is_fine():
     """The other half, because an over-strict guard is one somebody weakens.
 
-    Counting the bare name failed all three of these, none of which is a
-    command nobody ran. A test that cries wolf on a legitimate edit teaches the
-    next agent to relax it rather than to fix the preamble.
+    Every one of these was failed by a previous revision, and not one of them
+    is a command that went unrun. The last is the sharpest: a note whose own
+    text quotes a command is still one command, and a scan that reads the prose
+    cannot tell the difference.
     """
     assert advertised_commands("The operator-seat program records claims.") == []
-    assert advertised_commands("`operator-seat recall --instance x`, a "
+    assert advertised_commands("The operator-seat recall command reads notes.") == []
+    assert advertised_commands("`operator-seat recall --instance x`, from a "
                                "program named operator-seat.") == [
         ["operator-seat", "recall", "--instance", "x"]]
     assert advertised_commands("`operator-seat recall --instance "
                                "operator-seat-prism`") == [
         ["operator-seat", "recall", "--instance", "operator-seat-prism"]]
+    assert advertised_commands('`operator-seat remember --instance x --kind '
+                               'gotcha "operator-seat recall needs a seat"`') == [
+        ["operator-seat", "remember", "--instance", "x", "--kind", "gotcha",
+         "operator-seat recall needs a seat"]]
 
 
 def test_every_command_the_preamble_advertises_actually_runs(project,
@@ -214,14 +218,18 @@ def test_every_command_the_preamble_advertises_actually_runs(project,
 
     It *runs* them rather than parsing them, because parsing was the weaker
     claim in two ways both reviewers found. `--instance` is optional, so a
-    preamble that stopped putting it after the verb would still have parsed and
-    this test would have quietly stopped covering the defect; and the first
-    version supplied the `remember` text operand itself, so a preamble that
-    dropped the note would have been repaired here and passed.
+    preamble that stopped putting it after the verb would still have parsed;
+    and the first version supplied the `remember` text operand itself, so a
+    preamble that dropped the note would have been repaired here and passed.
 
-    The recall is run a second time at the end rather than only in argv order.
-    In argv order it runs before the write it is supposed to read, so checking
-    its exit code was all the first version could do -- and an advertised
+    The placement is required of *some* advertised command rather than all of
+    them, because both orders work now and an extra example in the other one is
+    not a defect. The regression this file exists for is the preamble ceasing
+    to offer the post-subcommand form at all.
+
+    Every advertised recall is run again after the write, rather than the first
+    one. In argv order recall runs before the write it is meant to read, so an
+    exit code was all the first version could check -- and an advertised
     `--per-kind 0` returned 0 while showing the seat nothing.
     """
     monkeypatch.setattr(op, "RESTART_DIR", tmp_path / "restart")
@@ -229,30 +237,59 @@ def test_every_command_the_preamble_advertises_actually_runs(project,
     text = op.build_preamble("anvil:anvil", inst, has_journal=True)
 
     advertised = advertised_commands(text)
-    assert all(len(argv) > 1 for argv in advertised), (
-        f"the preamble advertises a bare command with no subcommand: "
-        f"{advertised}")
-    assert {argv[1] for argv in advertised} == {"remember", "recall"}, (
-        "the preamble stopped naming both journal commands, so this test is "
-        f"asserting nothing; saw: {advertised}")
-
+    verbs = set()
     for argv in advertised:
         assert argv[0] == "operator-seat", (
             f"the preamble advertises {argv[0]!r}, which is not this program. "
             f"`cli.main` is handed argv[1:] and would run the real one anyway")
-        assert "--instance" in argv[2:], (
-            f"the preamble no longer puts --instance after the subcommand, "
-            f"which is the placement this whole file exists for: {argv}")
-        assert cli.main(argv[1:]) == 0, f"the preamble advertises {argv}"
+        verbs.add(_verb(argv))
+        assert _run(argv) == 0, f"the preamble advertises {argv}"
         capsys.readouterr()
+
+    assert verbs == {"remember", "recall"}, (
+        "the preamble stopped naming both journal commands, so this test is "
+        f"asserting nothing; saw: {advertised}")
+    assert any("--instance" in argv[2:] for argv in advertised), (
+        f"no advertised command puts --instance after the subcommand any more, "
+        f"which is the placement this whole file exists for: {advertised}")
 
     assert [e["text"] for e in journal.recall(project, inst.id)] == ["..."], (
         "the advertised remember parsed but wrote nothing, and a seat cannot "
         "tell that outcome from never having been told to write at all")
 
-    recall = next(argv for argv in advertised if argv[1] == "recall")
-    assert cli.main(recall[1:]) == 0
-    assert "..." in capsys.readouterr().out, (
-        f"{recall} exited 0 and showed the seat nothing back, which is the "
-        f"outcome it cannot distinguish from an empty journal")
+    for argv in advertised:
+        if _verb(argv) != "recall":
+            continue
+        assert _run(argv) == 0
+        assert "..." in capsys.readouterr().out, (
+            f"{argv} exited 0 and showed the seat nothing back, which is the "
+            f"outcome it cannot distinguish from an empty journal")
+
+
+def _verb(argv: "list[str]") -> str:
+    """The subcommand argparse finds in an advertised command, wherever it is.
+
+    Read from the parser rather than from `argv[1]`, so that an example whose
+    flags come before the verb is judged on what it does rather than skipped
+    for the shape it is in.
+    """
+    return _parse(argv).command
+
+
+def _parse(argv: "list[str]"):
+    try:
+        return cli.build_parser().parse_args(argv[1:])
+    except SystemExit as refused:  # argparse prints its own reason to stderr
+        raise AssertionError(
+            f"the preamble advertises {argv}, which this program refuses: "
+            f"exit {refused.code}") from None
+
+
+def _run(argv: "list[str]") -> int:
+    try:
+        return cli.main(argv[1:])
+    except SystemExit as refused:
+        raise AssertionError(
+            f"the preamble advertises {argv}, which this program refuses: "
+            f"exit {refused.code}") from None
 
