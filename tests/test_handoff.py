@@ -176,3 +176,18 @@ def test_joined_syntax_is_how_you_mean_an_option_literally(tmp_path,
     body = paths.project_handoff_file(work, "alpha").read_text(encoding="utf-8")
     assert "--no-restart" in body
     assert not op.Instance("alpha").restart_marker.exists()
+
+
+def test_an_option_shaped_value_is_refused_however_it_is_spelled(tmp_path,
+                                                                 monkeypatch,
+                                                                 capsys):
+    """Membership in the known flags was not enough. `--norestart` and
+    `--no-restart=true` are not members, and both ended the session."""
+    _project(tmp_path, monkeypatch)
+    for tail in (["--status", "--instance=x"],
+                 ["--status", "done", "--context", "--context=y"],
+                 ["--status", "done", "--context", "--norestart"],
+                 ["--status", "done", "--context", "--no-restart=true"]):
+        assert cli.main(["handoff", "--instance", "alpha", *tail]) == 2, tail
+        assert "needs a value" in capsys.readouterr().err
+        assert not op.Instance("alpha").restart_marker.exists(), tail

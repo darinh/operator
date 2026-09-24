@@ -29,11 +29,11 @@ USAGE = ("Usage: operator handoff --instance NAME --status TEXT "
 def parse(options: list[str]) -> "dict[str, str] | None":
     """Flag values, or None after saying which argument was the problem.
 
-    Nothing is skipped in silence. An unrecognised option and a value flag
-    followed by another option are both refused, because both fail the same
-    way: `--norestart` and `--context --no-restart` each end the session that
-    the argument was typed to preserve. Use `--context=--no-restart` to mean
-    an option-looking string literally.
+    Nothing is skipped in silence, and nothing option-shaped is taken as text.
+    A membership test against the known flags was not enough: `--norestart`
+    and `--no-restart=true` are not members, and both ended the session they
+    were typed to preserve. Anything starting with `-` is refused as a value.
+    Use `--context=--no-restart` to mean such a string literally.
     """
     values: dict[str, str] = {}
     i = 0
@@ -46,7 +46,7 @@ def parse(options: list[str]) -> "dict[str, str] | None":
                 i += 1
                 continue
             following = options[i + 1] if i + 1 < len(options) else ""
-            if i + 1 >= len(options) or following in VALUE_FLAGS + SWITCHES:
+            if i + 1 >= len(options) or following.startswith("-"):
                 print(f"operator handoff {name} needs a value", file=sys.stderr)
                 return None
             values[name] = following
