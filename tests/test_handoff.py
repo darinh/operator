@@ -194,15 +194,19 @@ def test_an_option_shaped_value_is_refused_however_it_is_spelled(tmp_path,
         assert not op.Instance("alpha").restart_marker.exists(), tail
 
 
-def _stored_status(work) -> str:
-    """Exactly what landed under `## Status`, not a substring of the file.
+def _expected_body(status: str) -> str:
+    """The whole document a status-only handoff produces.
 
-    Reviewer A got a corrupted suggestion past the previous `status in body`
-    assertion by prefixing it. A containment check cannot tell "this is the
-    status" from "the status is in here somewhere".
+    The helper this replaces returned just the `## Status` section, split at
+    the first blank line, and Reviewer A slipped a status carrying its own
+    blank line plus trailing text past it. Comparing a section cannot see what
+    is after the section; comparing the file can.
     """
-    body = paths.project_handoff_file(work, "alpha").read_text(encoding="utf-8")
-    return body.split("## Status\n\n", 1)[1].split("\n\n", 1)[0].rstrip("\n")
+    return f"# Handoff: alpha\n\n## Status\n\n{status}\n"
+
+
+def _body(work) -> str:
+    return paths.project_handoff_file(work, "alpha").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("status", [
@@ -231,4 +235,4 @@ def test_the_refusal_says_how_to_pass_a_value_that_looks_like_a_flag(
 
     assert cli.main(["handoff", "--instance", "alpha", f"--status={status}",
                      "--no-restart"]) == 0
-    assert _stored_status(work) == status
+    assert _body(work) == _expected_body(status)
