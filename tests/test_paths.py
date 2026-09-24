@@ -5,6 +5,21 @@ import os
 from pathlib import Path
 
 import paths
+from operator_cli.project import ensure_registered
+
+
+def _alias_catalog(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / "projects").mkdir(parents=True)
+    monkeypatch.setenv("COPILOT_OPERATOR_HOME", str(home))
+    stored = tmp_path / "stored"
+    alias = tmp_path / "alias"
+    stored.mkdir()
+    alias.mkdir()
+    guid = "11111111-2222-3333-4444-555555555555"
+    catalog = home / "projects" / "catalog.csv"
+    catalog.write_text(f'"{stored}",{guid}\n', encoding="utf-8")
+    return home, stored, alias, guid, catalog
 
 
 def test_catalog_guid_follows_samefile(tmp_path, monkeypatch):
@@ -29,3 +44,48 @@ def test_catalog_guid_follows_samefile(tmp_path, monkeypatch):
     monkeypatch.setattr(os.path, "samefile", fake_samefile)
     assert paths.catalog_guid(stored).guid == guid
     assert paths.catalog_guid(alias).guid == guid
+
+
+def _assert_probe_failure_is_undecided(alias, guid, catalog):
+    found = paths.catalog_guid(alias)
+    assert found.guid is None
+    assert found.undecided is True
+    before = catalog.read_text(encoding="utf-8")
+    rc, new_guid, created = ensure_registered(str(alias))
+    assert rc == 1
+    assert created is False
+    assert new_guid == ""
+    assert catalog.read_text(encoding="utf-8") == before
+    assert guid in before
+    assert before.count("\n") == 1
+
+
+def test_samefile_permission_error_is_undecided(tmp_path, monkeypatch):
+    _home, _stored, alias, guid, catalog = _alias_catalog(tmp_path, monkeypatch)
+
+    def boom(*_a, **_k):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(os.path, "samefile", boom)
+    _assert_probe_failure_is_undecided(alias, guid, catalog)
+
+
+def test_samefile_timeout_error_is_undecided(tmp_path, monkeypatch):
+    _home, _stored, alias, guid, catalog = _alias_catalog(tmp_path, monkeypatch)
+
+    def boom(*_a, **_k):
+        raise TimeoutError("slow")
+
+    monkeypatch.setattr(os.path, "samefile", boom)
+    _assert_probe_failure_is_undecided(alias, guid, catalog)
+
+
+def test_directory_gone_between_exists_and_samefile_is_undecided(
+        tmp_path, monkeypatch):
+    _home, _stored, alias, guid, catalog = _alias_catalog(tmp_path, monkeypatch)
+
+    def boom(*_a, **_k):
+        raise FileNotFoundError("gone")
+
+    monkeypatch.setattr(os.path, "samefile", boom)
+    _assert_probe_failure_is_undecided(alias, guid, catalog)
