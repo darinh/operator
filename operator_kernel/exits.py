@@ -149,6 +149,55 @@ def handoff_state(workdir: Path, instance_id: str = "") -> HandoffState:
     return HandoffState(HANDOFF_MISSING, handoff_file)
 
 
+def write_handoff(workdir: Path, instance_id: str, status: str,
+                  next_steps: str = "", context: str = "") -> object:
+    """Write this seat's handoff, returning the path it landed at.
+
+    The writer lives beside :func:`handoff_state`, its reader, because the two
+    agree on a location and nothing else checks that they still do. They were
+    split across two distributions for the whole life of this project: the
+    reader here, the writer in `copilot-tools`, which is the package the owner
+    said to design as though it did not exist. `supervisor.py` still carries a
+    comment explaining that "`handoff` touches the marker while copilot is
+    still up" -- a protocol this repository depended on and did not ship.
+
+    The three return values are :func:`project_handoff_file`'s, deliberately
+    unchanged. "The catalog would not open" and "this project is not
+    registered" are different facts and the caller owes the agent different
+    sentences, which is the same argument :func:`handoff_state` makes for
+    refusing to collapse them.
+
+    The replace is atomic because the supervisor is a concurrent reader: it
+    polls the restart marker and stats this path, so a partially written file
+    is a handoff the next session reads as complete. Writing the temp file in
+    the destination directory is what keeps `os.replace` on one filesystem.
+    """
+    handoff_file = project_handoff_file(workdir, instance_id)
+    if handoff_file is CATALOG_UNREADABLE or handoff_file is None:
+        return handoff_file
+    body = [f"# Handoff: {instance_id}", "", "## Status", "", status.strip()]
+    for heading, text in (("Next", next_steps), ("Context", context)):
+        if text.strip():
+            body += ["", f"## {heading}", "", text.strip()]
+    body.append("")
+    tmp = handoff_file.with_name(handoff_file.name + ".tmp")
+    handoff_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp.write_text("\n".join(body), encoding="utf-8")
+    os.replace(tmp, handoff_file)
+    return handoff_file
+
+
+def request_restart(instance_id: str) -> None:
+    """Ask this seat's supervisor to end the session and launch the next one.
+
+    Separate from :func:`write_handoff` so the file is on disk before the
+    supervisor is told to look. The marker is what `supervisor.py` polls, and
+    it tears the session down as soon as it sees it -- so touching it first
+    would race the write it exists to announce.
+    """
+    instance.Instance(instance_id).restart_marker.touch()
+
+
 def crash_recovery_verdict(workdir: Path, instance_id: str = "") -> bool:
     """Did the session before this launch end without leaving a handoff?
 
