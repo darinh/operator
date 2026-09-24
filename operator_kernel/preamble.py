@@ -61,7 +61,7 @@ def build_preamble(agent_name: str, instance: Instance, crash_recovery: bool = F
         "not seen by anyone and the seat idles until something kills it. "
         "(2) Session restart: when context gets heavy or a task is "
         "complete with next steps, use the handoff command: "
-        f"`operator handoff --instance {instance.display_name} "
+        f"`operator handoff --instance {instance.id} "
         "--status \"what you completed\" --next \"what to do next\" "
         "--context \"key decisions and gotchas\"` — this atomically writes the handoff file "
         "and triggers the restart. It works the same on every platform. (3) On startup: "

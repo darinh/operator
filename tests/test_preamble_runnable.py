@@ -17,6 +17,13 @@ from operator_cli import entry
 
 SEAT = "alpha"
 
+#: A single-token span is a command only if it could be a bare program name.
+#: Multi-token spans are always treated as commands, whatever the first token
+#: looks like, which is what lets `` `.\handoff.exe --instance x` `` be
+#: reported rather than mistaken for a path. Reviewer A found both shapes
+#: slipping through the acceptance rule this replaces.
+_PATHLIKE = re.compile(r"[/\\.]")
+
 
 def _launch_preamble(monkeypatch, tmp_path, *, remembered: str = "") -> str:
     """The text one real `run_loop_mode` session hands its seat."""
@@ -64,9 +71,17 @@ def _commands(text: str) -> list[str]:
     """
     found = set()
     for span in re.findall(r"`([^`]+)`", text):
-        tokens = span.strip().split()
-        if len(tokens) > 1 and re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]*", tokens[0]):
-            found.add(span.strip())
+        span = span.strip()
+        if not span:
+            continue
+        tokens = span.split()
+        if len(tokens) == 1 and _PATHLIKE.search(tokens[0]):
+            # `.operator/mandate.md` and `trace.jsonl` are the spans in this
+            # preamble that name files. A lone word with no separator and no
+            # extension is a program, and `` `handoff` `` on its own is
+            # exactly as much of an advertisement as the full command line.
+            continue
+        found.add(span)
     return sorted(found)
 
 
@@ -90,6 +105,34 @@ def _run(template: str) -> int:
     return entry.main(shlex.split(argv)[1:])
 
 
+def _launch_texts(monkeypatch, tmp_path):
+    """Every preamble a seat can be handed, real launches first.
+
+    The two real ones are what `run_loop_mode` actually produced, which is
+    what this file exists to check. The rest are composed, because the clauses
+    they carry are conditional on states a test cannot reach by launching --
+    a stale wrapper, an unreadable handoff probe, a crash. Composing is a weak
+    check for wiring and a sound one for reading the prose, which is all the
+    caller does with these.
+    """
+    yield _launch_preamble(monkeypatch, tmp_path)
+    yield _launch_preamble(monkeypatch, tmp_path, remembered="node 20 required")
+    import preamble as P
+    from instance import Instance
+    for extra in ({"crash_recovery": True}, {"handoff_unknown": True},
+                  {"handoff_waiting": str(tmp_path / "h.md"),
+                   "handoff_written": "2026-09-24T00:00:00Z"},
+                  {"assignment": "do the thing"},
+                  {"code_state": P.CODE_STALE},
+                  {"code_state": P.CODE_MISMATCH}):
+        yield P.build_preamble("a:b", Instance(SEAT), **extra)
+
+
+def _every_advertised_command(monkeypatch, tmp_path):
+    for text in _launch_texts(monkeypatch, tmp_path):
+        yield from _commands(text)
+
+
 def test_every_advertised_command_is_a_program_this_project_installs(
         monkeypatch, tmp_path):
     """The check the old extractor could not perform.
@@ -102,33 +145,75 @@ def test_every_advertised_command_is_a_program_this_project_installs(
     did not exist.
     """
     ours = _installed_programs()
-    for state in ({}, {"remembered": "node 20 is required"}):
-        for template in _commands(_launch_preamble(monkeypatch, tmp_path, **state)):
-            program = shlex.split(template)[0]
-            assert program in ours, (
-                f"the preamble advertises `{template}`, but {program!r} is "
-                f"not one of this project's console scripts {sorted(ours)}")
+    seen = 0
+    for template in _every_advertised_command(monkeypatch, tmp_path):
+        program = shlex.split(template)[0]
+        seen += 1
+        assert program in ours, (
+            f"the preamble advertises `{template}`, but {program!r} is "
+            f"not one of this project's console scripts {sorted(ours)}")
+    assert seen, "no commands were extracted, so this proved nothing"
 
 
 def test_no_command_is_advertised_outside_backticks(monkeypatch, tmp_path):
     """Backticks are what makes a command visible to the extractor above.
 
     The `handoff` clause sat in bare prose, so every guard here read straight
-    past it for as long as it existed. An option flag loose in the text is the
-    signature: prose does not contain `--instance`, only a command does.
+    past it for as long as it existed. Two signatures give a loose command
+    away: an option flag, and one of our programs followed by one of our
+    verbs. The second is narrow on purpose. "the operator supervisor" is an
+    ordinary English phrase in this text, so any looser rule fails on prose
+    that is doing nothing wrong.
     """
-    text = _launch_preamble(monkeypatch, tmp_path)
-    prose = re.sub(r"`[^`]+`", " ", text)
-    loose = re.findall(r"(?:^|\s)(--[A-Za-z][A-Za-z0-9-]*)", prose)
-    assert not loose, (
-        f"{loose} appears outside backticks, so a command is being advertised "
-        f"where the extractor cannot see it")
+    for text in _launch_texts(monkeypatch, tmp_path):
+        prose = re.sub(r"`[^`]+`", " ", text)
+        loose = re.findall(r"(?:^|\s)(--[A-Za-z][A-Za-z0-9-]*)", prose)
+        assert not loose, (
+            f"{loose} appears outside backticks, so a command is being "
+            f"advertised where the extractor cannot see it")
+        for program in _installed_programs():
+            for verb in entry.HANDLERS:
+                assert not re.search(
+                    rf"(?:^|\s){re.escape(program)}\s+{re.escape(verb)}\b",
+                    prose), (
+                    f"`{program} {verb}` appears outside backticks, which is "
+                    f"how the handoff clause hid from every guard here")
 
 
 def test_a_fresh_seat_is_told_how_to_restart_itself(monkeypatch, tmp_path):
-    """Key fact (2) of every preamble, and the least tested thing in it."""
+    """Key fact (2) of every preamble, and the least tested thing in it.
+
+    Naming it is not enough, which is the whole lesson of this file: the
+    command is run, so a clause that drifts from the parser fails here.
+    """
     found = _commands(_launch_preamble(monkeypatch, tmp_path))
-    assert any("handoff" in c for c in found), found
+    restart = [c for c in found if "handoff" in c]
+    assert restart, found
+    for template in restart:
+        assert _run(template) != 2, f"the preamble advertises `{template}`"
+
+
+def test_the_restart_clause_advertises_the_seat_id_not_the_display_name(
+        monkeypatch, tmp_path):
+    """Both reviewers of this change found the same bug here independently.
+
+    The supervisor probes with `instance.id`, the file is named for it, and
+    `safe_instance_id` maps `a.b` to something else entirely. A clause telling
+    the agent to hand off under its display name files the baton where the
+    next session does not look, and restarts the session regardless.
+    `preamble.py` already makes this exact argument for `operator remember`.
+    """
+    import preamble as P
+    from instance import Instance
+
+    seat = Instance("a.b")
+    assert seat.id != seat.display_name, "pick a name that actually sanitises"
+    restart = [c for c in _commands(P.build_preamble("a:b", seat))
+               if "handoff" in c]
+    assert restart, "no handoff command was advertised at all"
+    for command in restart:
+        assert f"--instance {seat.id}" in command, command
+        assert seat.display_name not in command.replace(seat.id, ""), command
 
 
 def test_a_fresh_seat_is_told_how_to_remember(monkeypatch, tmp_path):

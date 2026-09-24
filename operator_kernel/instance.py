@@ -24,6 +24,22 @@ from mux import safe_instance_id
 from probes import log, remove_file, utcnow
 
 # ── instance ────────────────────────────────────────────────────
+def restart_marker_for(seat_id: str) -> Path:
+    """The marker `supervisor.py` polls, addressed by seat id.
+
+    A function as well as a property because two callers need it and only one
+    of them holds an `Instance`. `operator handoff` is handed a seat id on a
+    command line, and `Instance(seat_id).restart_marker` is wrong for it:
+    `safe_instance_id` is not idempotent, so re-sanitising an id that has
+    already been sanitised invents a third name. Measured: `a.b` becomes
+    `a-b-69f664`, and that becomes `a-b-69f664-5d16fe`.
+
+    Spelled once so the writer and the poller cannot drift, which is the rule
+    `paths.py` applies to every other shared location.
+    """
+    return RESTART_DIR / seat_id
+
+
 class Instance:
     """One named unit of work: a session plus its state files."""
 
@@ -41,7 +57,7 @@ class Instance:
     # -- file locations
     @property
     def restart_marker(self) -> Path:
-        return RESTART_DIR / self.id
+        return restart_marker_for(self.id)
 
     @property
     def state_file(self) -> Path:

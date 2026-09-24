@@ -119,3 +119,65 @@ def test_the_restart_marker_is_the_one_the_supervisor_polls(tmp_path):
     assert not marker.exists()
     exits.request_restart("alpha")
     assert marker.exists()
+
+
+# ── what two reviewers found: the seat key, and the guard on it ──
+
+
+def test_a_seat_whose_name_sanitises_is_filed_where_the_reader_looks(
+        tmp_path, monkeypatch):
+    """The bug both reviewers of PR #28 found independently.
+
+    `safe_instance_id` maps `a.b` to `a-b-69f664`, the supervisor probes with
+    `instance.id`, and filing under the display name put the handoff where the
+    next session does not look while restarting the session anyway.
+    """
+    work = _registered(tmp_path, monkeypatch)
+    seat_id = op.safe_instance_id("a.b")
+    assert seat_id != "a.b", "pick a name that actually sanitises"
+
+    exits.write_handoff(work, seat_id, "filed under the id")
+    state = exits.handoff_state(work, seat_id)
+    assert state.verdict == exits.HANDOFF_WAITING
+    assert state.path.name == f"{seat_id}.md"
+    assert not exits.crash_recovery_verdict(work, seat_id)
+
+
+def test_the_display_name_addresses_nothing_the_reader_will_find(
+        tmp_path, monkeypatch):
+    """The other half: writing under the display name must not look fine."""
+    work = _registered(tmp_path, monkeypatch)
+    exits.write_handoff(work, "a.b", "filed under the display name")
+    assert exits.crash_recovery_verdict(work, op.safe_instance_id("a.b"))
+
+
+def test_a_seat_name_that_is_not_one_path_component_is_refused(tmp_path,
+                                                               monkeypatch):
+    """`project_journal_file` has always checked this and the handoff path
+    did not, because its only caller could not produce a bad name."""
+    work = _registered(tmp_path, monkeypatch)
+    for bad in ("../escape", ".", "", "a/b", "CON"):
+        assert exits.write_handoff(work, bad, "nope") is None, bad
+        assert not exits.request_restart(bad), bad
+
+
+def test_a_write_that_fails_reports_it_and_leaves_no_litter(tmp_path,
+                                                            monkeypatch):
+    """The claim "no temp file left behind" was only ever tested on the happy
+    path, where there is nothing to clean up."""
+    work = _registered(tmp_path, monkeypatch)
+    landed = exits.write_handoff(work, "alpha", "good")
+    monkeypatch.setattr(exits.os, "replace",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("full")))
+    assert exits.write_handoff(work, "alpha", "doomed") is exits.WRITE_FAILED
+    assert list(landed.parent.glob("*.tmp")) == []
+    assert "good" in landed.read_text(encoding="utf-8")
+
+
+def test_the_restart_marker_is_not_re_sanitised(tmp_path):
+    """`safe_instance_id` is not idempotent, so building an `Instance` from an
+    id that is already sanitised invents a third name."""
+    seat_id = op.safe_instance_id("a.b")
+    assert op.safe_instance_id(seat_id) != seat_id, "the hazard is real"
+    assert exits.request_restart(seat_id)
+    assert (op.RESTART_DIR / seat_id).exists()
