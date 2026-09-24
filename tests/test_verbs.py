@@ -50,6 +50,15 @@ def test_instance_goes_in_front_of_the_verbs_own_tokens():
         "remember", "--instance", "alpha", "--kind", "gotcha", "note"]
 
 
+def test_every_verb_says_something_on_both_surfaces():
+    """The table feeds the help text and the menu, and a verb that is blank on
+    either is invisible to whichever reader uses that one."""
+    for verb in verbs.VERBS:
+        assert verb.help.strip(), verb.tokens
+        assert verb.menu.strip(), verb.tokens
+        assert verb.help != verb.menu, verb.tokens
+
+
 def test_entry_still_re_exports_what_callers_import_from_it():
     """The table moved out of `entry.py` under its line ceiling. Anything
     that imported it from there must keep working."""

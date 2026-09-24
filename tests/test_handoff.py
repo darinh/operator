@@ -191,3 +191,20 @@ def test_an_option_shaped_value_is_refused_however_it_is_spelled(tmp_path,
         assert cli.main(["handoff", "--instance", "alpha", *tail]) == 2, tail
         assert "needs a value" in capsys.readouterr().err
         assert not op.Instance("alpha").restart_marker.exists(), tail
+
+
+def test_the_refusal_names_the_escape_it_expects(tmp_path, monkeypatch,
+                                                  capsys):
+    """A status that legitimately opens with a dash is a real thing to write.
+    Telling that user "needs a value" when they supplied one is a lie, so the
+    message names the joined form instead."""
+    work = _project(tmp_path, monkeypatch)
+    assert cli.main(["handoff", "--instance", "alpha",
+                     "--status", "- shipped the parser"]) == 2
+    err = capsys.readouterr().err
+    assert "looks like an option" in err
+    assert "--status=- shipped the parser" in err
+    assert cli.main(["handoff", "--instance", "alpha",
+                     "--status=- shipped the parser", "--no-restart"]) == 0
+    body = paths.project_handoff_file(work, "alpha").read_text(encoding="utf-8")
+    assert "- shipped the parser" in body
