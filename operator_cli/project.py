@@ -124,40 +124,8 @@ def _resolve(given: "str | None", *, must_exist: bool = True) -> "Path | None":
 
 
 def _same_path(left: Path, right: str) -> bool:
-    from config import IS_WINDOWS
-
-    other = Path(right)
-    try:
-        if left.exists() and other.exists() and os.path.samefile(left, other):
-            return True
-    except OSError:
-        pass
-    candidates = [right]
-    try:
-        candidates.append(str(other.resolve()))
-    except (OSError, ValueError, RuntimeError):
-        pass
-    a = str(left)
-    for b in candidates:
-        if IS_WINDOWS:
-            if a.lower() == b.lower():
-                return True
-        elif a == b:
-            return True
-    return False
-
-
-def _row_would_be_found(target: Path, written: str) -> bool:
-    from config import IS_WINDOWS
-
-    try:
-        resolved = str(Path(written).resolve())
-        want = str(target.resolve())
-    except (OSError, ValueError, RuntimeError):
-        return False
-    if IS_WINDOWS:
-        resolved, want = resolved.lower(), want.lower()
-    return resolved == want
+    import paths
+    return paths.catalog_paths_match(left, right) is True
 
 
 def ensure_registered(path: "str | None" = None) -> "tuple[int, str, bool]":
@@ -187,15 +155,12 @@ def _ensure_registered_locked(target: Path) -> "tuple[int, str, bool]":
     if rows is None:
         print("could not read the project catalog", file=sys.stderr)
         return 1, "", False
-    for path, guid in rows:
-        if _same_path(target, path):
-            return 0, guid, False
     pause = os.environ.get("OPERATOR_CATALOG_PAUSE")
     if pause:
         time.sleep(float(pause))
     guid = str(uuid.uuid4())
     written = str(target)
-    if not paths.guid_is_usable(guid) or not _row_would_be_found(target, written):
+    if not paths.guid_is_usable(guid):
         print("path would not round-trip through the catalog", file=sys.stderr)
         return 1, "", False
     try:
@@ -203,15 +168,26 @@ def _ensure_registered_locked(target: Path) -> "tuple[int, str, bool]":
     except OSError as exc:
         print(f"could not create the project directory: {exc}", file=sys.stderr)
         return 1, "", False
-    rows.append((written, guid))
-    if not _write_rows(catalog, rows):
+    staged = catalog.with_name(f"catalog.{os.getpid()}.staged")
+    if not _write_rows(staged, rows + [(written, guid)]):
         print("could not write the project catalog", file=sys.stderr)
         return 1, "", False
-    check = paths.catalog_guid(target)
-    if check.guid != guid:
-        _write_rows(catalog, [(p, g) for p, g in rows if g != guid])
-        print("wrote a catalog row the existing reader did not accept",
-              file=sys.stderr)
+    found = paths.catalog_guid(target, staged)
+    if found.guid != guid:
+        try:
+            staged.unlink()
+        except OSError:
+            pass
+        print("path would not round-trip through the catalog", file=sys.stderr)
+        return 1, "", False
+    try:
+        os.replace(staged, catalog)
+    except OSError:
+        try:
+            staged.unlink()
+        except OSError:
+            pass
+        print("could not write the project catalog", file=sys.stderr)
         return 1, "", False
     return 0, guid, True
 
