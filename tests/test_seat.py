@@ -188,7 +188,7 @@ def assert_no_unformatted_command(text: str) -> None:
     everything above will check it.
     """
     prose = re.sub(r"`[^`]*`", " ", text)
-    loose = re.findall(r"run operator-seat[^.]*", prose)
+    loose = re.findall(r"\brun\s+operator-seat\b[^.]*", prose, re.IGNORECASE)
     assert not loose, (
         f"the preamble tells a seat to run a command that is not in backticks, "
         f"so nothing runs it here: {loose}")
@@ -231,6 +231,12 @@ def test_the_extraction_hands_back_the_examples_that_are_wrong():
         assert_no_unformatted_command(
             "For a decision, run operator-seat remember --instance x "
             "--kind decision.")
+    with pytest.raises(AssertionError, match="not in backticks"):
+        assert_no_unformatted_command(
+            "Run operator-seat remember --instance x --kind decision.")
+    with pytest.raises(AssertionError, match="not in backticks"):
+        assert_no_unformatted_command(
+            "For a decision, run\noperator-seat remember --instance x.")
 
 
 def test_the_extraction_does_not_fire_on_a_preamble_that_is_fine():
@@ -243,9 +249,9 @@ def test_the_extraction_does_not_fire_on_a_preamble_that_is_fine():
     every span before asking whether it named the program made an ordinary
     possessive raise.
 
-    The last two go through the real `build_preamble`, because the five above
-    are strings this file made up and a control built only from those proves
-    the helper agrees with its author.
+    These are strings this file made up, which is why the next test builds the
+    same cases through the kernel: a control assembled only from its author's
+    own examples establishes that the helper agrees with its author.
     """
     assert advertised_commands("The operator-seat program records claims.") == []
     assert advertised_commands("The operator-seat recall command reads notes.") == []
@@ -273,14 +279,20 @@ def test_a_real_preamble_offers_exactly_its_two_commands(display_name,
     each failed a previous revision. They are built here by `build_preamble`
     rather than typed, because a control made only of this file's own strings
     establishes that the helper agrees with whoever wrote them.
+
+    The verbs are a set read through argparse, not `argv[1]` in a fixed order.
+    Indexing was the over-fit a reviewer caught: the test below accepts a
+    command in either order, so a control demanding one of them would have
+    failed a legitimate preamble that the thing it controls allows.
     """
     monkeypatch.setattr(op, "RESTART_DIR", tmp_path / "restart")
     text = op.build_preamble("anvil:anvil",
                              op.Instance(display_name=display_name),
                              assignment=assignment, has_journal=True)
     assert_no_unformatted_command(text)
-    assert [argv[1] for argv in advertised_commands(text)] == ["recall",
-                                                              "remember"]
+    advertised = advertised_commands(text)
+    assert len(advertised) == 2
+    assert {_verb(argv) for argv in advertised} == {"recall", "remember"}
 
 
 def test_every_command_the_preamble_advertises_actually_runs(project,
@@ -362,10 +374,16 @@ def _after_the_verb(argv: "list[str]") -> "list[str]":
     it *before* the verb, so the placement assertion this file exists for
     passed on a preamble that had abandoned the placement entirely.
 
-    The walk is checked against argparse rather than trusted: the two have to
-    name the same subcommand, or the invariant being asserted is this helper's
-    opinion.
+    The walk reads `--flag value` and `--flag=value`, which is every top-level
+    option this parser has, and `_assert_every_flag_takes_one_value` is what
+    keeps that true. Comparing the token it lands on against argparse is not
+    enough on its own: a reviewer showed that with a `store_true` option added,
+    `operator-seat --verbose remember --instance x --kind gotcha remember` walks
+    past the real verb onto the note, which is the same word, and agrees with
+    itself. The assumption is therefore asserted rather than cross-checked, and
+    the cross-check is kept as the cheaper second opinion.
     """
+    _assert_every_flag_takes_one_value()
     index = 1
     while index < len(argv) and argv[index].startswith("--"):
         index += 1 if "=" in argv[index] else 2
@@ -373,6 +391,27 @@ def _after_the_verb(argv: "list[str]") -> "list[str]":
         f"this walk and argparse disagree about where the subcommand is in "
         f"{argv}, so the placement check below would be asserting nothing")
     return argv[index + 1:]
+
+
+def _assert_every_flag_takes_one_value() -> None:
+    """Every top-level option of this parser consumes exactly one value.
+
+    The walk above counts tokens, so an option that consumes none -- a
+    `store_true`, say -- would make it step over the subcommand silently. That
+    is a defect in a test rather than in the program, and the kind that is only
+    found by the next reviewer, so the assumption fails here on the day it
+    stops holding rather than going quiet.
+
+    `_actions` is argparse's own list and is private; asking it is still better
+    than asserting nothing, or than parsing help text.
+    """
+    for action in cli.build_parser()._actions:
+        if not action.option_strings or "--help" in action.option_strings:
+            continue
+        assert action.nargs is None, (
+            f"{action.option_strings} no longer takes exactly one value, so "
+            f"the flag walk in `_after_the_verb` can step over a subcommand "
+            f"without noticing. Teach it about this option")
 
 
 def _parse(argv: "list[str]"):
