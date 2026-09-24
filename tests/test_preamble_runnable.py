@@ -58,7 +58,7 @@ def _commands(text: str) -> list[str]:
 
 def _run(template: str) -> int:
     argv = template.replace('\\"...\\"', "note").replace('"..."', "note")
-    return entry.main(shlex.split(argv, posix=False)[1:])
+    return entry.main(shlex.split(argv)[1:])
 
 
 def test_a_fresh_seat_is_told_how_to_remember(monkeypatch, tmp_path):
@@ -93,3 +93,21 @@ def test_the_supervisor_still_passes_what_the_clause_needs(
     composed the preamble itself would not notice."""
     text = _launch_preamble(monkeypatch, tmp_path, remembered="something")
     assert any(verb in c for c in _commands(text))
+
+
+@pytest.mark.parametrize("template", [
+    'operator recall --instance alpha',
+    'operator remember --instance alpha --kind gotcha "..."',
+    'operator remember --instance alpha --kind "gotcha" "..."',
+])
+def test_a_quoted_option_value_is_not_mangled_into_a_false_failure(
+        template, monkeypatch, tmp_path):
+    """Positive control on the tokenizer.
+
+    posix=False preserved the grouping quotes, so a clause writing --kind
+    "gotcha" reached argparse as the literal '"gotcha"' and was rejected. The
+    guard would have reported CLI incompatibility for a command the CLI
+    accepts, which is the failure mode that gets a guard muted.
+    """
+    _launch_preamble(monkeypatch, tmp_path)
+    assert _run(template) != 2, f"`{template}` is valid but the guard mangled it"
