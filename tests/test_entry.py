@@ -11,6 +11,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 import op
 from operator_cli import entry as cli
 
@@ -46,6 +48,13 @@ def _choice_for(argv):
         if item.argv == argv:
             return index
     raise AssertionError(f"no menu entry for {argv}")
+
+
+@pytest.fixture(autouse=True)
+def _launch_ready(monkeypatch):
+    import supervisor_control
+    monkeypatch.setattr(supervisor_control, "launch_status",
+                        lambda inst, pid: "ready")
 
 
 # ── help and the TTY gate ───────────────────────────────────────
@@ -360,6 +369,34 @@ def test_start_spawns_the_background_supervisor(monkeypatch, capsys):
     assert seen == {"name": "alpha", "args": ["--agent", "test:agent"],
                     "fresh": False}
     assert "started alpha (pid 4242)" in capsys.readouterr().out
+
+
+def test_start_does_not_claim_success_when_the_supervisor_died(monkeypatch,
+                                                               capsys):
+    import supervisor
+    import supervisor_control
+    monkeypatch.setattr(supervisor, "_spawn_background_loop",
+                        lambda *a, **k: 4242)
+    monkeypatch.setattr(supervisor_control, "launch_status",
+                        lambda inst, pid: "dead")
+    assert cli.main(["start", "--name", "alpha"]) == 1
+    captured = capsys.readouterr()
+    assert "exited before the supervisor published" in captured.err
+    assert "started alpha" not in captured.out
+
+
+def test_start_says_starting_when_the_pid_file_has_not_landed(monkeypatch,
+                                                              capsys):
+    import supervisor
+    import supervisor_control
+    monkeypatch.setattr(supervisor, "_spawn_background_loop",
+                        lambda *a, **k: 7)
+    monkeypatch.setattr(supervisor_control, "launch_status",
+                        lambda inst, pid: "starting")
+    assert cli.main(["start", "--name", "alpha"]) == 0
+    out = capsys.readouterr().out
+    assert "starting alpha (pid 7)" in out
+    assert "started alpha" not in out
 
 
 def test_start_accepts_a_positional_name(monkeypatch, capsys):

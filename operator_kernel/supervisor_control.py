@@ -500,6 +500,23 @@ def recover_loop(instance: Instance) -> int:
     return 0
 
 
+def launch_status(instance: Instance, pid: int, timeout: float = 0.4) -> str:
+    """ready, starting, or dead, after a short wait.
+
+    A background launch is allowed to be slow. This does not wait it out.
+    It refuses to say the seat started when the pid is already gone.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        if not _pid_alive(pid):
+            return "dead"
+        if _running_loop_pid(instance) is not None:
+            return "ready"
+        if time.monotonic() >= deadline:
+            return "starting"
+        time.sleep(0.05)
+
+
 def active_instances() -> list[Instance]:
     """Managed instances with a live session and/or a live loop supervisor.
 

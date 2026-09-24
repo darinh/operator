@@ -27,7 +27,7 @@ import pytest
 
 import op
 from conftest import FakeMux
-from supervisor_control import recover_loop, recoverable_instances
+from supervisor_control import launch_status, recover_loop, recoverable_instances
 
 
 @pytest.fixture
@@ -212,3 +212,24 @@ def test_a_missing_session_names_operator_start(home, capsys):
     err = capsys.readouterr().err
     assert "operator start --name ghost" in err
     assert "operator --loop" not in err
+
+
+def test_launch_status_is_dead_when_the_pid_is_gone(monkeypatch):
+    import supervisor_control as sc
+    monkeypatch.setattr(sc, "_pid_alive", lambda pid: False)
+    monkeypatch.setattr(sc, "_running_loop_pid", lambda inst: None)
+    assert launch_status(op.Instance("alpha"), 99, timeout=0) == "dead"
+
+
+def test_launch_status_is_ready_when_the_pid_file_is_there(monkeypatch):
+    import supervisor_control as sc
+    monkeypatch.setattr(sc, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(sc, "_running_loop_pid", lambda inst: 99)
+    assert launch_status(op.Instance("alpha"), 99, timeout=0) == "ready"
+
+
+def test_launch_status_is_starting_when_the_pid_file_has_not_landed(monkeypatch):
+    import supervisor_control as sc
+    monkeypatch.setattr(sc, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(sc, "_running_loop_pid", lambda inst: None)
+    assert launch_status(op.Instance("alpha"), 99, timeout=0) == "starting"
