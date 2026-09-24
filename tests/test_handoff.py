@@ -193,18 +193,39 @@ def test_an_option_shaped_value_is_refused_however_it_is_spelled(tmp_path,
         assert not op.Instance("alpha").restart_marker.exists(), tail
 
 
-def test_the_refusal_names_the_escape_it_expects(tmp_path, monkeypatch,
-                                                  capsys):
+def test_the_refusal_names_an_escape_that_survives_being_typed(tmp_path,
+                                                               monkeypatch,
+                                                               capsys):
     """A status that legitimately opens with a dash is a real thing to write.
-    Telling that user "needs a value" when they supplied one is a lie, so the
-    message names the joined form instead."""
+    Telling that user "needs a value" when they supplied one is a lie.
+
+    The suggestion is taken out of stderr and put through `shlex.split`, the
+    way a shell would tokenise it, rather than handed back as one argv element.
+    The first version of this test did the latter and passed while the printed
+    line was broken: unquoted, it lost everything after the first space and a
+    user copying it got `unexpected argument 'shipped'`.
+    """
+    import shlex
+
     work = _project(tmp_path, monkeypatch)
-    assert cli.main(["handoff", "--instance", "alpha",
-                     "--status", "- shipped the parser"]) == 2
+    status = "- shipped the parser"
+    assert cli.main(["handoff", "--instance", "alpha", "--status", status]) == 2
     err = capsys.readouterr().err
     assert "looks like an option" in err
-    assert "--status=- shipped the parser" in err
-    assert cli.main(["handoff", "--instance", "alpha",
-                     "--status=- shipped the parser", "--no-restart"]) == 0
+
+    suggested = err.split("literally, write ", 1)[1].strip()
+    argv = shlex.split(f"handoff --instance alpha {suggested} --no-restart")
+    assert argv[-2].startswith("--status="), argv
+    assert cli.main(argv) == 0, argv
     body = paths.project_handoff_file(work, "alpha").read_text(encoding="utf-8")
-    assert "- shipped the parser" in body
+    assert status in body
+
+
+def test_a_value_needing_no_quotes_is_suggested_without_them(tmp_path,
+                                                             monkeypatch,
+                                                             capsys):
+    """Quoting only when it is needed, so the common case stays readable."""
+    _project(tmp_path, monkeypatch)
+    assert cli.main(["handoff", "--instance", "alpha", "--status",
+                     "--no-restart"]) == 2
+    assert "write --status=--no-restart" in capsys.readouterr().err
