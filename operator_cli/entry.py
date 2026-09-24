@@ -48,32 +48,23 @@ VERBS: tuple[Verb, ...] = (
     Verb(("restart-loop",),
          "replace a supervisor without stopping the session",
          "Restart one seat's supervisor", ("name",),
-         extra_menu=(("Restart every running supervisor",
-                      ("restart-loop", "--all")),)),
+         extra_menu=(("Restart every running supervisor", ("restart-loop", "--all")),)),
     Verb(("recover",), "list seats that need recovering after a crash",
          "List seats that need recovering",
-         extra_menu=(("Recover every seat that needs it",
-                      ("recover", "--all")),)),
+         extra_menu=(("Recover every seat that needs it", ("recover", "--all")),)),
     Verb(("project", "register"), "register this directory as a project", "Register this directory as a project"),
     Verb(("project", "list"), "list registered projects", "List registered projects"),
     Verb(("project", "forget"), "remove a registration, keep the journal", "Forget a project registration", ("path",)),
     Verb(("ext", "list"), "list registered extensions", "List extensions"),
     Verb(("ext", "enable"), "enable an extension", "Enable an extension", ("extension",)),
     Verb(("ext", "disable"), "disable an extension", "Disable an extension", ("extension",)),
-    Verb(("remember",), "record one claim for this seat",
-         "Remember something about this seat",
-         ("instance", "kind", "text")),
+    Verb(("remember",), "record one claim for this seat", "Remember something about this seat", ("instance", "kind", "text")),
     Verb(("recall",), "show what earlier sessions recorded", "Recall what this seat recorded", ("instance",)),
-    Verb(("forget",), "stop recalling one journal entry",
-         "Forget one journal entry", ("instance", "id")),
-    Verb(("fleet", "run"), "poll the ledger and ask the extensions",
-         "Run the fleet host"),
-    Verb(("fleet", "proposals"), "show what is waiting for a human",
-         "Show fleet proposals"),
-    Verb(("trace",), "show recent ledger records, newest first",
-         "Show recent ledger records"),
-    Verb(("verify",), "check the ledger chain",
-         "Verify the ledger chain"),
+    Verb(("forget",), "stop recalling one journal entry", "Forget one journal entry", ("instance", "id")),
+    Verb(("fleet", "run"), "poll the ledger and ask the extensions", "Run the fleet host"),
+    Verb(("fleet", "proposals"), "show what is waiting for a human", "Show fleet proposals"),
+    Verb(("trace",), "show recent ledger records, newest first", "Show recent ledger records"),
+    Verb(("verify",), "check the ledger chain", "Verify the ledger chain"),
 )
 
 _PROMPT_LABEL = {
@@ -268,8 +259,17 @@ def _start(rest: list[str]) -> int:
         return 2
     from instance import Instance
     from supervisor import _spawn_background_loop
-    pid = _spawn_background_loop(Instance(name), copilot, is_fresh=fresh)
-    print(f"started {name} (pid {pid})")
+    from supervisor_control import launch_status
+    inst = Instance(name)
+    pid = _spawn_background_loop(inst, copilot, is_fresh=fresh)
+    status = launch_status(inst, pid)
+    if status == "dead":
+        print(f"seat {name} (pid {pid}) exited before the supervisor published", file=sys.stderr)
+        return 1
+    if status == "starting":
+        print(f"starting {name} (pid {pid}); supervisor not yet published")
+    else:
+        print(f"started {name} (pid {pid})")
     if attach:
         return _join([name])
     return 0
