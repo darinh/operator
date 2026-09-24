@@ -126,40 +126,50 @@ def test_a_seat_named_twice_takes_the_one_nearest_the_text(project):
 
 # ── the preamble and the parser, bound together ─────────────────
 
+#: An advertised command example: the CLI's name, *however it is spelled*, with
+#: one of its verbs after it. A misspelling matches deliberately, so that
+#: `operator-seat-bogus recall` is extracted and rejected by name below rather
+#: than never being seen -- the failure mode of every earlier version of this
+#: scan was skipping, not misjudging.
+#:
+#: A verb is required, so prose naming the program, and a seat id with the name
+#: inside it, are not miscounted as commands nobody ran. That was the cost of
+#: counting the bare substring: three legitimate preambles failed.
+ADVERTISED = re.compile(r"operator-seat\S*\s+(?:remember|recall|forget)\b")
+
+
 def advertised_commands(text: str) -> "list[list[str]]":
-    """Every `operator-seat` command line the preamble offers, tokenised.
+    """Every `operator-seat` command example the preamble offers, tokenised.
 
     A helper rather than three lines inline, so the extraction itself can be
-    put under test below. It failed twice in review by *skipping* rather than
-    by reporting: `str.split` could not carry a quoted operand, and matching
-    `"operator-seat "` against an unstripped segment silently dropped a command
-    indented by one space -- which is a way for a broken advertised form to sit
-    in the preamble with this file green.
+    put under test below. It failed three times in review, each time by
+    *skipping* rather than by misjudging: `str.split` could not carry a quoted
+    operand; matching an unstripped segment dropped a command indented by one
+    space; and matching a prefix accepted a command whose executable was not
+    this one.
 
-    So the count is checked rather than the content: every occurrence of the
-    name in the preamble has to be a command this returns. A mention outside
-    backticks, or one this filter does not recognise, fails here instead of
-    going unexamined.
+    So it counts rather than filters. Every command-shaped mention anywhere in
+    the preamble has to come back from here, which is what makes a mention
+    outside backticks a failure instead of a blind spot.
     """
     segments = [segment.strip() for segment in re.findall(r"`([^`]*)`", text)]
     commands = [shlex.split(segment) for segment in segments
-                if segment.startswith("operator-seat")]
-    assert len(commands) == text.count("operator-seat"), (
-        f"the preamble names operator-seat {text.count('operator-seat')} "
-        f"time(s) and this found {len(commands)} command(s). One of them is "
-        f"outside backticks or is not shaped like the others, so nothing below "
-        f"runs it. Segments seen: {segments}")
+                if ADVERTISED.match(segment)]
+    assert len(commands) == len(ADVERTISED.findall(text)), (
+        f"the preamble advertises {len(ADVERTISED.findall(text))} command(s) "
+        f"and this could reach {len(commands)}: one of them is outside "
+        f"backticks, so nothing below runs it. Segments seen: {segments}")
     return commands
 
 
 def test_the_extraction_cannot_quietly_skip_an_advertised_command():
-    """The control for the helper above, from the counterexample that broke it.
+    """The control for the helper above, built from what broke it in review.
 
     One leading space inside the backticks was enough: the command was dropped
     before tokenising, the surviving example supplied the same verb, and the
     test below stayed green while the preamble advertised a command that exits
-    2. Both halves are pinned -- the padded form is found, and a mention the
-    scan cannot reach is reported rather than passed over.
+    2. A prefix match was enough the next time, because `cli.main` is handed
+    `argv[1:]` and never sees the name it was called by.
     """
     padded = 'write it with ` operator-seat remember --instance x --kind gotcha "n"`.'
     assert advertised_commands(padded) == [
@@ -167,8 +177,29 @@ def test_the_extraction_cannot_quietly_skip_an_advertised_command():
 
     outside = ('run operator-seat remember yourself, or '
                '`operator-seat recall --instance x`.')
-    with pytest.raises(AssertionError, match="outside backticks"):
+    with pytest.raises(AssertionError,
+                       match=r"advertises 2 command\(s\) and this could reach 1"):
         advertised_commands(outside)
+
+    # Handed back rather than dropped, so the caller rejects it by name.
+    assert advertised_commands("`operator-seat-bogus recall --instance x`") == [
+        ["operator-seat-bogus", "recall", "--instance", "x"]]
+
+
+def test_the_extraction_does_not_fire_on_a_preamble_that_is_fine():
+    """The other half, because an over-strict guard is one somebody weakens.
+
+    Counting the bare name failed all three of these, none of which is a
+    command nobody ran. A test that cries wolf on a legitimate edit teaches the
+    next agent to relax it rather than to fix the preamble.
+    """
+    assert advertised_commands("The operator-seat program records claims.") == []
+    assert advertised_commands("`operator-seat recall --instance x`, a "
+                               "program named operator-seat.") == [
+        ["operator-seat", "recall", "--instance", "x"]]
+    assert advertised_commands("`operator-seat recall --instance "
+                               "operator-seat-prism`") == [
+        ["operator-seat", "recall", "--instance", "operator-seat-prism"]]
 
 
 def test_every_command_the_preamble_advertises_actually_runs(project,
@@ -186,9 +217,12 @@ def test_every_command_the_preamble_advertises_actually_runs(project,
     preamble that stopped putting it after the verb would still have parsed and
     this test would have quietly stopped covering the defect; and the first
     version supplied the `remember` text operand itself, so a preamble that
-    dropped the note would have been repaired here and passed. Nothing is added
-    to the argv now, the flag's placement is asserted outright, and the write
-    has to land.
+    dropped the note would have been repaired here and passed.
+
+    The recall is run a second time at the end rather than only in argv order.
+    In argv order it runs before the write it is supposed to read, so checking
+    its exit code was all the first version could do -- and an advertised
+    `--per-kind 0` returned 0 while showing the seat nothing.
     """
     monkeypatch.setattr(op, "RESTART_DIR", tmp_path / "restart")
     inst = op.Instance(display_name="prism")
@@ -203,6 +237,9 @@ def test_every_command_the_preamble_advertises_actually_runs(project,
         f"asserting nothing; saw: {advertised}")
 
     for argv in advertised:
+        assert argv[0] == "operator-seat", (
+            f"the preamble advertises {argv[0]!r}, which is not this program. "
+            f"`cli.main` is handed argv[1:] and would run the real one anyway")
         assert "--instance" in argv[2:], (
             f"the preamble no longer puts --instance after the subcommand, "
             f"which is the placement this whole file exists for: {argv}")
@@ -212,4 +249,10 @@ def test_every_command_the_preamble_advertises_actually_runs(project,
     assert [e["text"] for e in journal.recall(project, inst.id)] == ["..."], (
         "the advertised remember parsed but wrote nothing, and a seat cannot "
         "tell that outcome from never having been told to write at all")
+
+    recall = next(argv for argv in advertised if argv[1] == "recall")
+    assert cli.main(recall[1:]) == 0
+    assert "..." in capsys.readouterr().out, (
+        f"{recall} exited 0 and showed the seat nothing back, which is the "
+        f"outcome it cannot distinguish from an empty journal")
 
