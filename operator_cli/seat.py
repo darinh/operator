@@ -106,28 +106,55 @@ def _forget(args) -> int:
     return 1
 
 
+def _seat_flags(parser: argparse.ArgumentParser, *, on_subcommand: bool) -> None:
+    """`--instance` and `--session`, on both sides of the subcommand.
+
+    The launch preamble tells every seat to write with `operator-seat remember
+    --instance <id> --kind gotcha "..."`, which is the order a reader expects
+    and the order argparse rejects when the flag is declared only on the
+    top-level parser: the seat that follows its own instructions gets
+    "unrecognized arguments: --instance" and records nothing. Declaring the
+    flags on each subparser as well makes the advertised form the working
+    form.
+
+    The subparser copies default to `SUPPRESS` rather than to a value, because
+    `_SubParsersAction` parses into a fresh namespace and copies every key it
+    finds back over the one already parsed -- a real default there would
+    overwrite the value a caller passed *before* the subcommand with `None`.
+    """
+    suppress = {"default": argparse.SUPPRESS} if on_subcommand else {}
+    parser.add_argument("--instance",
+                        help="the seat (default: $" + INSTANCE_ENV + ")",
+                        **({"default": None} | suppress))
+    parser.add_argument("--session", type=int,
+                        help="the session number writing this",
+                        **({"default": 0} | suppress))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="operator-seat",
         description="What this seat remembers about itself, in this project.")
-    parser.add_argument("--instance", help="the seat (default: $"
-                                           + INSTANCE_ENV + ")")
-    parser.add_argument("--session", type=int, default=0,
-                        help="the session number writing this")
+    _seat_flags(parser, on_subcommand=False)
+    common = argparse.ArgumentParser(add_help=False)
+    _seat_flags(common, on_subcommand=True)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    remember = sub.add_parser("remember", help="record one claim, durably, now")
+    remember = sub.add_parser("remember", parents=[common],
+                              help="record one claim, durably, now")
     remember.add_argument("--kind", required=True,
                           choices=("decision", "gotcha", "disposition",
                                    "attempt"))
     remember.add_argument("text", nargs="+")
     remember.set_defaults(func=_remember)
 
-    recall = sub.add_parser("recall", help="what earlier sessions recorded")
+    recall = sub.add_parser("recall", parents=[common],
+                            help="what earlier sessions recorded")
     recall.add_argument("--per-kind", type=int, default=5)
     recall.set_defaults(func=_recall)
 
-    forget = sub.add_parser("forget", help="stop recalling one entry")
+    forget = sub.add_parser("forget", parents=[common],
+                            help="stop recalling one entry")
     forget.add_argument("id")
     forget.set_defaults(func=_forget)
     return parser
