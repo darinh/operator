@@ -55,15 +55,22 @@ def _write_rows(catalog: Path, rows: "list[tuple[str, str]]") -> bool:
         return False
 
 
-def _resolve(given: "str | None") -> "Path | None":
+def _resolve(given: "str | None", *, must_exist: bool = True) -> "Path | None":
     import paths
 
     target = Path(given) if given else Path.cwd()
     try:
-        if not target.is_dir():
-            print(f"not a directory: {target}", file=sys.stderr)
-            return None
-        return paths.primary_repo_root(target).resolve()
+        exists = target.is_dir()
+    except OSError as exc:
+        print(f"could not resolve {target}: {exc}", file=sys.stderr)
+        return None
+    if must_exist and not exists:
+        print(f"not a directory: {target}", file=sys.stderr)
+        return None
+    try:
+        if exists:
+            return paths.primary_repo_root(target).resolve()
+        return target.resolve()
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"could not resolve {target}: {exc}", file=sys.stderr)
         return None
@@ -72,52 +79,63 @@ def _resolve(given: "str | None") -> "Path | None":
 def _same_path(left: Path, right: str) -> bool:
     from config import IS_WINDOWS
 
+    candidates = [right]
     try:
-        resolved = str(Path(right).resolve())
+        candidates.append(str(Path(right).resolve()))
     except (OSError, ValueError, RuntimeError):
-        return False
-    a, b = str(left), resolved
-    if IS_WINDOWS:
-        return a.lower() == b.lower()
-    return a == b
+        pass
+    a = str(left)
+    for b in candidates:
+        if IS_WINDOWS:
+            if a.lower() == b.lower():
+                return True
+        elif a == b:
+            return True
+    return False
 
 
-def _register(args) -> int:
+def ensure_registered(path: "str | None" = None) -> "tuple[int, str, bool]":
+    """Register `path` (default cwd). Returns (exit, guid, created)."""
     _bootstrap()
     import paths
 
-    target = _resolve(args.path)
+    target = _resolve(path)
     if target is None:
-        return 2
+        return 2, "", False
     found = paths.catalog_guid(target)
     if found.undecided:
         print("could not read the project catalog", file=sys.stderr)
-        return 1
+        return 1, "", False
     if found.guid:
-        print(found.guid)
-        return 0
+        return 0, found.guid, False
     guid = str(uuid.uuid4())
     catalog = paths.project_catalog_path()
     rows = _rows(catalog)
     if rows is None:
         print("could not read the project catalog", file=sys.stderr)
-        return 1
+        return 1, "", False
     rows.append((str(target), guid))
     if not _write_rows(catalog, rows):
         print("could not write the project catalog", file=sys.stderr)
-        return 1
+        return 1, "", False
     try:
         paths.project_dir(guid).mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         print(f"could not create the project directory: {exc}", file=sys.stderr)
-        return 1
+        return 1, "", False
     check = paths.catalog_guid(target)
     if check.guid != guid:
         print("wrote a catalog row the existing reader did not accept",
               file=sys.stderr)
-        return 1
-    print(guid)
-    return 0
+        return 1, "", False
+    return 0, guid, True
+
+
+def _register(args) -> int:
+    rc, guid, _created = ensure_registered(args.path)
+    if rc == 0:
+        print(guid)
+    return rc
 
 
 def _list(_args) -> int:
@@ -142,7 +160,7 @@ def _forget(args) -> int:
     _bootstrap()
     import paths
 
-    target = _resolve(args.path)
+    target = _resolve(args.path, must_exist=False)
     if target is None:
         return 2
     catalog = paths.project_catalog_path()

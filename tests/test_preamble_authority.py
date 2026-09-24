@@ -305,9 +305,9 @@ def test_a_seat_with_no_journal_is_still_told_how_to_start_one(seat):
     old test asserted exactly that, which made it a test pinning the defect.
     """
     text = _preamble(seat)
-    assert "operator-seat remember" in text, (
+    assert "operator remember" in text, (
         "a seat that cannot learn the write command can never start a journal")
-    assert "operator-seat recall" not in text, (
+    assert "operator recall" not in text, (
         "there is nothing to recall, and an unconditional line is paid for on "
         "every token of every session")
 
@@ -316,8 +316,8 @@ def test_the_journal_clause_names_the_command_and_the_seat_id(seat):
     """The id, not the display name: `safe_instance_id` maps `a.b` elsewhere,
     and the supervisor probed the id."""
     text = _preamble(seat, has_journal=True)
-    assert f"operator-seat recall --instance {seat.id}" in text
-    assert f"operator-seat remember --instance {seat.id}" in text
+    assert f"operator recall --instance {seat.id}" in text
+    assert f"operator remember --instance {seat.id}" in text
 
 
 def test_the_advertised_seat_is_the_one_the_supervisor_probed(tmp_path,

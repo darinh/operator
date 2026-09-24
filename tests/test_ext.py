@@ -81,6 +81,19 @@ def test_disable_preserves_settings(monkeypatch, capsys):
     assert data["seat-watch"]["failures"] == 3
 
 
+def test_disable_an_uninstalled_name_still_in_config(monkeypatch, capsys):
+    monkeypatch.setattr(extensions, "discover", _three)
+    path = activation.config_path()
+    path.write_text(json.dumps({
+        "gone-ext": {"enabled": True, "mystery": "keep-me"},
+    }), encoding="utf-8")
+    assert cli.main(["ext", "disable", "gone-ext"]) == 0
+    capsys.readouterr()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["gone-ext"]["enabled"] is False
+    assert data["gone-ext"]["mystery"] == "keep-me"
+
+
 def test_enable_of_an_unknown_name_fails(monkeypatch, capsys):
     monkeypatch.setattr(extensions, "discover", _three)
     assert cli.main(["ext", "enable", "no-such"]) == 1

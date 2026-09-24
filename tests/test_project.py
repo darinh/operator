@@ -112,6 +112,26 @@ def test_an_empty_catalog_lists_nothing(capsys):
     assert "No registered projects." in capsys.readouterr().out
 
 
+def test_forget_removes_a_row_whose_directory_is_gone(tmp_path, monkeypatch,
+                                                      capsys):
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    assert cli.main(["project", "register"]) == 0
+    guid = _guid(capsys)
+    monkeypatch.chdir(tmp_path)
+    cwd.rmdir()
+    assert not cwd.exists()
+    assert cli.main(["project", "forget", str(cwd)]) == 0
+    out = capsys.readouterr().out
+    assert guid in out
+    catalog = paths.project_catalog_path()
+    with open(catalog, "r", encoding="utf-8", errors="replace",
+              newline="") as fh:
+        rows = [row for row in paths.catalog_rows(fh) if row]
+    assert rows == []
+
+
 def test_project_without_a_subcommand_is_usage(capsys):
     assert cli.main(["project"]) == 2
     err = capsys.readouterr().err.lower()

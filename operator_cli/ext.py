@@ -124,9 +124,11 @@ def _enable(args) -> int:
 
 def _disable(args) -> int:
     _bootstrap()
-    if not _require_name(args.name):
-        return 1
     config = _load()
+    if args.name not in config and args.name not in _discovered():
+        print(f"not a registered extension: {args.name}", file=sys.stderr)
+        print("see: operator ext list", file=sys.stderr)
+        return 1
     entry = _entry(config, args.name)
     entry["enabled"] = False
     config[args.name] = entry
