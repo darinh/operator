@@ -126,6 +126,51 @@ def test_a_seat_named_twice_takes_the_one_nearest_the_text(project):
 
 # ── the preamble and the parser, bound together ─────────────────
 
+def advertised_commands(text: str) -> "list[list[str]]":
+    """Every `operator-seat` command line the preamble offers, tokenised.
+
+    A helper rather than three lines inline, so the extraction itself can be
+    put under test below. It failed twice in review by *skipping* rather than
+    by reporting: `str.split` could not carry a quoted operand, and matching
+    `"operator-seat "` against an unstripped segment silently dropped a command
+    indented by one space -- which is a way for a broken advertised form to sit
+    in the preamble with this file green.
+
+    So the count is checked rather than the content: every occurrence of the
+    name in the preamble has to be a command this returns. A mention outside
+    backticks, or one this filter does not recognise, fails here instead of
+    going unexamined.
+    """
+    segments = [segment.strip() for segment in re.findall(r"`([^`]*)`", text)]
+    commands = [shlex.split(segment) for segment in segments
+                if segment.startswith("operator-seat")]
+    assert len(commands) == text.count("operator-seat"), (
+        f"the preamble names operator-seat {text.count('operator-seat')} "
+        f"time(s) and this found {len(commands)} command(s). One of them is "
+        f"outside backticks or is not shaped like the others, so nothing below "
+        f"runs it. Segments seen: {segments}")
+    return commands
+
+
+def test_the_extraction_cannot_quietly_skip_an_advertised_command():
+    """The control for the helper above, from the counterexample that broke it.
+
+    One leading space inside the backticks was enough: the command was dropped
+    before tokenising, the surviving example supplied the same verb, and the
+    test below stayed green while the preamble advertised a command that exits
+    2. Both halves are pinned -- the padded form is found, and a mention the
+    scan cannot reach is reported rather than passed over.
+    """
+    padded = 'write it with ` operator-seat remember --instance x --kind gotcha "n"`.'
+    assert advertised_commands(padded) == [
+        ["operator-seat", "remember", "--instance", "x", "--kind", "gotcha", "n"]]
+
+    outside = ('run operator-seat remember yourself, or '
+               '`operator-seat recall --instance x`.')
+    with pytest.raises(AssertionError, match="outside backticks"):
+        advertised_commands(outside)
+
+
 def test_every_command_the_preamble_advertises_actually_runs(project,
                                                              tmp_path,
                                                              monkeypatch,
@@ -149,9 +194,10 @@ def test_every_command_the_preamble_advertises_actually_runs(project,
     inst = op.Instance(display_name="prism")
     text = op.build_preamble("anvil:anvil", inst, has_journal=True)
 
-    advertised = [shlex.split(segment)
-                  for segment in re.findall(r"`([^`]*)`", text)
-                  if segment.startswith("operator-seat ")]
+    advertised = advertised_commands(text)
+    assert all(len(argv) > 1 for argv in advertised), (
+        f"the preamble advertises a bare command with no subcommand: "
+        f"{advertised}")
     assert {argv[1] for argv in advertised} == {"remember", "recall"}, (
         "the preamble stopped naming both journal commands, so this test is "
         f"asserting nothing; saw: {advertised}")
