@@ -59,14 +59,15 @@ class CatalogLookup:
                 and other.undecided == self.undecided)
 
 
-def catalog_paths_match(cwd: Path, stored: str) -> "bool | None":
-    """True if ``stored`` names ``cwd``. None if the comparison could not be settled.
+def catalog_paths_match(want: Path, stored: str) -> "bool | None":
+    """True if ``stored`` names ``want``. None if the comparison could not be settled.
 
-    Resolved strings first, then ``os.path.samefile`` when both exist, so a
-    drive-letter path and a UNC path for the same directory are one project.
+    ``want`` is the canonical lookup path, already resolved, so a catalog
+    walk does not spawn git once per row. Resolved strings first, then
+    ``os.path.samefile`` when both exist. A probe that errors is not a
+    no-match.
     """
     try:
-        want = primary_repo_root(cwd).resolve()
         have = Path(stored).resolve()
     except (OSError, ValueError, RuntimeError):
         return None
@@ -76,10 +77,17 @@ def catalog_paths_match(cwd: Path, stored: str) -> "bool | None":
     if want_s == have_s:
         return True
     try:
-        if want.exists() and have.exists() and os.path.samefile(want, have):
+        want_here = want.exists()
+        have_here = have.exists()
+    except OSError:
+        return None
+    if not want_here or not have_here:
+        return False
+    try:
+        if os.path.samefile(want, have):
             return True
     except OSError:
-        pass
+        return None
     return False
 
 
@@ -108,6 +116,10 @@ def catalog_guid(cwd: Path, catalog: "Path | None" = None) -> CatalogLookup:
     catalog = project_catalog_path() if catalog is None else catalog
     if file_present(catalog) is False:
         return CatalogLookup(None)
+    try:
+        want = primary_repo_root(cwd).resolve()
+    except (OSError, ValueError, RuntimeError):
+        return CatalogLookup(None, undecided=True)
     # "No row matched" is only an answer if every row was actually compared.
     undecided = False
     try:
@@ -132,7 +144,7 @@ def catalog_guid(cwd: Path, catalog: "Path | None" = None) -> CatalogLookup:
                 # project's handoff.
                 if not path or not guid_is_usable(guid):
                     continue
-                match = catalog_paths_match(cwd, path)
+                match = catalog_paths_match(want, path)
                 if match is None:
                     undecided = True
                     continue
