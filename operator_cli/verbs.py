@@ -4,11 +4,9 @@ Split out of `entry.py`, which was at exactly 500 of its 500 allowed code
 lines when a new verb arrived. The ceiling in `test_kernel_boundary.py` is the
 repository asking for a seam rather than a bigger number, and the table is the
 part of that file which was never routing: `entry.py` decides what to run,
-this decides what exists.
-
-One table drives three surfaces -- the help text, the numbered menu, and the
-argv the menu builds -- so a verb that is typeable but unreachable from the
-menu, or listed but unrunnable, is not expressible here.
+this decides what exists. One table drives three surfaces -- the help text,
+the numbered menu, and the argv the menu builds -- so a verb that is typeable
+but unreachable from the menu, or listed but unrunnable, is not expressible.
 """
 from __future__ import annotations
 

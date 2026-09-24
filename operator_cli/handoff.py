@@ -1,12 +1,10 @@
 """`operator handoff` -- end this session and leave the next one a record.
 
-The launch preamble has told every seat to run this since the preamble was
-written, and until now it named a bare `handoff`: a console script of
-`copilot-tools`, the predecessor this project is designed not to assume is
-installed. The kernel's half was always here. `exits.handoff_state` reads the
-file, `supervisor.py` polls the marker, and nothing in this distribution wrote
-either one. `project.py`, `ext.py` and `seat.py` are the same shape as this:
-parse the flags, call the kernel, print what happened.
+The preamble has advertised this to every seat since it was written, naming a
+bare `handoff` that belongs to `copilot-tools` rather than here. The kernel's
+half was always present: `exits.handoff_state` reads the file, `supervisor.py`
+polls the marker, and nothing in this distribution wrote either. Same shape as
+`project.py` and `ext.py`: parse the flags, call in, report what happened.
 """
 from __future__ import annotations
 
@@ -29,10 +27,9 @@ USAGE = ("Usage: operator handoff --instance NAME --status TEXT "
 def parse(options: list[str]) -> "dict[str, str] | None":
     """Flag values, or None after saying which argument was the problem.
 
-    Nothing is skipped in silence, and nothing option-shaped is taken as text.
-    A membership test against the known flags was not enough: `--norestart`
-    and `--no-restart=true` are not members, and both ended the session they
-    were typed to preserve. Anything starting with `-` is refused as a value.
+    Nothing is skipped in silence and nothing option-shaped is taken as text.
+    A membership test was not enough: `--norestart` and `--no-restart=true`
+    are not members and both ended the session they were typed to preserve.
     Use `--context=--no-restart` to mean such a string literally.
     """
     values: dict[str, str] = {}
@@ -47,7 +44,13 @@ def parse(options: list[str]) -> "dict[str, str] | None":
                 continue
             following = options[i + 1] if i + 1 < len(options) else ""
             if i + 1 >= len(options) or following.startswith("-"):
-                print(f"operator handoff {name} needs a value", file=sys.stderr)
+                # A status may legitimately open with a dash, and telling that
+                # user "needs a value" when they supplied one is a lie.
+                hint = (f", and {following!r} looks like an option. To mean it "
+                        f"literally, write {name}={following}"
+                        if following else "")
+                print(f"operator handoff {name} needs a value{hint}",
+                      file=sys.stderr)
                 return None
             values[name] = following
             i += 2
