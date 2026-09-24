@@ -55,7 +55,7 @@ def _choice_for(argv):
 def _launch_ready(monkeypatch):
     import supervisor_control
     monkeypatch.setattr(supervisor_control, "launch_status",
-                        lambda inst, pid: "ready")
+                        lambda inst, pid, **k: ("ready", pid))
 
 
 # ── help and the TTY gate ───────────────────────────────────────
@@ -399,25 +399,24 @@ def test_start_does_not_claim_success_when_the_supervisor_died(monkeypatch,
     monkeypatch.setattr(supervisor, "_spawn_background_loop",
                         lambda *a, **k: 4242)
     monkeypatch.setattr(supervisor_control, "launch_status",
-                        lambda inst, pid: "dead")
+                        lambda inst, pid, **k: ("dead", pid))
     assert cli.main(["start", "--name", "alpha"]) == 1
     captured = capsys.readouterr()
     assert "exited before the supervisor published" in captured.err
     assert "started alpha" not in captured.out
 
 
-def test_start_says_starting_when_the_pid_file_has_not_landed(monkeypatch,
-                                                              capsys):
+def test_start_does_not_treat_unknown_as_success(monkeypatch, capsys):
     import supervisor
     import supervisor_control
     monkeypatch.setattr(supervisor, "_spawn_background_loop",
                         lambda *a, **k: 7)
     monkeypatch.setattr(supervisor_control, "launch_status",
-                        lambda inst, pid: "starting")
-    assert cli.main(["start", "--name", "alpha"]) == 0
-    out = capsys.readouterr().out
-    assert "starting alpha (pid 7)" in out
-    assert "started alpha" not in out
+                        lambda inst, pid, **k: ("unknown", pid))
+    assert cli.main(["start", "--name", "alpha"]) == 1
+    captured = capsys.readouterr()
+    assert "could not confirm supervisor for alpha" in captured.err
+    assert "started alpha" not in captured.out
 
 
 def test_start_accepts_a_positional_name(monkeypatch, capsys):

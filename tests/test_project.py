@@ -1,6 +1,11 @@
 """`operator project` writes the catalog the existing reader already understands."""
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import paths
 from operator_cli import entry as cli
 from operator_memory import journal
@@ -130,6 +135,94 @@ def test_forget_removes_a_row_whose_directory_is_gone(tmp_path, monkeypatch,
               newline="") as fh:
         rows = [row for row in paths.catalog_rows(fh) if row]
     assert rows == []
+
+
+def test_forget_rejects_an_empty_path(tmp_path, monkeypatch, capsys):
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    assert cli.main(["project", "register"]) == 0
+    capsys.readouterr()
+    assert cli.main(["project", "forget", ""]) == 2
+    err = capsys.readouterr().err
+    assert "directory path is needed" in err
+    assert paths.catalog_guid(cwd).guid
+
+
+def test_register_reuses_guid_when_samefile_says_so(tmp_path, monkeypatch,
+                                                    capsys):
+    first = tmp_path / "one"
+    alias = tmp_path / "two"
+    first.mkdir()
+    alias.mkdir()
+    monkeypatch.chdir(first)
+    assert cli.main(["project", "register"]) == 0
+    guid = _guid(capsys)
+
+    def fake_samefile(left, right):
+        try:
+            pair = {str(Path(left).resolve()), str(Path(right).resolve())}
+        except (OSError, ValueError):
+            return False
+        return {str(first.resolve()), str(alias.resolve())} <= pair or (
+            Path(left).resolve() == Path(right).resolve())
+
+    monkeypatch.setattr(os.path, "samefile", fake_samefile)
+    assert cli.main(["project", "register", str(alias)]) == 0
+    assert _guid(capsys) == guid
+    catalog = paths.project_catalog_path()
+    with open(catalog, "r", encoding="utf-8", errors="replace",
+              newline="") as fh:
+        rows = [row for row in paths.catalog_rows(fh) if row]
+    assert len(rows) == 1
+
+
+def test_two_processes_registering_keep_both_rows(tmp_path, monkeypatch):
+    import time
+    home = tmp_path / "home"
+    (home / "projects").mkdir(parents=True)
+    monkeypatch.setenv("COPILOT_OPERATOR_HOME", str(home))
+    a = tmp_path / "a"
+    b = tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    gate = tmp_path / "go"
+    root = Path(__file__).resolve().parents[1]
+    env = os.environ.copy()
+    env["COPILOT_OPERATOR_HOME"] = str(home)
+    env["OPERATOR_CATALOG_PAUSE"] = "0.4"
+    env["PYTHONPATH"] = os.pathsep.join([
+        str(root), str(root / "operator_kernel"), str(root / "operator_fleet"),
+        env.get("PYTHONPATH", ""),
+    ])
+    child = (
+        "import sys, time\n"
+        "from pathlib import Path\n"
+        "gate = Path(sys.argv[2])\n"
+        "while not gate.exists():\n"
+        "    time.sleep(0.01)\n"
+        "from operator_cli.project import ensure_registered\n"
+        "rc, guid, created = ensure_registered(sys.argv[1])\n"
+        "print(guid)\n"
+        "raise SystemExit(rc)\n"
+    )
+    procs = [
+        subprocess.Popen(
+            [sys.executable, "-c", child, str(path), str(gate)],
+            env=env, cwd=str(tmp_path),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        for path in (a, b)
+    ]
+    time.sleep(0.3)
+    gate.write_text("go", encoding="utf-8")
+    results = [p.communicate(timeout=30) for p in procs]
+    codes = [p.returncode for p in procs]
+    assert codes == [0, 0], results
+    guids = [out.strip() for out, _err in results]
+    assert len(set(guids)) == 2
+    catalog = home / "projects" / "catalog.csv"
+    text = catalog.read_text(encoding="utf-8")
+    assert guids[0] in text and guids[1] in text
 
 
 def test_project_without_a_subcommand_is_usage(capsys):

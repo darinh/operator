@@ -18,13 +18,25 @@ def _config():
     return activation
 
 
+class ConfigError(Exception):
+    """The activation file exists but cannot be used as config."""
+
+
 def _load() -> dict:
     path = _config().config_path()
     try:
-        parsed = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
         return {}
-    return parsed if isinstance(parsed, dict) else {}
+    except OSError as exc:
+        raise ConfigError(f"could not read {path}: {exc}") from exc
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        raise ConfigError(f"malformed JSON in {path}") from None
+    if not isinstance(parsed, dict):
+        raise ConfigError(f"malformed JSON in {path}")
+    return parsed
 
 
 def _save(data: dict) -> bool:
@@ -87,7 +99,11 @@ def _list(_args) -> int:
     if not names:
         print("No extensions registered.")
         return 0
-    config = _load()
+    try:
+        config = _load()
+    except ConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     for name in names:
         entry = config.get(name)
         on = isinstance(entry, dict) and entry.get("enabled") is True
@@ -110,7 +126,11 @@ def _enable(args) -> int:
     settings = _parse_set(args.set or [])
     if settings is None:
         return 2
-    config = _load()
+    try:
+        config = _load()
+    except ConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     entry = _entry(config, args.name)
     entry["enabled"] = True
     entry.update(settings)
@@ -124,7 +144,11 @@ def _enable(args) -> int:
 
 def _disable(args) -> int:
     _bootstrap()
-    config = _load()
+    try:
+        config = _load()
+    except ConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     if args.name not in config and args.name not in _discovered():
         print(f"not a registered extension: {args.name}", file=sys.stderr)
         print("see: operator ext list", file=sys.stderr)

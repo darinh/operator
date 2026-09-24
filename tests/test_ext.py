@@ -94,6 +94,18 @@ def test_disable_an_uninstalled_name_still_in_config(monkeypatch, capsys):
     assert data["gone-ext"]["mystery"] == "keep-me"
 
 
+def test_enable_refuses_malformed_json_and_keeps_the_file(monkeypatch, capsys):
+    monkeypatch.setattr(extensions, "discover", _three)
+    path = activation.config_path()
+    path.write_text("{not json", encoding="utf-8")
+    before = path.read_text(encoding="utf-8")
+    assert cli.main(["ext", "enable", "seat-watch"]) == 1
+    err = capsys.readouterr().err
+    assert "malformed JSON" in err
+    assert str(path) in err
+    assert path.read_text(encoding="utf-8") == before
+
+
 def test_enable_of_an_unknown_name_fails(monkeypatch, capsys):
     monkeypatch.setattr(extensions, "discover", _three)
     assert cli.main(["ext", "enable", "no-such"]) == 1

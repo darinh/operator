@@ -220,23 +220,23 @@ def test_launch_status_is_dead_when_the_pid_is_gone(monkeypatch):
     monkeypatch.setattr(sc, "_pid_alive", lambda pid: False)
     monkeypatch.setattr(sc, "_running_loop_pid", lambda inst: None)
     monkeypatch.setattr(sc, "_supervisor_present", lambda inst: False)
-    assert launch_status(op.Instance("alpha"), 99, timeout=0) == "dead"
+    assert launch_status(op.Instance("alpha"), 99, timeout=0) == ("dead", 99)
 
 
 def test_launch_status_is_ready_when_the_pid_file_is_there(monkeypatch):
     import supervisor_control as sc
     monkeypatch.setattr(sc, "_pid_alive", lambda pid: False)
-    monkeypatch.setattr(sc, "_running_loop_pid", lambda inst: 99)
+    monkeypatch.setattr(sc, "_running_loop_pid", lambda inst: 77)
     monkeypatch.setattr(sc, "_supervisor_present", lambda inst: True)
-    assert launch_status(op.Instance("alpha"), 99, timeout=0) == "ready"
+    assert launch_status(op.Instance("alpha"), 99, timeout=0) == ("ready", 77)
 
 
-def test_launch_status_is_starting_when_the_pid_file_has_not_landed(monkeypatch):
+def test_launch_status_is_unknown_when_the_pid_file_has_not_landed(monkeypatch):
     import supervisor_control as sc
     monkeypatch.setattr(sc, "_pid_alive", lambda pid: True)
     monkeypatch.setattr(sc, "_running_loop_pid", lambda inst: None)
     monkeypatch.setattr(sc, "_supervisor_present", lambda inst: False)
-    assert launch_status(op.Instance("alpha"), 99, timeout=0) == "starting"
+    assert launch_status(op.Instance("alpha"), 99, timeout=0) == ("unknown", 99)
 
 
 def test_wait_for_session_returns_when_the_mux_has_it(monkeypatch):
@@ -253,9 +253,9 @@ def test_wait_for_session_times_out_when_the_session_never_appears(monkeypatch):
     assert wait_for_session(op.Instance("alpha"), timeout=0) is False
 
 
-def test_launch_status_does_not_call_a_dead_shim_a_dead_supervisor(monkeypatch):
+def test_launch_status_ignores_the_parents_startup_record(monkeypatch):
     import supervisor_control as sc
     monkeypatch.setattr(sc, "_pid_alive", lambda pid: False)
     monkeypatch.setattr(sc, "_running_loop_pid", lambda inst: None)
     monkeypatch.setattr(sc, "_supervisor_present", lambda inst: True)
-    assert launch_status(op.Instance("alpha"), 99, timeout=0) == "starting"
+    assert launch_status(op.Instance("alpha"), 99, timeout=0) == ("dead", 99)

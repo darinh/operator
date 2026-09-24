@@ -263,12 +263,12 @@ def _start(rest: list[str]) -> int:
         print(f"registered this directory as a project ({guid})")
     inst = Instance(name)
     pid = _spawn_background_loop(inst, copilot, is_fresh=fresh)
-    status = launch_status(inst, pid)
-    if status == "dead":
-        print(f"seat {name} (pid {pid}) exited before the supervisor published", file=sys.stderr)
+    status, shown = launch_status(inst, pid)
+    if status != "ready":
+        print({"dead": f"seat {name} (pid {pid}) exited before the supervisor published"}.get(
+            status, f"could not confirm supervisor for {name} (pid {pid})"), file=sys.stderr)
         return 1
-    print(f"starting {name} (pid {pid}); supervisor not yet published"
-          if status == "starting" else f"started {name} (pid {pid})")
+    print(f"started {name} (pid {shown})")
     if attach:
         wait_for_session(inst)
         return _join([name])
