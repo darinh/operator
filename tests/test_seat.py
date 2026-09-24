@@ -14,6 +14,8 @@ it happened to use the one order that worked.
 """
 from __future__ import annotations
 
+import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -105,39 +107,63 @@ def test_the_environment_still_supplies_the_seat(project, capsys, monkeypatch):
 
 
 def test_a_seat_named_twice_takes_the_one_nearest_the_text(project):
-    """Ordinary argparse last-wins, stated so the precedence is not a surprise."""
+    """Ordinary argparse last-wins, in both directions.
+
+    Asserted both ways round because one way round does not distinguish
+    last-wins from "the subparser value always wins", and those two differ the
+    moment someone reaches for a real default on the subparser again.
+    """
     assert cli.main(["--instance", "other", "remember", "--instance", "prism",
-                     "--kind", "gotcha", "x"]) == 0
-    assert journal.recall(project, "prism")
-    assert not journal.recall(project, "other")
+                     "--kind", "gotcha", "after"]) == 0
+    assert [e["text"] for e in journal.recall(project, "prism")] == ["after"]
+    assert journal.recall(project, "other") == []
+
+    assert cli.main(["--instance", "prism", "remember", "--instance", "other",
+                     "--kind", "gotcha", "reversed"]) == 0
+    assert [e["text"] for e in journal.recall(project, "other")] == ["reversed"]
+    assert [e["text"] for e in journal.recall(project, "prism")] == ["after"]
 
 
 # ── the preamble and the parser, bound together ─────────────────
 
-def test_every_command_the_preamble_advertises_actually_parses(tmp_path,
-                                                               monkeypatch):
+def test_every_command_the_preamble_advertises_actually_runs(project,
+                                                             tmp_path,
+                                                             monkeypatch,
+                                                             capsys):
     """The guard for the defect itself.
 
     The kernel writes these command lines into the preamble and the CLI parses
     them, and nothing connected the two: the advertised form could drift from
-    the accepted form again with both files' own tests green. This reads the
-    real preamble, lifts every `operator-seat` line out of it, and feeds it to
-    the real parser.
+    the accepted form again with both files' own tests green.
+
+    It *runs* them rather than parsing them, because parsing was the weaker
+    claim in two ways both reviewers found. `--instance` is optional, so a
+    preamble that stopped putting it after the verb would still have parsed and
+    this test would have quietly stopped covering the defect; and the first
+    version supplied the `remember` text operand itself, so a preamble that
+    dropped the note would have been repaired here and passed. Nothing is added
+    to the argv now, the flag's placement is asserted outright, and the write
+    has to land.
     """
     monkeypatch.setattr(op, "RESTART_DIR", tmp_path / "restart")
-    text = op.build_preamble("anvil:anvil", op.Instance(display_name="prism"),
-                             has_journal=True)
+    inst = op.Instance(display_name="prism")
+    text = op.build_preamble("anvil:anvil", inst, has_journal=True)
 
-    advertised = [line.strip(' .,"')
-                  for line in text.replace("`", "\n").splitlines()
-                  if line.strip().startswith("operator-seat ")]
-    assert len(advertised) >= 2, (
-        "the preamble stopped naming the journal commands, so this test is "
+    advertised = [shlex.split(segment)
+                  for segment in re.findall(r"`([^`]*)`", text)
+                  if segment.startswith("operator-seat ")]
+    assert {argv[1] for argv in advertised} == {"remember", "recall"}, (
+        "the preamble stopped naming both journal commands, so this test is "
         f"asserting nothing; saw: {advertised}")
 
-    parser = cli.build_parser()
-    for command in advertised:
-        argv = command.split()[1:]
-        if argv and argv[0] == "remember":
-            argv += ["a note"]  # the quoted text, which split() cannot give
-        parser.parse_args(argv)
+    for argv in advertised:
+        assert "--instance" in argv[2:], (
+            f"the preamble no longer puts --instance after the subcommand, "
+            f"which is the placement this whole file exists for: {argv}")
+        assert cli.main(argv[1:]) == 0, f"the preamble advertises {argv}"
+        capsys.readouterr()
+
+    assert [e["text"] for e in journal.recall(project, inst.id)] == ["..."], (
+        "the advertised remember parsed but wrote nothing, and a seat cannot "
+        "tell that outcome from never having been told to write at all")
+
