@@ -80,8 +80,13 @@ MAX_EXTENSION_TOTAL_LINES = 1600
 #: Raised from 850 / 1200 when the front door had to stop reading options
 #: past `--`, quote argv so a paste does not expand `$HOME`, and treat a
 #: missing stdin as not a TTY. Measured 866 / 1219.
-MAX_CLI_CODE_LINES = 950
-MAX_CLI_TOTAL_LINES = 1400
+#:
+#: Raised from 950 / 1400 when `project register|list|forget` landed in
+#: their own module. Four new verb groups cannot fit in entry.py, which is
+#: already at the per-module code ceiling. Measured 1029 / 1420. Room left
+#: for the extension verbs, which are the same shape.
+MAX_CLI_CODE_LINES = 1200
+MAX_CLI_TOTAL_LINES = 1650
 
 #: The two closed hook sets, unioned. An extension may implement hooks from
 #: either host; no *host* will ask it something outside its own set, which is

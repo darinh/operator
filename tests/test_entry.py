@@ -221,6 +221,13 @@ def test_menu_offers_recover_all():
     assert any(item.argv == ("recover", "--all") for item in cli.menu_items())
 
 
+def test_menu_offers_project_verbs():
+    items = {item.argv for item in cli.menu_items()}
+    assert ("project", "register") in items
+    assert ("project", "list") in items
+    assert ("project", "forget") in items
+
+
 def test_doctor_is_first_on_the_menu():
     assert cli.menu_items()[0].argv == ("doctor",)
 
