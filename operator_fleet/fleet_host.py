@@ -54,6 +54,7 @@ afford deadlines an order of magnitude longer than the launch path's.
 from __future__ import annotations
 
 import dataclasses
+import json
 import time
 from pathlib import Path
 
@@ -523,6 +524,29 @@ class FleetHost:
             })
 
 
+def _watching_and_inert(home, found) -> "tuple[list[str], list[str]]":
+    """Enabled names vs discovered-but-inert.
+
+    `enabled` must be exactly True, the same rule as activation.settings.
+    This package may not import operator_extensions.
+    """
+    try:
+        parsed = json.loads(
+            (Path(home) / "extensions.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        parsed = {}
+    if not isinstance(parsed, dict):
+        parsed = {}
+    watching, inert = [], []
+    for ext in found:
+        entry = parsed.get(ext.name)
+        if isinstance(entry, dict) and entry.get("enabled") is True:
+            watching.append(ext.name)
+        else:
+            inert.append(ext.name)
+    return watching, inert
+
+
 def fleet_host(home, **kwargs) -> FleetHost:
     """Discover what is installed, once, and hold it for the run.
 
@@ -540,8 +564,12 @@ def fleet_host(home, **kwargs) -> FleetHost:
         # name that grants authority, so this is the one line in this file that
         # may repeat one. A *failed* registration's name has passed no such
         # check, which is why the failures below go through `_report`.
-        log(f"  Extensions watching the fleet: "
-            f"{', '.join(e.name for e in found)}")
+        watching, inert = _watching_and_inert(home, found)
+        if watching:
+            log("  Extensions watching the fleet: " + ", ".join(watching))
+        if inert:
+            log("  Installed but inert: " + ", ".join(inert)
+                + ". Enable with: operator ext enable NAME")
     host = extensions.Host(found, hooks=FLEET_HOOKS, deadline=FLEET_DEADLINE,
                            call_deadline=FLEET_CALL_DEADLINE) if found else None
     fleet = FleetHost(host, home=home, **kwargs)
