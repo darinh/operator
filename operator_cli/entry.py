@@ -19,7 +19,7 @@ from pathlib import Path
 from operator_kernel.argtail import at_dashdash
 
 from . import argv as _argv
-from . import fleet, project, recover, seat
+from . import ext, fleet, project, recover, seat
 from .fleet import _bootstrap, _home, _settle_home
 
 
@@ -40,15 +40,11 @@ class Item:
 
 
 VERBS: tuple[Verb, ...] = (
-    Verb(("doctor",), "check that this machine can run operator",
-         "Check this machine"),
-    Verb(("start",), "start a supervised seat (start --name NAME)",
-         "Start a supervised seat"),
+    Verb(("doctor",), "check that this machine can run operator", "Check this machine"),
+    Verb(("start",), "start a supervised seat (start --name NAME)", "Start a supervised seat"),
     Verb(("list",), "list running seats", "List running seats"),
-    Verb(("join",), "attach this terminal to a running seat",
-         "Join a running seat", ("name",)),
-    Verb(("stop",), "ask a seat's supervisor to stop",
-         "Stop a supervised seat", ("name",)),
+    Verb(("join",), "attach this terminal to a running seat", "Join a running seat", ("name",)),
+    Verb(("stop",), "ask a seat's supervisor to stop", "Stop a supervised seat", ("name",)),
     Verb(("restart-loop",),
          "replace a supervisor without stopping the session",
          "Restart one seat's supervisor", ("name",),
@@ -61,11 +57,13 @@ VERBS: tuple[Verb, ...] = (
     Verb(("project", "register"), "register this directory as a project", "Register this directory as a project"),
     Verb(("project", "list"), "list registered projects", "List registered projects"),
     Verb(("project", "forget"), "remove a registration, keep the journal", "Forget a project registration", ("path",)),
+    Verb(("ext", "list"), "list registered extensions", "List extensions"),
+    Verb(("ext", "enable"), "enable an extension", "Enable an extension", ("extension",)),
+    Verb(("ext", "disable"), "disable an extension", "Disable an extension", ("extension",)),
     Verb(("remember",), "record one claim for this seat",
          "Remember something about this seat",
          ("instance", "kind", "text")),
-    Verb(("recall",), "show what earlier sessions recorded",
-         "Recall what this seat recorded", ("instance",)),
+    Verb(("recall",), "show what earlier sessions recorded", "Recall what this seat recorded", ("instance",)),
     Verb(("forget",), "stop recalling one journal entry",
          "Forget one journal entry", ("instance", "id")),
     Verb(("fleet", "run"), "poll the ledger and ask the extensions",
@@ -85,6 +83,7 @@ _PROMPT_LABEL = {
     "text": ("Text: ", "note"),
     "id": ("Entry id: ", "entry id"),
     "path": ("Project directory: ", "directory"),
+    "extension": ("Extension name: ", "extension"),
 }
 
 
@@ -152,7 +151,7 @@ def _build_argv(item: Item, values: dict[str, str]) -> list[str]:
         argv = [argv[0], "--instance", values["instance"], *argv[1:]]
     if "kind" in values:
         argv += ["--kind", values["kind"]]
-    for key in ("name", "text", "id", "path"):
+    for key in ("name", "text", "id", "path", "extension"):
         if key in values:
             argv += [values[key]]
     return argv
@@ -530,6 +529,7 @@ HANDLERS = {
     "restart-loop": _restart_loop,
     "recover": _recover,
     "project": project.main,
+    "ext": ext.main,
     "remember": _remember,
     "recall": _recall,
     "forget": _forget,

@@ -436,8 +436,9 @@ that has no call site: an extension answering a question nobody asks is a demo
 that cannot fail, and this document is already long enough on the subject of
 signals indistinguishable from their absence.
 
-They are registered on install and **inert until a human writes
-`~/.operator/extensions.json`**. That split is not tidiness. Registering is
+They are registered on install and **inert until a human runs
+`operator ext enable NAME`**, which writes `~/.operator/extensions.json`.
+That split is not tidiness. Registering is
 enough to be asked a question on the launch path of every seat, and an
 `admit_launch` refusal is honoured — so an extension that went live on install
 would be one `pip install` away from holding a nine-seat fleet closed, with
