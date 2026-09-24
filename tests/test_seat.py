@@ -56,6 +56,24 @@ def test_recall_on_an_empty_registered_journal_still_succeeds(tmp_path,
     assert "nothing recorded" in capsys.readouterr().out
 
 
+def test_remember_names_the_size_limit(tmp_path, monkeypatch, capsys):
+    from operator_cli import entry
+    from operator_memory import journal
+
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    assert entry.main(["project", "register"]) == 0
+    capsys.readouterr()
+    assert journal.remember(cwd, "alpha", "gotcha", "already there")
+    monkeypatch.setattr(journal, "MAX_JOURNAL_BYTES", 1)
+    assert cli.main(["--instance", "alpha", "remember", "--kind", "gotcha",
+                     "more"]) == 1
+    err = capsys.readouterr().err
+    assert "size limit" in err
+    assert "registered project" not in err
+
+
 def test_remember_names_an_unusable_seat(tmp_path, monkeypatch, capsys):
     cwd = tmp_path / "repo"
     cwd.mkdir()
