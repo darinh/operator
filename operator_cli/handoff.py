@@ -2,9 +2,8 @@
 
 The preamble has advertised this to every seat since it was written, naming a
 bare `handoff` that belongs to `copilot-tools` rather than here. The kernel's
-half was always present: `exits.handoff_state` reads the file, `supervisor.py`
-polls the marker, and nothing in this distribution wrote either. Same shape as
-`project.py` and `ext.py`: parse the flags, call in, report what happened.
+half was always present: `exits.handoff_state` reads the file and
+`supervisor.py` polls the marker, while nothing here wrote either.
 """
 from __future__ import annotations
 
@@ -15,8 +14,7 @@ from operator_kernel.argtail import at_dashdash
 
 from .fleet import _bootstrap
 
-#: Everything that takes a value. `--no-restart` is deliberately absent: it is
-#: a switch, and listing it here would make it swallow the token after it.
+#: Takes a value. A switch listed here would swallow the token after it.
 VALUE_FLAGS = ("--instance", "--status", "--next", "--context")
 SWITCHES = ("--no-restart",)
 
@@ -30,7 +28,6 @@ def parse(options: list[str]) -> "dict[str, str] | None":
     Nothing is skipped in silence and nothing option-shaped is taken as text.
     A membership test was not enough: `--norestart` and `--no-restart=true`
     are not members and both ended the session they were typed to preserve.
-    Use `--context=--no-restart` to mean such a string literally.
     """
     values: dict[str, str] = {}
     i = 0
@@ -44,11 +41,14 @@ def parse(options: list[str]) -> "dict[str, str] | None":
                 continue
             following = options[i + 1] if i + 1 < len(options) else ""
             if i + 1 >= len(options) or following.startswith("-"):
-                # A status may legitimately open with a dash, and telling that
-                # user "needs a value" when they supplied one is a lie.
+                # A status may legitimately open with a dash, and "needs a
+                # value" is a lie to a user who supplied one. Quoted when it
+                # must be: a hint that does not survive being typed is worse
+                # than none.
+                shown = (f'"{following}"'
+                         if any(c.isspace() for c in following) else following)
                 hint = (f", and {following!r} looks like an option. To mean it "
-                        f"literally, write {name}={following}"
-                        if following else "")
+                        f"literally, write {name}={shown}" if following else "")
                 print(f"operator handoff {name} needs a value{hint}",
                       file=sys.stderr)
                 return None

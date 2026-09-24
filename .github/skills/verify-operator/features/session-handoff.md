@@ -92,9 +92,9 @@ Preconditions:
 - **A value that starts with a dash needs the joined form.** `--status
   "- shipped the parser"` is refused, because taking any following token
   blindly is what let `--context --no-restart` swallow the switch and restart a
-  session that asked not to be restarted. Write `--status=- shipped the parser`
-  instead; the refusal message names that escape rather than just saying a
-  value is missing.
+  session that asked not to be restarted. Write `--status="- shipped the
+  parser"` instead; the refusal message names that escape, already quoted,
+  rather than just saying a value is missing.
 - **Exit `2` and exit `1` mean different things here.** `2` is the command
   refusing what it was asked (usage, unusable seat, unknown option) and nothing
   was written. `1` is the command trying and failing (unregistered project,
