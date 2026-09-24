@@ -181,3 +181,19 @@ def test_the_restart_marker_is_not_re_sanitised(tmp_path):
     assert op.safe_instance_id(seat_id) != seat_id, "the hazard is real"
     assert exits.request_restart(seat_id)
     assert (op.RESTART_DIR / seat_id).exists()
+
+
+def test_a_cleanup_that_also_fails_is_said_out_loud(tmp_path, monkeypatch):
+    """A caller told "nothing was left behind" when a temp file remains has
+    been told something false. Reviewer A found the silent `except OSError`.
+    """
+    work = _registered(tmp_path, monkeypatch)
+    exits.write_handoff(work, "alpha", "good")
+    monkeypatch.setattr(exits.os, "replace",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("locked")))
+    monkeypatch.setattr(exits.Path, "unlink",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("held")))
+    said = []
+    monkeypatch.setattr(exits, "log", said.append)
+    assert exits.write_handoff(work, "alpha", "doomed") is exits.WRITE_FAILED
+    assert any("could not remove" in line for line in said), said

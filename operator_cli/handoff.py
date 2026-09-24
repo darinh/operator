@@ -5,10 +5,8 @@ written, and until now it named a bare `handoff`: a console script of
 `copilot-tools`, the predecessor this project is designed not to assume is
 installed. The kernel's half was always here. `exits.handoff_state` reads the
 file, `supervisor.py` polls the marker, and nothing in this distribution wrote
-either one.
-
-`project.py`, `ext.py` and `seat.py` are the same shape as this: parse the
-flags, call the kernel, print what happened.
+either one. `project.py`, `ext.py` and `seat.py` are the same shape as this:
+parse the flags, call the kernel, print what happened.
 """
 from __future__ import annotations
 
@@ -31,11 +29,11 @@ USAGE = ("Usage: operator handoff --instance NAME --status TEXT "
 def parse(options: list[str]) -> "dict[str, str] | None":
     """Flag values, or None after saying which argument was the problem.
 
-    An unrecognised option is refused rather than skipped. Silently ignoring
-    one means `--norestart` -- a plausible typo for the switch that exists --
-    reads as "restart me", which is the most expensive way to get this command
-    wrong: the session ends anyway and the flag meant to prevent that never
-    took effect.
+    Nothing is skipped in silence. An unrecognised option and a value flag
+    followed by another option are both refused, because both fail the same
+    way: `--norestart` and `--context --no-restart` each end the session that
+    the argument was typed to preserve. Use `--context=--no-restart` to mean
+    an option-looking string literally.
     """
     values: dict[str, str] = {}
     i = 0
@@ -47,10 +45,11 @@ def parse(options: list[str]) -> "dict[str, str] | None":
                 values[name] = inline
                 i += 1
                 continue
-            if i + 1 >= len(options):
+            following = options[i + 1] if i + 1 < len(options) else ""
+            if i + 1 >= len(options) or following in VALUE_FLAGS + SWITCHES:
                 print(f"operator handoff {name} needs a value", file=sys.stderr)
                 return None
-            values[name] = options[i + 1]
+            values[name] = following
             i += 2
             continue
         if arg in SWITCHES:

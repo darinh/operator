@@ -192,7 +192,7 @@ def cmd_doctor(args) -> int:
         return 1
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
 
-    for name in ("operator-fleet", "operator-seat"):
+    for name in ("operator", "operator-fleet", "operator-seat"):
         found = shutil.which(name)
         check(f"{name} on PATH", found is not None, found or "missing")
 
