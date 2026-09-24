@@ -22,7 +22,7 @@ from . import ext, fleet, handoff, project, recover, seat, verbs
 from .fleet import _bootstrap, _home, _settle_home
 
 
-from .verbs import Item, Verb, VERBS, menu_items  # noqa: F401
+from .verbs import VERBS, menu_items  # noqa: F401
 
 
 def _print_help(stream) -> None:

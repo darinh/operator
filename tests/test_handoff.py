@@ -90,3 +90,49 @@ def test_help_names_every_flag_it_accepts(capsys):
     for flag in ("--instance", "--status", "--next", "--context",
                  "--no-restart"):
         assert flag in out, flag
+
+
+# ── argument handling the reviewers asked for ───────────────────
+
+
+def test_an_unknown_option_is_refused_rather_than_ignored(tmp_path,
+                                                          monkeypatch, capsys):
+    """`--norestart` is a plausible typo for the switch that exists. Skipping
+    it silently restarts the session the flag was meant to preserve."""
+    _project(tmp_path, monkeypatch)
+    assert cli.main(["handoff", "--instance", "alpha", "--status", "done",
+                     "--norestart"]) == 2
+    assert "unknown option --norestart" in capsys.readouterr().err
+    assert not op.Instance("alpha").restart_marker.exists()
+
+
+def test_flag_equals_value_is_accepted(tmp_path, monkeypatch):
+    """Every other verb on this entry point takes `--name=value`."""
+    work = _project(tmp_path, monkeypatch)
+    assert cli.main(["handoff", "--instance=alpha", "--status=done",
+                     "--no-restart"]) == 0
+    assert paths.project_handoff_file(work, "alpha").exists()
+
+
+def test_a_whitespace_only_status_is_not_a_status(tmp_path, monkeypatch,
+                                                  capsys):
+    """It passed the truthiness check and then wrote an empty section."""
+    _project(tmp_path, monkeypatch)
+    assert cli.main(["handoff", "--instance", "alpha", "--status", "   "]) == 2
+    assert "Usage: operator handoff" in capsys.readouterr().err
+
+
+def test_a_seat_name_that_escapes_the_handoff_directory_is_refused(
+        tmp_path, monkeypatch, capsys):
+    """`--instance ../escape` addressed a file outside `handoff/`."""
+    _project(tmp_path, monkeypatch)
+    assert cli.main(["handoff", "--instance", "../escape",
+                     "--status", "done"]) == 2
+    assert "not usable" in capsys.readouterr().err
+
+
+def test_a_second_positional_is_refused(tmp_path, monkeypatch, capsys):
+    """Two bare words means one of them was meant to be a flag value."""
+    _project(tmp_path, monkeypatch)
+    assert cli.main(["handoff", "alpha", "beta", "--status", "done"]) == 2
+    assert "unexpected argument" in capsys.readouterr().err
