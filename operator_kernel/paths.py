@@ -59,7 +59,31 @@ class CatalogLookup:
                 and other.undecided == self.undecided)
 
 
-def catalog_guid(cwd: Path) -> CatalogLookup:
+def catalog_paths_match(cwd: Path, stored: str) -> "bool | None":
+    """True if ``stored`` names ``cwd``. None if the comparison could not be settled.
+
+    Resolved strings first, then ``os.path.samefile`` when both exist, so a
+    drive-letter path and a UNC path for the same directory are one project.
+    """
+    try:
+        want = primary_repo_root(cwd).resolve()
+        have = Path(stored).resolve()
+    except (OSError, ValueError, RuntimeError):
+        return None
+    want_s, have_s = str(want), str(have)
+    if IS_WINDOWS:
+        want_s, have_s = want_s.lower(), have_s.lower()
+    if want_s == have_s:
+        return True
+    try:
+        if want.exists() and have.exists() and os.path.samefile(want, have):
+            return True
+    except OSError:
+        pass
+    return False
+
+
+def catalog_guid(cwd: Path, catalog: "Path | None" = None) -> CatalogLookup:
     """The project guid registered for ``cwd``, if the catalog settles it.
 
     `supervisor.py` called this by name for the whole life of the extraction
@@ -81,19 +105,11 @@ def catalog_guid(cwd: Path) -> CatalogLookup:
     *stat* does not imply a denied *read*, so a catalog behind an unsearchable
     parent still gets opened.
     """
-    catalog = project_catalog_path()
+    catalog = project_catalog_path() if catalog is None else catalog
     if file_present(catalog) is False:
         return CatalogLookup(None)
     # "No row matched" is only an answer if every row was actually compared.
     undecided = False
-    try:
-        target = str(primary_repo_root(cwd).resolve())
-    except (OSError, ValueError, RuntimeError):
-        # Nothing can be compared against a target that will not resolve, so
-        # every row below is undecided rather than unmatched.
-        return CatalogLookup(None, undecided=True)
-    if IS_WINDOWS:
-        target = target.lower()
     try:
         with open(catalog, "r", encoding="utf-8", errors="replace",
                   newline="") as fh:
@@ -116,21 +132,11 @@ def catalog_guid(cwd: Path) -> CatalogLookup:
                 # project's handoff.
                 if not path or not guid_is_usable(guid):
                     continue
-                try:
-                    resolved = str(Path(path).resolve())
-                except (OSError, ValueError, RuntimeError):
-                    # This row could not be compared. Skipping it is right, but
-                    # it means the "not registered" verdict below is no longer
-                    # established for this catalog. All three arrive here: the
-                    # catalog is a hand-edited CSV, so a row can name a symlink
-                    # loop (RuntimeError, or OSError(ELOOP) on newer
-                    # interpreters) or carry an embedded NUL (ValueError) just
-                    # as easily as it can name a denied path (OSError).
+                match = catalog_paths_match(cwd, path)
+                if match is None:
                     undecided = True
                     continue
-                if IS_WINDOWS:
-                    resolved = resolved.lower()
-                if resolved == target:
+                if match:
                     return CatalogLookup(guid)
     except OSError:
         return CatalogLookup(None, undecided=True)

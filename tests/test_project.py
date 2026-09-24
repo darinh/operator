@@ -175,6 +175,8 @@ def test_register_reuses_guid_when_samefile_says_so(tmp_path, monkeypatch,
               newline="") as fh:
         rows = [row for row in paths.catalog_rows(fh) if row]
     assert len(rows) == 1
+    assert paths.catalog_guid(alias).guid == guid
+    assert paths.catalog_guid(first).guid == guid
 
 
 def test_two_processes_registering_keep_both_rows(tmp_path, monkeypatch):

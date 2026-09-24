@@ -93,6 +93,10 @@ def _entry(config: dict, name: str) -> dict:
     return {}
 
 
+def _enabled(entry) -> bool:
+    return isinstance(entry, dict) and entry.get("enabled") is True
+
+
 def _list(_args) -> int:
     _bootstrap()
     names = _discovered()
@@ -106,7 +110,7 @@ def _list(_args) -> int:
         return 1
     for name in names:
         entry = config.get(name)
-        on = isinstance(entry, dict) and entry.get("enabled") is True
+        on = _enabled(entry)
         state = "enabled" if on else "disabled"
         extras = []
         if isinstance(entry, dict):
