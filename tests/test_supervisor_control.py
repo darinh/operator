@@ -218,13 +218,15 @@ def test_launch_status_is_dead_when_the_pid_is_gone(monkeypatch):
     import supervisor_control as sc
     monkeypatch.setattr(sc, "_pid_alive", lambda pid: False)
     monkeypatch.setattr(sc, "_running_loop_pid", lambda inst: None)
+    monkeypatch.setattr(sc, "_supervisor_present", lambda inst: False)
     assert launch_status(op.Instance("alpha"), 99, timeout=0) == "dead"
 
 
 def test_launch_status_is_ready_when_the_pid_file_is_there(monkeypatch):
     import supervisor_control as sc
-    monkeypatch.setattr(sc, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(sc, "_pid_alive", lambda pid: False)
     monkeypatch.setattr(sc, "_running_loop_pid", lambda inst: 99)
+    monkeypatch.setattr(sc, "_supervisor_present", lambda inst: True)
     assert launch_status(op.Instance("alpha"), 99, timeout=0) == "ready"
 
 
@@ -232,4 +234,13 @@ def test_launch_status_is_starting_when_the_pid_file_has_not_landed(monkeypatch)
     import supervisor_control as sc
     monkeypatch.setattr(sc, "_pid_alive", lambda pid: True)
     monkeypatch.setattr(sc, "_running_loop_pid", lambda inst: None)
+    monkeypatch.setattr(sc, "_supervisor_present", lambda inst: False)
+    assert launch_status(op.Instance("alpha"), 99, timeout=0) == "starting"
+
+
+def test_launch_status_does_not_call_a_dead_shim_a_dead_supervisor(monkeypatch):
+    import supervisor_control as sc
+    monkeypatch.setattr(sc, "_pid_alive", lambda pid: False)
+    monkeypatch.setattr(sc, "_running_loop_pid", lambda inst: None)
+    monkeypatch.setattr(sc, "_supervisor_present", lambda inst: True)
     assert launch_status(op.Instance("alpha"), 99, timeout=0) == "starting"

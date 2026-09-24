@@ -503,17 +503,21 @@ def recover_loop(instance: Instance) -> int:
 def launch_status(instance: Instance, pid: int, timeout: float = 0.4) -> str:
     """ready, starting, or dead, after a short wait.
 
-    A background launch is allowed to be slow. This does not wait it out.
-    It refuses to say the seat started when the pid is already gone.
+    Wait for the pid file, not the spawned pid. On Windows sys.executable is
+    often a launcher shim that exits once the real interpreter is running, so
+    the pid Popen hands back may be dead while the supervisor is fine. Same
+    rule as restart_loop.
     """
     deadline = time.monotonic() + timeout
     while True:
-        if not _pid_alive(pid):
-            return "dead"
         if _running_loop_pid(instance) is not None:
             return "ready"
         if time.monotonic() >= deadline:
-            return "starting"
+            if _running_loop_pid(instance) is not None:
+                return "ready"
+            if _pid_alive(pid) or _supervisor_present(instance):
+                return "starting"
+            return "dead"
         time.sleep(0.05)
 
 
