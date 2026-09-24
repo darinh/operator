@@ -1151,8 +1151,6 @@ def test_a_real_extension_is_tailed_woken_and_proposed_from(tmp_path, home,
     assert record["approved"] is False
 
 
-# ── watching vs inert ───────────────────────────────────────────
-
 class _Named:
     def __init__(self, name):
         self.name = name
