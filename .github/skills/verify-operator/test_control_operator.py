@@ -323,6 +323,66 @@ def test_a_nested_state_file_keeps_its_path_in_its_name(run):
     assert "projects__guid-1__journal__seat-a.jsonl" in names
 
 
+def test_evidence_captures_both_halves_of_a_handoff(run):
+    """The file and the marker, because either alone is ambiguous.
+
+    A handoff file with no marker is a checkpoint. A marker with no file is a
+    session that ended leaving nothing. A proof that captures one of the two
+    cannot tell those apart, which is exactly the distinction the recipe for
+    `--no-restart` rests on.
+    """
+    handoff = run / "home" / "projects" / "guid-1" / "handoff"
+    handoff.mkdir(parents=True)
+    (handoff / "seat-a.md").write_text("# Handoff\n", encoding="utf-8")
+    (run / "home" / "restart").mkdir(parents=True, exist_ok=True)
+    (run / "home" / "restart" / "seat-a").touch()
+
+    control.cmd_evidence(SimpleNamespace(run=str(run), label="snap"))
+    names = {p.name for p in (run / "artifacts" / "snap").iterdir()}
+    assert "projects__guid-1__handoff__seat-a.md" in names
+    assert "restart__seat-a" in names
+
+
+def test_the_front_door_runs_from_the_registered_checkout(monkeypatch, run):
+    """`operator handoff` resolves its project from the working directory, so
+    the driver has to stand in the checkout the catalog knows about."""
+    seen = {}
+
+    def fake(run_, label, argv, cwd):
+        seen.update(argv=argv, cwd=cwd)
+        return 0
+
+    monkeypatch.setattr(control, "_invoke", fake)
+    monkeypatch.setattr(control, "_script", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(control, "_meta", lambda r: {"repo": str(run / "repo")})
+    control.main(["operator", "--run", str(run), "--label", "h",
+                  "--", "handoff", "--instance", "alpha", "--status", "done"])
+    assert seen["argv"][0] == "/bin/operator", seen["argv"]
+    assert seen["argv"][1:] == ["handoff", "--instance", "alpha",
+                                "--status", "done"]
+    assert seen["cwd"] == run / "repo"
+
+
+def test_the_front_door_can_be_pointed_somewhere_unregistered(monkeypatch, run,
+                                                              tmp_path):
+    """The refusal path needs a directory the catalog does not know, and it has
+    to be drivable through the transcript rather than by a raw call beside it."""
+    seen = {}
+
+    def fake(run_, label, argv, cwd):
+        seen.update(cwd=cwd)
+        return 0
+
+    monkeypatch.setattr(control, "_invoke", fake)
+    monkeypatch.setattr(control, "_script", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(control, "_meta", lambda r: {"repo": str(run / "repo")})
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    control.main(["operator", "--run", str(run), "--cwd", str(elsewhere),
+                  "--", "handoff", "--instance", "alpha", "--status", "x"])
+    assert seen["cwd"] == elsewhere.resolve()
+
+
 def test_two_labels_do_not_overwrite_each_other(run):
     (run / "home" / "trace.jsonl").write_text("a\n", encoding="utf-8")
     control.cmd_evidence(SimpleNamespace(run=str(run), label="before"))

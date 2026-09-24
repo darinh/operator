@@ -4,10 +4,9 @@ This directory is the maintained source for verifying the user-facing behaviour 
 `operator`. Read this index before driving, then use the matching feature file as
 the recipe.
 
-**The three core features need no extensions.** A core install with an empty
+**The four core features need no extensions.** A core install with an empty
 `extensions.json` — or none at all — can be fully verified. Extensions are an
 optional layer with its own file.
-
 ## Baseline preconditions
 
 - Create a disposable instance with `python .github/skills/verify-operator/control_operator.py up`.
@@ -25,6 +24,7 @@ optional layer with its own file.
 - Treat every command as literal. Keep quoted text, kinds and flags unchanged.
 - Fleet actions go through `control_operator.py fleet --run <run> -- <args>`.
 - Seat actions go through `control_operator.py seat --run <run> -- <args>`.
+- Front-door actions go through `control_operator.py operator --run <run> -- <args>`.
 - Give every call a `--label`, because the label names its transcript entry.
 - Identify things by stable handles: ledger records by `event` and `instance`,
   proposals by the attributed extension name, journal entries by the 8-character id.
@@ -76,6 +76,8 @@ No extension required for any of these.
   rename-claim drain, the archive, and abandoned-batch recovery.
 - [Fleet host](./fleet-host.md) — `operator-fleet run`, rounds, discovery,
   inert-by-default, the ledger cursor, and isolation.
+- [Session handoff](./session-handoff.md) — `operator handoff`, the file the next
+  launch announces, the restart marker, and the seat-id key both share.
 
 ## Optional layer
 
