@@ -3,7 +3,7 @@
 Supervision for fleets of autonomous coding agents.
 
 You give an agent a repository and walk away. `operator` is what notices when it stops making
-progress, restarts it, brings it back after a reboot, and keeps a tamper-evident record of what
+progress, restarts it, brings it back after a reboot, and keeps a checked record of what
 happened. It writes no code itself.
 
 The unit it supervises is a **seat**, not a session. A seat outlives the sessions it runs, keeps
@@ -46,7 +46,7 @@ operator start --name alpha   start a supervised seat here
 operator list                 what is running
 operator join alpha           attach your terminal to it
 operator stop alpha           ask its supervisor to stop
-operator recover              bring back seats a crash or reboot took down
+operator recover --all        bring back seats a crash or reboot took down
 operator trace                what happened, newest first
 operator verify               has the record been altered
 ```
@@ -62,22 +62,28 @@ spend ceiling is unlimited by default and you set it yourself.
 
 **Stops a seat that has stopped working.** After each session it fingerprints the whole
 repository, every ref and every worktree, and asks whether anything changed. Three consecutive
-sessions that change nothing exits with `EXIT_NO_PROGRESS`. Five sessions that end without a
-handoff or an observed exit exits with `EXIT_UNACCOUNTED`. It polls every 10 seconds and treats
-a session shorter than 120 seconds as a crash rather than a working session.
+sessions that change nothing *and end cleanly* exits with `EXIT_NO_PROGRESS`. Five that change
+nothing *and* end without a handoff or an observed exit exits with `EXIT_UNACCOUNTED`. Both
+counters need an unchanged fingerprint, so a seat that keeps producing work never trips either
+one. It polls every 10 seconds, and an unexpected exit inside 120 seconds counts as a crash
+rather than a session.
 
 **Knows the difference between "nothing changed" and "I could not tell."** An unreadable git
-probe is `unknown`, not `unchanged`, and it does not count toward the limit. A breaker that
+probe is `unknown`, not `unchanged`, and it does not count toward either limit. A breaker that
 fires on its own blindness would stop a healthy fleet.
 
-**Survives a reboot.** `operator recover` finds seats that were supervised when the machine
-stopped and restarts their supervisors, continuing the session numbering rather than starting
-over.
+**Survives a reboot.** `operator recover` lists seats that were supervised when the machine
+stopped. `operator recover --all`, or a seat name, restarts their supervisors, continuing the
+session numbering rather than starting over.
 
 **Keeps a record you can check.** Every supervision fact appends to `~/.operator/trace.jsonl`
-with a per-writer hash chain, so `operator verify` can tell you whether records were removed or
-edited. Read `docs/ledger.md` before trusting that: it is a checksum, not tamper-evidence, and
-it detects nothing against anyone with write access to the file.
+with a per-writer hash chain, and `operator verify` replays it.
+
+Read `docs/ledger.md` before trusting that, because the limits are real. It is a checksum, not
+tamper-evidence. It catches an edited record and a record removed from the middle of a writer's
+run. It does **not** catch a whole writer removed, or records removed from the end of one, and
+it detects nothing at all against someone who can rewrite the file, because re-chaining it takes
+seconds.
 
 **Remembers.** A seat records decisions, gotchas and dispositions with `operator remember`, and
 reads them back with `operator recall`. That memory is per seat and per project, keyed on the
