@@ -21,6 +21,18 @@ and a terminal multiplexer (`tmux`, or `psmux` on Windows).
 
 Python 3.10 or newer. Nothing else is required. The tool stands alone.
 
+## Quickstart
+
+```
+cd ~/repos/yourproject
+operator project register        let this directory hold seat memory
+operator start --name alpha      start a seat, give it the first task
+operator list                    confirm it is running
+operator join alpha              watch it work
+```
+
+Come back later and `operator recall --instance alpha` shows what that seat learned.
+
 ## Use it
 
 Run `operator` with no arguments and you get a menu. Every menu action prints the command it
@@ -38,6 +50,13 @@ operator recover              bring back seats a crash or reboot took down
 operator trace                what happened, newest first
 operator verify               has the record been altered
 ```
+
+## What it costs
+
+Each seat runs a real GitHub Copilot CLI session, and the supervisor restarts it when a session
+ends, up to 1000 times. Three seats left overnight is three agents working continuously against
+your account. Nothing here bills you directly, but nothing here caps your usage either. The
+spend ceiling is unlimited by default and you set it yourself.
 
 ## What it actually does
 
@@ -96,22 +115,19 @@ python -m operator_bench measure
 ```
 
 Every number carries its sample size, coverage, label source and an interval, or reports
-`NoEstimate` with a reason. Miss rate and false-alarm rate are reported separately and never
-merged, because lowering the stall threshold improves one and destroys the other.
-
-One scenario, `backlog-0014`, is a seat that manufactures busywork. It moves the fingerprint
-every session while doing nothing real, and the supervisor cannot currently tell. That scenario
-scores a **miss** on purpose, and a test asserts it. When a breaker learns to see manufactured
-work, that test fails and the recorded baseline changes.
+`NoEstimate` with a reason. Miss rate and false-alarm rate stay separate, because lowering the
+stall threshold improves one and destroys the other. One scenario is a seat that manufactures
+busywork, and it scores a **miss** on purpose, because the supervisor genuinely cannot tell.
 
 ## What it does not do
 
 Stated plainly, because each of these looks built from the outside.
 
-**Seats are not told what to work on.** `work_seam.set_session_store` is called by nothing, so
-`session_store()` returns `None` on every run. A seat is supervised, not assigned. Deciding what
-an agent should work on sits on the far side of this boundary and needs a work store that does
-not exist here.
+**No seat is given work beyond its first task.** You tell a seat what to work on when you start
+it, and that prompt reaches the session. What does not exist is anything that hands a seat its
+*next* piece of work. `work_seam.set_session_store` is called by nothing, so `session_store()`
+returns `None` on every run. Once the opening task is done, later sessions continue with
+whatever the seat writes in its own handoff, not from a queue anyone else controls.
 
 **There is no intent layer.** Nothing traces a change back to an authorised goal. The evidence
 ledger records what happened, not whether anyone asked for it.
@@ -119,6 +135,10 @@ ledger records what happened, not whether anyone asked for it.
 **There is no trust boundary.** Agents run under your filesystem identity. A seat can write the
 mandate, the gate code and the ledger. Making "an agent cannot grant itself authority" true
 rather than decorative needs a separate OS account and ACLs.
+
+**There is no morning report.** After an overnight run, `operator list` shows what is still up
+and `operator trace` shows raw records. Nothing summarises which seats ran, what they produced,
+or why each one stopped.
 
 **Two extension hooks are declared and never asked.** `gate_change` and `detect_repo` are part
 of the documented hook set with no call site, because there is no kernel merge gate to hang the
