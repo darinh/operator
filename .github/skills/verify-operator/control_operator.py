@@ -61,6 +61,11 @@ STATE_GLOBS = (
     "extensions/*.json",
     "projects/catalog.csv",
     "projects/*/journal/*.jsonl",
+    # The two halves of a handoff. The file is what the next session reads and
+    # the marker is what the supervisor polls, so a proof that shows only one
+    # of them cannot tell "handed off" from "ended without leaving anything".
+    "projects/*/handoff/*.md",
+    "restart/*",
 )
 
 
@@ -437,6 +442,21 @@ def cmd_seat(args) -> int:
     return _invoke(run, args.label or "seat " + " ".join(args.rest), argv, cwd)
 
 
+def cmd_operator(args) -> int:
+    """Drive the `operator` front door, the entry point the other two are not.
+
+    `handoff` lives here rather than on `operator-seat`, because the owner
+    wants one entry point with a menu instead of a family of binaries. Like
+    `seat`, the working directory decides the project, so `--cwd` is what
+    makes the unregistered refusal drivable through the transcript.
+    """
+    run = Path(args.run).expanduser().resolve()
+    meta = _meta(run)
+    argv = [_script("operator"), *args.rest]
+    cwd = Path(args.cwd).expanduser().resolve() if args.cwd else Path(meta["repo"])
+    return _invoke(run, args.label or "operator " + " ".join(args.rest), argv, cwd)
+
+
 def cmd_gate(args) -> int:
     """Ask the kernel's launch gate whether a seat may start, and report.
 
@@ -597,6 +617,15 @@ def build_parser() -> argparse.ArgumentParser:
                                     "checkout (to drive the unregistered case)")
     seat.add_argument("rest", nargs=argparse.REMAINDER)
     seat.set_defaults(func=cmd_seat)
+
+    front = sub.add_parser("operator", help="run the `operator` front door "
+                                            "against this run")
+    front.add_argument("--run", required=True)
+    front.add_argument("--label")
+    front.add_argument("--cwd", help="run from here instead of the registered "
+                                     "checkout (to drive the unregistered case)")
+    front.add_argument("rest", nargs=argparse.REMAINDER)
+    front.set_defaults(func=cmd_operator)
 
     evidence = sub.add_parser("evidence", help="snapshot home state into artifacts")
     evidence.add_argument("--run", required=True)
