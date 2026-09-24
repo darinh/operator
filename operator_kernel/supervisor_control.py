@@ -514,24 +514,27 @@ def wait_for_session(instance: Instance, timeout: float = 2.0) -> bool:
         time.sleep(0.05)
 
 
-def launch_status(instance: Instance, pid: int, timeout: float = 0.4) -> str:
-    """ready, starting, or dead, after a short wait.
+def launch_status(instance: Instance, pid: int,
+                  timeout: float = 2.0) -> "tuple[str, int]":
+    """(ready|dead|unknown, pid to print).
 
-    Wait for the pid file, not the spawned pid. On Windows sys.executable is
-    often a launcher shim that exits once the real interpreter is running, so
-    the pid Popen hands back may be dead while the supervisor is fine. Same
-    rule as restart_loop.
+    Ready is a published loop pid file. The parent writes a startup record
+    before the child exists, so that record is not evidence the launch worked.
+    Unknown is a live spawn pid with no pid file yet. Dead is a gone spawn pid
+    and no pid file.
     """
     deadline = time.monotonic() + timeout
     while True:
-        if _running_loop_pid(instance) is not None:
-            return "ready"
+        published = _running_loop_pid(instance)
+        if published is not None:
+            return "ready", published
         if time.monotonic() >= deadline:
-            if _running_loop_pid(instance) is not None:
-                return "ready"
-            if _pid_alive(pid) or _supervisor_present(instance):
-                return "starting"
-            return "dead"
+            published = _running_loop_pid(instance)
+            if published is not None:
+                return "ready", published
+            if _pid_alive(pid):
+                return "unknown", pid
+            return "dead", pid
         time.sleep(0.05)
 
 

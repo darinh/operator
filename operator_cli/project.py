@@ -10,7 +10,9 @@ import argparse
 import csv
 import os
 import sys
+import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 from .fleet import _bootstrap
@@ -55,9 +57,54 @@ def _write_rows(catalog: Path, rows: "list[tuple[str, str]]") -> bool:
         return False
 
 
+@contextmanager
+def _catalog_lock():
+    import paths
+
+    lock = paths.projects_root() / "catalog.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(lock, "a+b")
+    try:
+        if fh.seek(0, os.SEEK_END) == 0:
+            fh.write(b"\0")
+            fh.flush()
+        deadline = time.monotonic() + 30
+        while True:
+            try:
+                fh.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    print("could not lock the project catalog", file=sys.stderr)
+                    raise
+                time.sleep(0.05)
+        yield
+    finally:
+        try:
+            fh.seek(0)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        fh.close()
+
+
 def _resolve(given: "str | None", *, must_exist: bool = True) -> "Path | None":
     import paths
 
+    if given is not None and not str(given).strip():
+        print("a directory path is needed", file=sys.stderr)
+        return None
     target = Path(given) if given else Path.cwd()
     try:
         exists = target.is_dir()
@@ -79,9 +126,15 @@ def _resolve(given: "str | None", *, must_exist: bool = True) -> "Path | None":
 def _same_path(left: Path, right: str) -> bool:
     from config import IS_WINDOWS
 
+    other = Path(right)
+    try:
+        if left.exists() and other.exists() and os.path.samefile(left, other):
+            return True
+    except OSError:
+        pass
     candidates = [right]
     try:
-        candidates.append(str(Path(right).resolve()))
+        candidates.append(str(other.resolve()))
     except (OSError, ValueError, RuntimeError):
         pass
     a = str(left)
@@ -94,37 +147,69 @@ def _same_path(left: Path, right: str) -> bool:
     return False
 
 
+def _row_would_be_found(target: Path, written: str) -> bool:
+    from config import IS_WINDOWS
+
+    try:
+        resolved = str(Path(written).resolve())
+        want = str(target.resolve())
+    except (OSError, ValueError, RuntimeError):
+        return False
+    if IS_WINDOWS:
+        resolved, want = resolved.lower(), want.lower()
+    return resolved == want
+
+
 def ensure_registered(path: "str | None" = None) -> "tuple[int, str, bool]":
     """Register `path` (default cwd). Returns (exit, guid, created)."""
     _bootstrap()
-    import paths
-
     target = _resolve(path)
     if target is None:
         return 2, "", False
+    try:
+        with _catalog_lock():
+            return _ensure_registered_locked(target)
+    except OSError:
+        return 1, "", False
+
+
+def _ensure_registered_locked(target: Path) -> "tuple[int, str, bool]":
+    import paths
+
     found = paths.catalog_guid(target)
     if found.undecided:
         print("could not read the project catalog", file=sys.stderr)
         return 1, "", False
     if found.guid:
         return 0, found.guid, False
-    guid = str(uuid.uuid4())
     catalog = paths.project_catalog_path()
     rows = _rows(catalog)
     if rows is None:
         print("could not read the project catalog", file=sys.stderr)
         return 1, "", False
-    rows.append((str(target), guid))
-    if not _write_rows(catalog, rows):
-        print("could not write the project catalog", file=sys.stderr)
+    for path, guid in rows:
+        if _same_path(target, path):
+            return 0, guid, False
+    pause = os.environ.get("OPERATOR_CATALOG_PAUSE")
+    if pause:
+        time.sleep(float(pause))
+    guid = str(uuid.uuid4())
+    written = str(target)
+    if not paths.guid_is_usable(guid) or not _row_would_be_found(target, written):
+        print("path would not round-trip through the catalog", file=sys.stderr)
         return 1, "", False
     try:
         paths.project_dir(guid).mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         print(f"could not create the project directory: {exc}", file=sys.stderr)
         return 1, "", False
+    rows.append((written, guid))
+    if not _write_rows(catalog, rows):
+        print("could not write the project catalog", file=sys.stderr)
+        return 1, "", False
     check = paths.catalog_guid(target)
     if check.guid != guid:
+        _write_rows(catalog, [(p, g) for p, g in rows if g != guid])
         print("wrote a catalog row the existing reader did not accept",
               file=sys.stderr)
         return 1, "", False
@@ -158,11 +243,19 @@ def _list(_args) -> int:
 
 def _forget(args) -> int:
     _bootstrap()
-    import paths
-
     target = _resolve(args.path, must_exist=False)
     if target is None:
         return 2
+    try:
+        with _catalog_lock():
+            return _forget_locked(target)
+    except OSError:
+        return 1
+
+
+def _forget_locked(target: Path) -> int:
+    import paths
+
     catalog = paths.project_catalog_path()
     rows = _rows(catalog)
     if rows is None:

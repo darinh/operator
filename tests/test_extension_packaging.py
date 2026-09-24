@@ -88,8 +88,11 @@ MAX_EXTENSION_TOTAL_LINES = 1600
 #:
 #: Raised from 1200 / 1650 when start auto-registers, forget/disable accept
 #: missing targets, and seat help grew flags. Measured 1219 code.
-MAX_CLI_CODE_LINES = 1300
-MAX_CLI_TOTAL_LINES = 1750
+#:
+#: Raised from 1300 / 1750 when catalog locking and ext config errors landed.
+#: Measured 1323 / 1771.
+MAX_CLI_CODE_LINES = 1400
+MAX_CLI_TOTAL_LINES = 1900
 
 #: The two closed hook sets, unioned. An extension may implement hooks from
 #: either host; no *host* will ask it something outside its own set, which is
