@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import json
 
+import exits
 import op
+import paths
+from operator_cli import entry as cli
 
 
 def _spend_file(home, key, amount):
@@ -62,3 +65,57 @@ def test_a_session_ending_files_its_cost_under_the_seat_id(tmp_path):
     assert len(costs) == 1
     assert costs[0]["instance"] == seat_id
     assert costs[0]["amount"] == 3.0
+
+
+# ── the handoff file: one module writes it, the same module reads it ──
+
+
+def _registered(tmp_path, monkeypatch):
+    """A project the catalog knows about, which is what a handoff needs."""
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["project", "register"]) == 0
+    assert paths.catalog_guid(tmp_path).guid
+    return tmp_path
+
+
+def test_the_reader_finds_what_the_writer_wrote(tmp_path, monkeypatch):
+    """The writer lived in `copilot-tools` and the reader here, so nothing
+    ever checked that the two agreed on a location."""
+    work = _registered(tmp_path, monkeypatch)
+    landed = exits.write_handoff(work, "alpha", "did the thing",
+                                 "do the next thing", "beware the cache")
+    state = exits.handoff_state(work, "alpha")
+    assert state.verdict == exits.HANDOFF_WAITING
+    assert state.path == landed
+    body = landed.read_text(encoding="utf-8")
+    assert "did the thing" in body
+    assert "do the next thing" in body
+    assert "beware the cache" in body
+
+
+def test_an_unregistered_project_is_refused_rather_than_guessed(tmp_path,
+                                                                monkeypatch):
+    """`None` is `project_handoff_file`'s answer for "not registered", and it
+    must not become a path under the projects root itself."""
+    monkeypatch.chdir(tmp_path)
+    assert paths.catalog_guid(tmp_path).guid is None
+    assert exits.write_handoff(tmp_path, "alpha", "s") is None
+
+
+def test_the_replace_leaves_no_half_written_file_behind(tmp_path, monkeypatch):
+    """The supervisor stats this path while polling, so a visible temp file is
+    a handoff somebody reads as complete."""
+    work = _registered(tmp_path, monkeypatch)
+    landed = exits.write_handoff(work, "alpha", "first")
+    exits.write_handoff(work, "alpha", "second")
+    assert "second" in landed.read_text(encoding="utf-8")
+    assert "first" not in landed.read_text(encoding="utf-8")
+    assert list(landed.parent.glob("*.tmp")) == []
+
+
+def test_the_restart_marker_is_the_one_the_supervisor_polls(tmp_path):
+    """`supervisor.py` watches `instance.restart_marker` and nothing else."""
+    marker = op.Instance("alpha").restart_marker
+    assert not marker.exists()
+    exits.request_restart("alpha")
+    assert marker.exists()

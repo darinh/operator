@@ -51,14 +51,84 @@ def _launch_preamble(monkeypatch, tmp_path, *, remembered: str = "") -> str:
 
 
 def _commands(text: str) -> list[str]:
-    spans = re.findall(r"`([^`]+)`", text)
-    return sorted({s.strip() for s in spans
-                   if s.strip().split()[:1] == ["operator"]})
+    """Every backticked span that could be a command, whatever it names.
+
+    The extractor must not know which program is the right one. This guard
+    used to keep only spans whose first token was exactly `operator`, which
+    made it structurally unable to report its own headline defect: the
+    restart clause advertised `handoff`, a console script of `copilot-tools`,
+    and the filter dropped it before any check ran. A test that finds its
+    subject with the same rule it judges it by cannot report a subject that
+    breaks the rule, so finding is permissive here and judging happens in
+    `test_every_advertised_command_is_a_program_this_project_installs`.
+    """
+    found = set()
+    for span in re.findall(r"`([^`]+)`", text):
+        tokens = span.strip().split()
+        if len(tokens) > 1 and re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]*", tokens[0]):
+            found.add(span.strip())
+    return sorted(found)
+
+
+def _installed_programs() -> frozenset:
+    """The console scripts a machine gets by installing this project, alone.
+
+    Read from the packaging metadata rather than a list retyped here, because
+    the question being asked is exactly "would this command exist on a fresh
+    devbox with nothing else on it". Asking the environment for `handoff`
+    would have answered yes on the machine where the defect was found, since
+    the predecessor tool was installed beside it.
+    """
+    from importlib import metadata
+    dist = metadata.distribution("operator-kernel")
+    return frozenset(entry.name for entry in dist.entry_points
+                     if entry.group == "console_scripts")
 
 
 def _run(template: str) -> int:
     argv = template.replace('\\"...\\"', "note").replace('"..."', "note")
     return entry.main(shlex.split(argv)[1:])
+
+
+def test_every_advertised_command_is_a_program_this_project_installs(
+        monkeypatch, tmp_path):
+    """The check the old extractor could not perform.
+
+    `handoff --instance ... --status ...` was advertised to every seat as the
+    session-restart protocol while no distribution of this project installed
+    a `handoff`. It resolved, on the machine where this was written, to a
+    console script belonging to `copilot-tools`. On the fresh devbox this
+    project is meant to stand alone on, the core loop's restart step simply
+    did not exist.
+    """
+    ours = _installed_programs()
+    for state in ({}, {"remembered": "node 20 is required"}):
+        for template in _commands(_launch_preamble(monkeypatch, tmp_path, **state)):
+            program = shlex.split(template)[0]
+            assert program in ours, (
+                f"the preamble advertises `{template}`, but {program!r} is "
+                f"not one of this project's console scripts {sorted(ours)}")
+
+
+def test_no_command_is_advertised_outside_backticks(monkeypatch, tmp_path):
+    """Backticks are what makes a command visible to the extractor above.
+
+    The `handoff` clause sat in bare prose, so every guard here read straight
+    past it for as long as it existed. An option flag loose in the text is the
+    signature: prose does not contain `--instance`, only a command does.
+    """
+    text = _launch_preamble(monkeypatch, tmp_path)
+    prose = re.sub(r"`[^`]+`", " ", text)
+    loose = re.findall(r"(?:^|\s)(--[A-Za-z][A-Za-z0-9-]*)", prose)
+    assert not loose, (
+        f"{loose} appears outside backticks, so a command is being advertised "
+        f"where the extractor cannot see it")
+
+
+def test_a_fresh_seat_is_told_how_to_restart_itself(monkeypatch, tmp_path):
+    """Key fact (2) of every preamble, and the least tested thing in it."""
+    found = _commands(_launch_preamble(monkeypatch, tmp_path))
+    assert any("handoff" in c for c in found), found
 
 
 def test_a_fresh_seat_is_told_how_to_remember(monkeypatch, tmp_path):

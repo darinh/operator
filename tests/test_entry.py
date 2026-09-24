@@ -766,3 +766,18 @@ def test_the_console_script_is_declared():
     assert "operator-fleet" in text
     assert "operator-seat" in text
     assert "operator-recover" in text
+
+
+# ── operator handoff ────────────────────────────────────────────
+
+
+def test_handoff_is_reachable_from_the_menu(monkeypatch, capsys):
+    """The menu is the documented way in for a human who has not memorised
+    the flags, and `--status` needs a prompt to reach the parser."""
+    choice = _choice_for(("handoff",))
+    printed = []
+    monkeypatch.setattr(cli, "dispatch", lambda argv, **k: printed.append(list(argv)) or 0)
+    _tty(monkeypatch, f"{choice}\nalpha\nfinished the sweep\n")
+    assert cli.main([]) == 0
+    assert printed and printed[-1] == [
+        "handoff", "--instance", "alpha", "--status", "finished the sweep"]
