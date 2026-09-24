@@ -77,12 +77,15 @@ def _commands(text: str) -> list[str]:
         if not span:
             continue
         tokens = span.split()
-        if (len(tokens) == 1 and _PATHLIKE.search(tokens[0])
-                and not tokens[0].lower().endswith(_EXECUTABLE)):
+        bare = tokens[0].strip("\"'")
+        if (len(tokens) == 1 and _PATHLIKE.search(bare)
+                and not bare.lower().endswith(_EXECUTABLE)):
             # `.operator/mandate.md` and `trace.jsonl` name files. A lone word
             # with no separator is a program, and so is one carrying an
             # executable suffix: `handoff.exe` advertises a program this
             # project does not install just as plainly as `handoff` does.
+            # Quotes are stripped first, because `"handoff.exe"` is a command
+            # spelling on Windows and not a different kind of thing.
             continue
         found.add(span)
     return sorted(found)
@@ -280,3 +283,11 @@ def test_an_executable_named_in_a_lone_span_is_still_a_command():
         assert _commands(f"text `{span}` more"), span
     for span in (".operator/mandate.md", "trace.jsonl", "extensions.json"):
         assert not _commands(f"text `{span}` more"), span
+
+
+def test_a_quoted_executable_is_still_a_command():
+    """`"handoff.exe"` is a command spelling on Windows, and the suffix test
+    was reading the closing quote as part of the extension."""
+    for span in ('"handoff.exe"', "'handoff.exe'", '".\\handoff.exe"',
+                 "handoff.EXE"):
+        assert _commands(f"run `{span}` now"), span
