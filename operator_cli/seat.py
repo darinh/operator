@@ -39,24 +39,55 @@ def _instance(given: "str | None") -> str:
     return os.environ.get(INSTANCE_ENV, "").strip()
 
 
+def _named_seat(args) -> "str | None":
+    seat = _instance(args.instance)
+    if seat:
+        return seat
+    print(f"no seat named; pass --instance or set {INSTANCE_ENV}",
+          file=sys.stderr)
+    return None
+
+
+def _project_ready(cwd: Path, seat: str) -> bool:
+    """False after printing why this directory cannot hold a journal."""
+    import paths
+
+    found = paths.catalog_guid(cwd)
+    if found.undecided:
+        print("could not read the project catalog", file=sys.stderr)
+        return False
+    if found.guid is None:
+        print("this directory is not a registered project", file=sys.stderr)
+        print("register it with: operator project register", file=sys.stderr)
+        return False
+    if not paths.guid_is_usable(seat):
+        print("the seat name is not usable", file=sys.stderr)
+        return False
+    return True
+
+
 def _remember(args) -> int:
     _bootstrap()
     from operator_memory import journal
 
-    seat = _instance(args.instance)
-    if not seat:
-        print(f"no seat named; pass --instance or set {INSTANCE_ENV}",
-              file=sys.stderr)
+    seat = _named_seat(args)
+    if seat is None:
         return 2
-    entry_id = journal.remember(Path.cwd(), seat, args.kind,
+    cwd = Path.cwd()
+    if not _project_ready(cwd, seat):
+        return 1
+    entry_id = journal.remember(cwd, seat, args.kind,
                                 " ".join(args.text), session=args.session)
     if entry_id is None:
-        # The three reasons are deliberately not distinguished in the exit
-        # code: an agent that could not take a note should carry on working,
-        # and the message is for the human reading the transcript afterwards.
-        print("nothing written - is this directory a registered project, is "
-              "the seat name usable, and is the journal under its size limit?",
-              file=sys.stderr)
+        path = journal.journal_file(cwd, seat)
+        try:
+            current = path.stat().st_size if path is not None and path.exists() else 0
+        except OSError:
+            current = 0
+        if current + journal.MAX_TEXT + 128 > journal.MAX_JOURNAL_BYTES:
+            print("the journal is at its size limit", file=sys.stderr)
+        else:
+            print("could not write the journal", file=sys.stderr)
         return 1
     print(f"remembered {entry_id} ({args.kind}) for seat {seat}")
     return 0
@@ -66,12 +97,13 @@ def _recall(args) -> int:
     _bootstrap()
     from operator_memory import journal
 
-    seat = _instance(args.instance)
-    if not seat:
-        print(f"no seat named; pass --instance or set {INSTANCE_ENV}",
-              file=sys.stderr)
+    seat = _named_seat(args)
+    if seat is None:
         return 2
-    entries = journal.recall(Path.cwd(), seat, per_kind=args.per_kind)
+    cwd = Path.cwd()
+    if not _project_ready(cwd, seat):
+        return 1
+    entries = journal.recall(cwd, seat, per_kind=args.per_kind)
     if not entries:
         print(f"seat {seat} has nothing recorded for this project")
         return 0
@@ -93,12 +125,13 @@ def _forget(args) -> int:
     _bootstrap()
     from operator_memory import journal
 
-    seat = _instance(args.instance)
-    if not seat:
-        print(f"no seat named; pass --instance or set {INSTANCE_ENV}",
-              file=sys.stderr)
+    seat = _named_seat(args)
+    if seat is None:
         return 2
-    if journal.forget(Path.cwd(), seat, args.id, session=args.session):
+    cwd = Path.cwd()
+    if not _project_ready(cwd, seat):
+        return 1
+    if journal.forget(cwd, seat, args.id, session=args.session):
         print(f"entry {args.id} will no longer be recalled "
               f"(superseded, not deleted)")
         return 0

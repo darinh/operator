@@ -74,11 +74,10 @@ Preconditions:
 - **Refuse outside a registered project.** Point the same command at a directory
   that is not a project. Run
   `control_operator.py seat --run <run> --label unregistered --cwd <some-temp-dir> -- --instance verify-seat remember --kind gotcha "should not land"`.
-  Exit `1`, and stderr is the single three-causes message: `nothing written - is
-  this directory a registered project, is the seat name usable, and is the journal
-  under its size limit?` Then run the identical command **without** `--cwd`: exit
-  `0` and an id is printed. The pair is the proof — the only thing that changed
-  was where the command was standing.
+  Exit `1`, and stderr names the unregistered directory and the fix:
+  `operator project register`. Then run the identical command **without**
+  `--cwd`: exit `0` and an id is printed. The pair is the proof. The only thing
+  that changed was where the command was standing.
 - **Prove the text cap truncates rather than refusing.** Remember an entry longer
   than the 600-character cap — 700 `A`s will do. It **succeeds**, printing an id,
   and the stored `text` in `projects/<guid>/journal/<seat>.jsonl` is exactly 600
@@ -90,8 +89,8 @@ Preconditions:
   asymmetry. Pad the journal close to its 4 MB limit with
   `control_operator.py seed-journal --run <run> --seat cap-seat --pad-to-bytes 4194104`,
   then keep remembering short entries. They are accepted until the next entry
-  would not fit, and **every** write after that exits `1` with `nothing
-  written`, leaving the file byte-identical. It never exceeds
+  would not fit, and **every** write after that exits `1` naming the size
+  limit, leaving the file byte-identical. It never exceeds
   `MAX_JOURNAL_BYTES`, which is the visible consequence of the check being on
   the *resulting* size rather than the current one. A refused write is visible
   to the agent making it; silently dropping the oldest entries would not be.

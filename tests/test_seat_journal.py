@@ -427,7 +427,9 @@ def test_the_command_reports_a_write_it_could_not_make(tmp_path, monkeypatch,
     monkeypatch.chdir(tmp_path)
     assert cli.main(["--instance", "prism", "remember", "--kind", "gotcha",
                      "x"]) == 1
-    assert "nothing written" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "not a registered project" in err
+    assert "operator project register" in err
 
 
 def test_recall_reports_withheld_wording_rather_than_swallowing_it(
