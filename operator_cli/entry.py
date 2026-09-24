@@ -19,7 +19,7 @@ from pathlib import Path
 from operator_kernel.argtail import at_dashdash
 
 from . import argv as _argv
-from . import fleet, recover, seat
+from . import fleet, project, recover, seat
 from .fleet import _bootstrap, _home, _settle_home
 
 
@@ -44,8 +44,7 @@ VERBS: tuple[Verb, ...] = (
          "Check this machine"),
     Verb(("start",), "start a supervised seat (start --name NAME)",
          "Start a supervised seat"),
-    Verb(("list",), "list running seats",
-         "List running seats"),
+    Verb(("list",), "list running seats", "List running seats"),
     Verb(("join",), "attach this terminal to a running seat",
          "Join a running seat", ("name",)),
     Verb(("stop",), "ask a seat's supervisor to stop",
@@ -59,6 +58,9 @@ VERBS: tuple[Verb, ...] = (
          "List seats that need recovering",
          extra_menu=(("Recover every seat that needs it",
                       ("recover", "--all")),)),
+    Verb(("project", "register"), "register this directory as a project", "Register this directory as a project"),
+    Verb(("project", "list"), "list registered projects", "List registered projects"),
+    Verb(("project", "forget"), "remove a registration, keep the journal", "Forget a project registration", ("path",)),
     Verb(("remember",), "record one claim for this seat",
          "Remember something about this seat",
          ("instance", "kind", "text")),
@@ -82,6 +84,7 @@ _PROMPT_LABEL = {
     "kind": ("Kind (decision, gotcha, disposition, attempt): ", "kind"),
     "text": ("Text: ", "note"),
     "id": ("Entry id: ", "entry id"),
+    "path": ("Project directory: ", "directory"),
 }
 
 
@@ -96,8 +99,7 @@ def menu_items() -> tuple[Item, ...]:
 
 def _print_help(stream) -> None:
     print("Usage: operator [command]", file=stream)
-    print("No command opens a menu when stdin and stdout are a TTY.",
-          file=stream)
+    print("No command opens a menu when stdin and stdout are a TTY.", file=stream)
     print(file=stream)
     for verb in VERBS:
         print(f"  {' '.join(verb.tokens):<22}{verb.help}", file=stream)
@@ -148,14 +150,11 @@ def _build_argv(item: Item, values: dict[str, str]) -> list[str]:
     argv = list(item.argv)
     if "instance" in values:
         argv = [argv[0], "--instance", values["instance"], *argv[1:]]
-    if "name" in values:
-        argv += [values["name"]]
     if "kind" in values:
         argv += ["--kind", values["kind"]]
-    if "text" in values:
-        argv += [values["text"]]
-    if "id" in values:
-        argv += [values["id"]]
+    for key in ("name", "text", "id", "path"):
+        if key in values:
+            argv += [values[key]]
     return argv
 
 
@@ -530,6 +529,7 @@ HANDLERS = {
     "stop": _stop,
     "restart-loop": _restart_loop,
     "recover": _recover,
+    "project": project.main,
     "remember": _remember,
     "recall": _recall,
     "forget": _forget,
