@@ -140,20 +140,58 @@ def test_a_seat_named_twice_takes_the_one_nearest_the_text(project):
 def advertised_commands(text: str) -> "list[list[str]]":
     """Every `operator-seat` command example the preamble offers, tokenised.
 
-    Only backtick spans are read. Earlier versions also scanned the prose, to
-    catch an example that escaped its formatting, and that is what made the
-    guard cry wolf: a sentence naming the program, a seat id containing it, an
+    Only backtick spans are read, and the span has to name the program before
+    anything is parsed. Both halves were found by review. Earlier versions
+    scanned the prose too, to catch an example that escaped its formatting, and
+    that is what made the guard cry wolf: a sentence naming the program, a
+    sentence naming its `recall` command, a seat id containing the name, an
     assignment mentioning it, and a note whose own text quoted a command were
-    all reported as commands nobody ran. None of them is. The contract here is
-    over examples a reader would copy, and a preamble that stops offering any
-    fails the verb check below rather than passing quietly.
+    all reported as commands nobody ran. And shell-parsing every span before
+    asking whether it was a command failed on an ordinary apostrophe.
+
+    A span that does name the program must be one shell command a reader can
+    copy: unbalanced backticks mean the spans below are paired with the wrong
+    partners, and a newline inside one means the shell would run two commands
+    where this runs one -- `shlex` treats the break as ordinary whitespace, so
+    an advertised note on its own line was being handed to a command that, as
+    typed, does not receive it.
     """
+    assert text.count("`") % 2 == 0, (
+        "the preamble has an odd number of backticks, so the spans below are "
+        "paired with the wrong partners and an example can hide between them")
     commands = []
     for segment in re.findall(r"`([^`]*)`", text):
-        argv = shlex.split(segment.strip())
-        if argv and argv[0].startswith("operator-seat"):
-            commands.append(argv)
+        stripped = segment.strip()
+        if not stripped.startswith("operator-seat"):
+            continue
+        assert "\n" not in segment, (
+            f"the preamble advertises a command broken across lines, which a "
+            f"shell reads as two: {segment!r}")
+        try:
+            commands.append(shlex.split(stripped))
+        except ValueError as unparsable:
+            raise AssertionError(
+                f"the preamble advertises {stripped!r}, which is not one "
+                f"shell command: {unparsable}") from None
     return commands
+
+
+def assert_no_unformatted_command(text: str) -> None:
+    """No prose telling a seat to *run* this program outside a code span.
+
+    The narrowest form of a check this file gave up once and had handed back by
+    the reviewer who had argued against the broad one. Scanning prose for
+    mentions produced five false alarms; scanning it for an imperative produces
+    none of them, and still catches the realistic edit -- an instruction added
+    as a sentence rather than as an example, which no test then runs. The
+    remedy asked for is formatting, not parsing: put it in backticks and
+    everything above will check it.
+    """
+    prose = re.sub(r"`[^`]*`", " ", text)
+    loose = re.findall(r"run operator-seat[^.]*", prose)
+    assert not loose, (
+        f"the preamble tells a seat to run a command that is not in backticks, "
+        f"so nothing runs it here: {loose}")
 
 
 def test_the_extraction_hands_back_the_examples_that_are_wrong():
@@ -183,27 +221,66 @@ def test_the_extraction_hands_back_the_examples_that_are_wrong():
     assert advertised_commands("`operator-seat --instance x remember`") == [
         ["operator-seat", "--instance", "x", "remember"]]
 
+    with pytest.raises(AssertionError, match="not one shell command"):
+        advertised_commands("`operator-seat remember --kind gotcha \"open`")
+    with pytest.raises(AssertionError, match="broken across lines"):
+        advertised_commands('`operator-seat remember --kind gotcha\n"n"`')
+    with pytest.raises(AssertionError, match="odd number of backticks"):
+        advertised_commands("`operator-seat recall --instance x` and `more")
+    with pytest.raises(AssertionError, match="not in backticks"):
+        assert_no_unformatted_command(
+            "For a decision, run operator-seat remember --instance x "
+            "--kind decision.")
+
 
 def test_the_extraction_does_not_fire_on_a_preamble_that_is_fine():
     """The other half, because an over-strict guard is one somebody weakens.
 
     Every one of these was failed by a previous revision, and not one of them
-    is a command that went unrun. The last is the sharpest: a note whose own
-    text quotes a command is still one command, and a scan that reads the prose
-    cannot tell the difference.
+    is a command that went unrun. The note whose own text quotes a command is
+    the sharpest: it is still one command, and a scan that reads the prose
+    cannot tell the difference. The apostrophe is the cheapest: shell-parsing
+    every span before asking whether it named the program made an ordinary
+    possessive raise.
+
+    The last two go through the real `build_preamble`, because the five above
+    are strings this file made up and a control built only from those proves
+    the helper agrees with its author.
     """
     assert advertised_commands("The operator-seat program records claims.") == []
     assert advertised_commands("The operator-seat recall command reads notes.") == []
+    assert advertised_commands("`session's notes`") == []
     assert advertised_commands("`operator-seat recall --instance x`, from a "
                                "program named operator-seat.") == [
         ["operator-seat", "recall", "--instance", "x"]]
-    assert advertised_commands("`operator-seat recall --instance "
-                               "operator-seat-prism`") == [
-        ["operator-seat", "recall", "--instance", "operator-seat-prism"]]
     assert advertised_commands('`operator-seat remember --instance x --kind '
                                'gotcha "operator-seat recall needs a seat"`') == [
         ["operator-seat", "remember", "--instance", "x", "--kind", "gotcha",
          "operator-seat recall needs a seat"]]
+
+
+@pytest.mark.parametrize("display_name, assignment", [
+    ("operator-seat-prism", ""),
+    ("prism", "Use operator-seat to journal what you find."),
+    ("prism", "Investigate operator-seat argument ordering."),
+])
+def test_a_real_preamble_offers_exactly_its_two_commands(display_name,
+                                                         assignment,
+                                                         tmp_path, monkeypatch):
+    """The same half, through the kernel rather than through strings.
+
+    A seat id containing the program's name, and an assignment mentioning it,
+    each failed a previous revision. They are built here by `build_preamble`
+    rather than typed, because a control made only of this file's own strings
+    establishes that the helper agrees with whoever wrote them.
+    """
+    monkeypatch.setattr(op, "RESTART_DIR", tmp_path / "restart")
+    text = op.build_preamble("anvil:anvil",
+                             op.Instance(display_name=display_name),
+                             assignment=assignment, has_journal=True)
+    assert_no_unformatted_command(text)
+    assert [argv[1] for argv in advertised_commands(text)] == ["recall",
+                                                              "remember"]
 
 
 def test_every_command_the_preamble_advertises_actually_runs(project,
@@ -237,6 +314,7 @@ def test_every_command_the_preamble_advertises_actually_runs(project,
     text = op.build_preamble("anvil:anvil", inst, has_journal=True)
 
     advertised = advertised_commands(text)
+    assert_no_unformatted_command(text)
     verbs = set()
     for argv in advertised:
         assert argv[0] == "operator-seat", (
@@ -249,7 +327,7 @@ def test_every_command_the_preamble_advertises_actually_runs(project,
     assert verbs == {"remember", "recall"}, (
         "the preamble stopped naming both journal commands, so this test is "
         f"asserting nothing; saw: {advertised}")
-    assert any("--instance" in argv[2:] for argv in advertised), (
+    assert any("--instance" in _after_the_verb(argv) for argv in advertised), (
         f"no advertised command puts --instance after the subcommand any more, "
         f"which is the placement this whole file exists for: {advertised}")
 
@@ -274,6 +352,27 @@ def _verb(argv: "list[str]") -> str:
     for the shape it is in.
     """
     return _parse(argv).command
+
+
+def _after_the_verb(argv: "list[str]") -> "list[str]":
+    """The part of an advertised command that follows its subcommand.
+
+    `argv[2:]` stood here and was not the same thing. `operator-seat --session
+    1 --instance prism recall` has `--instance` inside `argv[2:]` while putting
+    it *before* the verb, so the placement assertion this file exists for
+    passed on a preamble that had abandoned the placement entirely.
+
+    The walk is checked against argparse rather than trusted: the two have to
+    name the same subcommand, or the invariant being asserted is this helper's
+    opinion.
+    """
+    index = 1
+    while index < len(argv) and argv[index].startswith("--"):
+        index += 1 if "=" in argv[index] else 2
+    assert index < len(argv) and argv[index] == _verb(argv), (
+        f"this walk and argparse disagree about where the subcommand is in "
+        f"{argv}, so the placement check below would be asserting nothing")
+    return argv[index + 1:]
 
 
 def _parse(argv: "list[str]"):
