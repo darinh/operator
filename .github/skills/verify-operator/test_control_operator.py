@@ -323,6 +323,16 @@ def test_a_nested_state_file_keeps_its_path_in_its_name(run):
     assert "projects__guid-1__journal__seat-a.jsonl" in names
 
 
+def test_doctor_checks_every_console_script_the_harness_drives(run):
+    """A PATH check that skips a driven entry point reports healthy about a
+    machine that cannot run the recipe. `operator` was missed when the front
+    door became drivable, which Reviewer B caught."""
+    source = _SOURCE.read_text(encoding="utf-8")
+    checked = source.split('for name in (', 1)[1].split(')', 1)[0]
+    for name in ("operator", "operator-fleet", "operator-seat"):
+        assert f'"{name}"' in checked, (name, checked)
+
+
 def test_evidence_captures_both_halves_of_a_handoff(run):
     """The file and the marker, because either alone is ambiguous.
 

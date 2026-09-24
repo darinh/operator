@@ -136,3 +136,43 @@ def test_a_second_positional_is_refused(tmp_path, monkeypatch, capsys):
     _project(tmp_path, monkeypatch)
     assert cli.main(["handoff", "alpha", "beta", "--status", "done"]) == 2
     assert "unexpected argument" in capsys.readouterr().err
+
+
+def test_a_value_flag_does_not_swallow_the_next_option(tmp_path, monkeypatch,
+                                                       capsys):
+    """The regression the first round of review fixes introduced.
+
+    `--context --no-restart` took the switch as the context text, left the
+    switch unparsed, and restarted the session the user had just asked to
+    keep. Worse than the typo it was fixed alongside, because the flag was
+    spelled correctly.
+    """
+    _project(tmp_path, monkeypatch)
+    assert cli.main(["handoff", "--instance", "alpha", "--status", "done",
+                     "--context", "--no-restart"]) == 2
+    assert "--context needs a value" in capsys.readouterr().err
+    assert not op.Instance("alpha").restart_marker.exists()
+
+
+def test_a_status_that_looks_like_a_flag_is_not_taken_as_one(tmp_path,
+                                                             monkeypatch,
+                                                             capsys):
+    """The same rule one flag over, because `--status --no-restart` wrote the
+    switch as the status and ended the session."""
+    _project(tmp_path, monkeypatch)
+    assert cli.main(["handoff", "--instance", "alpha", "--status",
+                     "--no-restart"]) == 2
+    assert "--status needs a value" in capsys.readouterr().err
+    assert not op.Instance("alpha").restart_marker.exists()
+
+
+def test_joined_syntax_is_how_you_mean_an_option_literally(tmp_path,
+                                                           monkeypatch):
+    """Refusing the separated form needs an escape hatch, or text that happens
+    to look like a flag becomes unsayable."""
+    work = _project(tmp_path, monkeypatch)
+    assert cli.main(["handoff", "--instance", "alpha", "--status", "done",
+                     "--context=--no-restart", "--no-restart"]) == 0
+    body = paths.project_handoff_file(work, "alpha").read_text(encoding="utf-8")
+    assert "--no-restart" in body
+    assert not op.Instance("alpha").restart_marker.exists()

@@ -219,7 +219,10 @@ def write_handoff(workdir: Path, instance_id: str, status: str,
         try:
             tmp.unlink()
         except OSError:
-            pass
+            # Best effort, and said out loud. A lock that survives the replace
+            # can survive the cleanup too, and a caller told "nothing was left
+            # behind" when a temp file remains has been told something false.
+            log(f"  and could not remove {tmp.name}")
         return WRITE_FAILED
     return handoff_file
 

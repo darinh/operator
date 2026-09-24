@@ -17,12 +17,14 @@ from operator_cli import entry
 
 SEAT = "alpha"
 
-#: A single-token span is a command only if it could be a bare program name.
-#: Multi-token spans are always treated as commands, whatever the first token
-#: looks like, which is what lets `` `.\handoff.exe --instance x` `` be
-#: reported rather than mistaken for a path. Reviewer A found both shapes
-#: slipping through the acceptance rule this replaces.
+#: A single-token span is a command only if it could name a program. Multi-token
+#: spans are always commands, whatever the first token is, which is what lets
+#: `` `.\handoff.exe --instance x` `` be reported rather than mistaken for a
+#: path. Reviewer A found three shapes slipping through the acceptance rule
+#: this replaces, then a fourth that this exemption had to be narrowed for:
+#: `` `handoff.exe` `` is an advertised program, `` `trace.jsonl` `` is a file.
 _PATHLIKE = re.compile(r"[/\\.]")
+_EXECUTABLE = (".exe", ".cmd", ".bat", ".ps1", ".sh", ".com")
 
 
 def _launch_preamble(monkeypatch, tmp_path, *, remembered: str = "") -> str:
@@ -75,11 +77,12 @@ def _commands(text: str) -> list[str]:
         if not span:
             continue
         tokens = span.split()
-        if len(tokens) == 1 and _PATHLIKE.search(tokens[0]):
-            # `.operator/mandate.md` and `trace.jsonl` are the spans in this
-            # preamble that name files. A lone word with no separator and no
-            # extension is a program, and `` `handoff` `` on its own is
-            # exactly as much of an advertisement as the full command line.
+        if (len(tokens) == 1 and _PATHLIKE.search(tokens[0])
+                and not tokens[0].lower().endswith(_EXECUTABLE)):
+            # `.operator/mandate.md` and `trace.jsonl` name files. A lone word
+            # with no separator is a program, and so is one carrying an
+            # executable suffix: `handoff.exe` advertises a program this
+            # project does not install just as plainly as `handoff` does.
             continue
         found.add(span)
     return sorted(found)
@@ -266,3 +269,14 @@ def test_a_quoted_option_value_is_not_mangled_into_a_false_failure(
     """
     _launch_preamble(monkeypatch, tmp_path)
     assert _run(template) != 2, f"`{template}` is valid but the guard mangled it"
+
+
+def test_an_executable_named_in_a_lone_span_is_still_a_command():
+    """Reviewer A's fourth shape. `handoff.exe` advertises a program this
+    project does not install just as plainly as `handoff` does, and the
+    path-like exemption was swallowing it along with `trace.jsonl`."""
+    for span in ("handoff", "handoff.exe", ".\\handoff.exe", "git.exe",
+                 "operator handoff --instance a"):
+        assert _commands(f"text `{span}` more"), span
+    for span in (".operator/mandate.md", "trace.jsonl", "extensions.json"):
+        assert not _commands(f"text `{span}` more"), span
