@@ -60,17 +60,23 @@ spend ceiling is unlimited by default and you set it yourself.
 
 ## What it actually does
 
-**Stops a seat that has stopped working.** After each session it fingerprints the whole
-repository, every ref and every worktree, and asks whether anything changed. Three consecutive
-sessions that change nothing *and end cleanly* exits with `EXIT_NO_PROGRESS`. Five that change
-nothing *and* end without a handoff or an observed exit exits with `EXIT_UNACCOUNTED`. Both
-counters need an unchanged fingerprint, so a seat that keeps producing work never trips either
-one. It polls every 10 seconds, and an unexpected exit inside 120 seconds counts as a crash
-rather than a session.
+**Stops a seat that has stopped working.** Three independent counters run, and whichever reaches
+its limit first ends the run.
+
+| Counter | Limit | Counts | Exit |
+| --- | --- | --- | --- |
+| crash loop | 5 | unexpected exits inside 120 seconds | 1 |
+| no progress | 3 | sessions that changed nothing and ended cleanly | 3 |
+| unaccounted | 5 | sessions that changed nothing and ended without a handoff or observed exit | 4 |
+
+The fingerprint behind the last two covers the whole repository, every ref and every worktree,
+so a seat that keeps producing work trips neither. The crash counter is checked first, which
+means a run of short unaccounted sessions ends as a crash loop rather than as unaccounted
+endings.
 
 **Knows the difference between "nothing changed" and "I could not tell."** An unreadable git
-probe is `unknown`, not `unchanged`, and it does not count toward either limit. A breaker that
-fires on its own blindness would stop a healthy fleet.
+probe is `unknown`, not `unchanged`, and it advances no counter. A breaker that fires on its own
+blindness would stop a healthy fleet.
 
 **Survives a reboot.** `operator recover` lists seats that were supervised when the machine
 stopped. `operator recover --all`, or a seat name, restarts their supervisors, continuing the
