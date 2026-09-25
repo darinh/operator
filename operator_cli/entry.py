@@ -207,14 +207,8 @@ def _start(rest: list[str]) -> int:
 
 def _list(_rest: list[str]) -> int:
     _bootstrap()
-    from supervisor_control import active_instances
-    found = active_instances()
-    if not found:
-        print("No running seats.")
-        return 0
-    for inst in found:
-        print(f"  {inst.display_name}")
-    return 0
+    from snapshot import list_instances
+    return list_instances()
 
 
 def _named(rest: list[str]) -> str:
