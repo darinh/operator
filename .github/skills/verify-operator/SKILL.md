@@ -1,19 +1,24 @@
 ---
 name: verify-operator
-description: Drive the operator CLIs (operator-fleet, operator-seat) against a disposable operator home and capture proof. Use when changing the kernel, fleet host, proposal queue, seat journal or an extension and you need evidence the real commands still behave, not just that pytest is green.
+description: Drive the operator CLIs (operator, operator-fleet, operator-seat) against a disposable operator home and capture proof. Use when changing the kernel, fleet host, proposal queue, seat journal, session handoff or an extension and you need evidence the real commands still behave, not just that pytest is green.
 ---
 
 # Verify operator
 
 `operator` is a supervision kernel for fleets of autonomous coding-agent sessions.
-Its user-facing surface is two console scripts installed from this repo:
+It installs four console scripts. This skill drives three of them:
 
+- **`operator`** — the front door. `handoff` files a seat's baton and asks its
+  supervisor for a restart; `project` registers and forgets checkouts; `ext`
+  enables and disables extensions.
 - **`operator-fleet`** — `run` polls the ledger and wakes enabled extensions;
   `proposals` shows and drains the NEEDS-HUMAN queue.
 - **`operator-seat`** — `remember` / `recall` / `forget`, a seat's cross-session
   journal for one project.
 
-There is no server, no UI and no long-lived process to attach to. Both commands
+`operator-recover` is the fourth and this skill does not wrap it.
+
+There is no server, no UI and no long-lived process to attach to. All of these
 are short-lived, they read and write a state directory, and **that directory is
 the thing under test**. So "launch" here means *build a disposable operator home*,
 and every drive runs against it.
@@ -151,12 +156,17 @@ nothing.
 python .github/skills/verify-operator/control_operator.py evidence --run <run> --label before-drain
 ```
 
-Every `fleet` and `seat` call already appends the command, exit code, stdout and
-stderr to `artifacts/transcript.md`. `evidence` adds a labelled snapshot of the
-home's state files — `trace.jsonl`, `proposals.jsonl`, `proposals.handled.jsonl`,
-`fleet-failures.jsonl`, `fleet-tail.json`, `extensions.json`, `operator.log`, any
-`extensions/*.json`, the catalog and every seat journal — plus a `MANIFEST.txt`
-naming sizes.
+Every `operator`, `fleet` and `seat` call already appends the command, exit code,
+stdout and stderr to `artifacts/transcript.md`. `evidence` adds a labelled
+snapshot of the home's state files — `trace.jsonl`, `proposals.jsonl`,
+`proposals.handled.jsonl`, `fleet-failures.jsonl`, `fleet-tail.json`,
+`extensions.json`, `operator.log`, any `extensions/*.json`, the catalog, every
+seat journal, every handoff under `projects/*/handoff/*.md` and everything under
+`restart/*` — plus a `MANIFEST.txt` naming sizes.
+
+The last two are one pair. The handoff file is what the next session reads and
+the restart marker is what the supervisor polls, so a snapshot showing only one
+of them cannot tell "handed off" from "ended without leaving anything".
 
 Proof standards:
 

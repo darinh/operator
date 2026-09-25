@@ -174,6 +174,24 @@ def test_a_write_that_fails_reports_it_and_leaves_no_litter(tmp_path,
     assert "good" in landed.read_text(encoding="utf-8")
 
 
+def test_a_status_that_cannot_be_encoded_is_reported_and_leaves_no_litter(
+        tmp_path, monkeypatch):
+    """The failure the `except OSError` above it could not catch.
+
+    `UnicodeEncodeError` is a `ValueError`, so an unencodable status escaped
+    as a traceback out of the shipped CLI and left the temp file behind. The
+    status is not mocked here because it does not need to be: POSIX decodes an
+    undecodable argv byte with `surrogateescape`, so `--status $'\\xff'`
+    arrives as exactly this string on the platform half of CI runs on.
+    """
+    work = _registered(tmp_path, monkeypatch)
+    landed = exits.write_handoff(work, "alpha", "good")
+    unencodable = b"\xff".decode("utf-8", "surrogateescape")
+    assert exits.write_handoff(work, "alpha", unencodable) is exits.WRITE_FAILED
+    assert list(landed.parent.glob("*.tmp")) == []
+    assert "good" in landed.read_text(encoding="utf-8")
+
+
 def test_the_restart_marker_is_not_re_sanitised(tmp_path):
     """`safe_instance_id` is not idempotent, so building an `Instance` from an
     id that is already sanitised invents a third name."""
