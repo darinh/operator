@@ -248,3 +248,57 @@ def test_no_running_seats_is_not_a_failure(monkeypatch, capsys):
     monkeypatch.setattr(op, "active_instances", lambda: [])
     assert op.list_instances() == 0
     assert capsys.readouterr().out.strip() == "No running seats."
+
+
+def test_every_seat_is_described_with_its_own_state(monkeypatch, capsys):
+    """The other clause that names this command, and the other way to fake it.
+
+    Where the stale CAUTION promises the changed files, the fallback one
+    promises that ``operator list`` "reports the same state for every instance
+    on this machine". A board that decided once and printed that verdict down
+    the column would satisfy every other test in this file, because they all
+    look at one seat. So this one gives three seats three different answers
+    and insists each row carries its own, with the stale seat's files against
+    the stale seat and nowhere else.
+    """
+    states = {"alpha": (op.CODE_STALE, ["only-alpha.py"]),
+              "beta": (op.CODE_CURRENT, []),
+              "gamma": (op.CODE_MISMATCH, [])}
+    monkeypatch.setattr(op, "active_instances",
+                        lambda: [op.Instance(n) for n in states])
+    monkeypatch.setattr(op, "instance_snapshot", lambda inst: {
+        "name": inst.display_name, "id": inst.id, "loop_pid": PID,
+        "loop_code": states[inst.display_name][0],
+        "loop_changed": states[inst.display_name][1]})
+
+    assert op.list_instances() == 0
+    lines = capsys.readouterr().out.splitlines()
+
+    rows = {n: next(ln for ln in lines if ln.startswith(f"  {n}")) for n in states}
+    assert rows["beta"].strip() == "beta", (
+        f"a current supervisor was given somebody else's verdict: {rows['beta']}")
+    for stale in ("alpha", "gamma"):
+        assert rows[stale].strip() != stale, f"{stale} was reported as healthy"
+    assert rows["alpha"].replace("alpha", "") != rows["gamma"].replace("gamma", ""), (
+        f"two different verdicts printed the same words:\n{rows}")
+    assert [ln for ln in lines if "only-alpha.py" in ln] == ["      only-alpha.py"], (
+        f"alpha's changed file was printed against more than alpha:\n{lines}")
+
+
+def test_a_row_without_the_changed_key_is_still_printed(monkeypatch, capsys):
+    """`instance_snapshot` is not the only thing that can build a row.
+
+    An extension or an older record reader handing over a dict without
+    ``loop_changed`` must cost the seat its file list, not the whole listing.
+    Losing the board to a `KeyError` would take every other seat's verdict
+    down with it, which is the opposite of what it is for.
+    """
+    monkeypatch.setattr(op, "active_instances", lambda: [op.Instance("alpha")])
+    monkeypatch.setattr(op, "instance_snapshot", lambda inst: {
+        "name": "alpha", "id": inst.id, "loop_pid": PID,
+        "loop_code": op.CODE_STALE})
+
+    assert op.list_instances() == 0
+    out = capsys.readouterr().out
+    assert out.splitlines()[0].strip() != "alpha", (
+        f"the verdict went missing with the file list:\n{out}")
