@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import instance
 import evidence
-from paths import project_handoff_file
+from paths import guid_is_usable, project_handoff_file
 
 from config import CATALOG_UNREADABLE, MAX_LAUNCH_FAILURES, OPERATOR_HOME
 from presence import path_present
@@ -147,6 +147,116 @@ def handoff_state(workdir: Path, instance_id: str = "") -> HandoffState:
     log("  No handoff file found for this project — treating this as "
         "crash recovery")
     return HandoffState(HANDOFF_MISSING, handoff_file)
+
+
+#: `write_handoff` could address the file and could not write it. Distinct
+#: from `None`, which means there was nowhere to write in the first place: one
+#: is a full disk or a denied directory, the other is an unregistered project,
+#: and the seat is owed different sentences for them.
+WRITE_FAILED = "write-failed"
+
+
+def write_handoff(workdir: Path, instance_id: str, status: str,
+                  next_steps: str = "", context: str = "") -> object:
+    """Write this seat's handoff, returning the path it landed at.
+
+    ``instance_id`` is the seat **id**, never the display name. That is the
+    name the supervisor probes with (``handoff_state(workdir, instance.id)``
+    at `supervisor.py`) and the name the file is called, and
+    ``safe_instance_id`` maps ``a.b`` to ``a-b-69f664`` -- so a handoff filed
+    under the display name is written somewhere the next session does not
+    look, while the restart it triggers happens anyway. `preamble.py` makes
+    the same point about ``operator remember``, three clauses further down,
+    and both reviewers of this change caught it here independently.
+
+    The writer lives beside :func:`handoff_state`, its reader, because the two
+    agree on a location and nothing else checks that they still do. They were
+    split across two distributions for the whole life of this project: the
+    reader here, the writer in `copilot-tools`, which is the package the owner
+    said to design as though it did not exist. `supervisor.py` still carries a
+    comment explaining that "`handoff` touches the marker while copilot is
+    still up", a protocol this repository depended on and did not ship.
+
+    The path values are :func:`project_handoff_file`'s, deliberately
+    unchanged. "The catalog would not open", "this project is not registered
+    or that seat name cannot be a filename" and a real path are different
+    facts and the caller owes the agent different sentences, which is the
+    argument :func:`handoff_state` already makes for refusing to collapse
+    them.
+
+    Never raises. A seat that cannot write its handoff still has to be able to
+    report that, and a traceback out of the last command a session runs is the
+    one place an error message is worth most.
+
+    The replace is atomic because the supervisor is a concurrent reader: it
+    polls the restart marker and stats this path, so a partially written file
+    is a handoff the next session reads as complete. Writing the temp file in
+    the destination directory is what keeps `os.replace` on one filesystem,
+    and the temp file is removed on failure so a crashed write does not leave
+    litter beside a handoff that is still good.
+    """
+    handoff_file = project_handoff_file(workdir, instance_id)
+    if not guid_is_usable(instance_id):
+        # `project_handoff_file` answers an empty id with the project's legacy
+        # `next-session.md`, which the reader still needs for an unmigrated
+        # project. A *writer* must never land there: it is one shared file per
+        # project, so a seat with no id would overwrite another seat's baton.
+        return None
+    if handoff_file is CATALOG_UNREADABLE or handoff_file is None:
+        return handoff_file
+    body = [f"# Handoff: {instance_id}", "", "## Status", "", status.strip()]
+    for heading, text in (("Next", next_steps), ("Context", context)):
+        if text.strip():
+            body += ["", f"## {heading}", "", text.strip()]
+    body.append("")
+    tmp = handoff_file.with_name(handoff_file.name + ".tmp")
+    try:
+        handoff_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text("\n".join(body), encoding="utf-8")
+        os.replace(tmp, handoff_file)
+    except (OSError, UnicodeError):
+        # `UnicodeError` belongs here with `OSError` because the text is not
+        # this module's to vouch for. POSIX decodes an undecodable argv byte
+        # with `surrogateescape`, so `--status $'\xff'` arrives as a lone
+        # surrogate that `write_text` refuses *after* opening the temp file.
+        # Catching only `OSError` let that escape as a traceback and left the
+        # litter this function's docstring promises it removes.
+        log(f"  Could not write the handoff at {handoff_file}")
+        try:
+            tmp.unlink()
+        except OSError:
+            # Best effort, and said out loud. A lock that survives the replace
+            # can survive the cleanup too, and a caller told "nothing was left
+            # behind" when a temp file remains has been told something false.
+            log(f"  and could not remove {tmp.name}")
+        return WRITE_FAILED
+    return handoff_file
+
+
+def request_restart(instance_id: str) -> bool:
+    """Ask this seat's supervisor to end the session and launch the next one.
+
+    Separate from :func:`write_handoff` so the file is on disk before the
+    supervisor is told to look. The marker is what `supervisor.py` polls, and
+    it tears the session down as soon as it sees it -- so touching it first
+    would race the write it exists to announce.
+
+    Addressed through :func:`instance.restart_marker_for` rather than by
+    building an `Instance`, because ``instance_id`` is already an id and
+    ``safe_instance_id`` is not idempotent. False if the marker could not be
+    set, which leaves a written handoff and a session that keeps running: the
+    recoverable half of the two.
+    """
+    if not guid_is_usable(instance_id):
+        return False
+    marker = instance.restart_marker_for(instance_id)
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
+    except OSError:
+        log(f"  Could not set the restart marker for {instance_id}")
+        return False
+    return True
 
 
 def crash_recovery_verdict(workdir: Path, instance_id: str = "") -> bool:

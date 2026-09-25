@@ -56,9 +56,9 @@ Per seat, the share that did *not* take the handoff path:
 
 `record_session_exit` is careful that "unexplained" means *no stop, detach or
 restart marker was set* and is **not** evidence of a crash. That caveat does not
-rescue the handoff, because the inference runs the other way: the `handoff`
-command sets the restart marker, so an ending with no restart marker is an
-ending that wrote no handoff. Whatever those 997 endings were, they left
+rescue the handoff, because the inference runs the other way: the `operator
+handoff` command sets the restart marker, so an ending with no restart marker is
+an ending that wrote no handoff. Whatever those 997 endings were, they left
 nothing behind.
 
 > **The seat's only memory is written on the rare path.** For most seats it is

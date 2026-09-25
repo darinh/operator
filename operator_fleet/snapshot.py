@@ -1,7 +1,16 @@
-"""What a supervised instance looks like right now.
+"""What a supervised instance looks like right now, and the board that prints it.
 
-The board reads this. It is deliberately separate from the loop: a status
-read must never be able to change what it is reporting on.
+Describing and supervising stay apart: a status read must never be able to
+change what it is reporting on, and nothing below writes anything.
+
+The board lived nowhere for a while, and `operator list` printed a seat name
+per row instead. That is not a cosmetic gap. The one CAUTION the launch
+preamble ever prints tells an agent that ``operator list`` "names the changed
+files and every instance affected", and `loop_record_facts` has always
+returned those paths beside the verdict. There was no board to print them and
+`instance_snapshot` dropped them from the row, so the agent that went and
+checked, because the preamble told it to, learned strictly less than the
+agent that did not bother.
 
 **This is why it is not in the kernel.** Describing a fleet is not supervising
 one, and the arrow proves it: no kernel module imports this file, while this
@@ -22,10 +31,12 @@ from __future__ import annotations
 
 import json
 from presence import path_present
-from config import MUX, OPERATOR_HOME
+from config import (CODE_MISMATCH, CODE_STALE, CODE_UNKNOWN, CODE_UNRECORDED,
+                    MUX, OPERATOR_HOME)
 from instance import Instance
 from provenance import loop_record_facts
 from supervisor_records import _running_loop_identity
+import supervisor_control
 
 TABS_FILE = OPERATOR_HOME / "tabs.json"
 
@@ -104,6 +115,11 @@ def instance_snapshot(instance: Instance) -> dict:
         "owned": session_live and instance.owns_live_session(),
         "loop_pid": loop_pid,
         "loop_code": record["code"],
+        # The paths behind the verdict, carried rather than recomputed. The
+        # board is told to name them and cannot name what the row drops, and
+        # re-reading them at print time would compare disk against a disk
+        # that has moved on since the verdict was decided.
+        "loop_changed": record["changed"],
         "loop_started": record["started"] or "",
         "loop_adopted": record["adopted"],
         "loop_began_run": record["began_run"],
@@ -115,3 +131,83 @@ def instance_snapshot(instance: Instance) -> dict:
         "cwd": cwd,
         "argv": list(spec.get("argv") or []),
     }
+
+
+#: Verdicts a restart is known to mend. ``unknown`` is deliberately absent:
+#: nobody could compare that supervisor at all, so a restart is a guess, and
+#: offering a remedy for a state nobody has diagnosed spends the reader's
+#: trust on the one row that least deserves it. It still gets a notice below,
+#: because saying nothing is the failure this whole instrument exists for.
+REMEDIABLE = (CODE_STALE, CODE_UNRECORDED, CODE_MISMATCH)
+
+#: What each verdict costs the reader, in the row's own words. ``current`` is
+#: absent rather than empty: the overwhelmingly common case stays silent, for
+#: the same reason `preamble._code_state_notice` gives about attaching a
+#: caveat to every session. A verdict missing from here renders an ordinary
+#: row, which `tests/test_snapshot.py` fails on rather than tolerates.
+_CODE_NOTICE = {
+    CODE_STALE: "OUT-OF-DATE code, changed since it started:",
+    CODE_UNRECORDED: "recorded nothing about the code it imported",
+    CODE_MISMATCH: "startup record belongs to a different process",
+    CODE_UNKNOWN: "startup record could not be compared against the tree",
+}
+
+
+def _instance_summary(snap: dict) -> str:
+    """One row: the seat, and what its supervisor cannot show about itself.
+
+    Every notice is gated on a live loop pid. A seat whose supervisor was
+    stopped has imported nothing that could be behind disk, so a staleness
+    verdict about it describes nothing -- and the gate is load-bearing in
+    both directions, which is what `tests/test_loop_pid_identity.py` is for:
+    a recycled pid read as live switches four notices on for a supervisor
+    that cannot be described.
+    """
+    row = f"  {snap['name']}"
+    if not snap.get("loop_pid"):
+        return row
+    notice = _CODE_NOTICE.get(snap.get("loop_code"), "")
+    return f"{row}   {notice}" if notice else row
+
+
+def list_instances() -> int:
+    """Every running seat, and every supervisor that cannot show it is current.
+
+    The remedy is offered once for the group and never once per instance, and
+    that is the incident this function was rebuilt around rather than a
+    preference about output. An operator change makes every supervisor on the
+    machine stale at the same instant -- each imported its code once, at
+    startup -- so the sweep is the normal case and the per-instance restart is
+    the exception. This listing once named eight stale supervisors and printed
+    eight commands to type, and a remedy applied by hand once per instance is
+    a remedy applied to some of them.
+
+    ``active_instances`` is reached through its module rather than bound at
+    import by a ``from``. Either spelling works if the lookup happens per
+    call, and a function-local ``from`` import would too; what fails is a
+    module-level one, because it is resolved before any caller can substitute
+    the roster. The two `test_entry.py` cases that drive `operator list`
+    caught exactly that: they patch `supervisor_control`, the first draft read
+    a copy taken at import time, and the listing reported an empty machine.
+    """
+    found = supervisor_control.active_instances()
+    if not found:
+        print("No running seats.")
+        return 0
+    behind = 0
+    for inst in found:
+        snap = instance_snapshot(inst)
+        print(_instance_summary(snap))
+        if not snap.get("loop_pid"):
+            continue
+        for path in snap.get("loop_changed") or ():
+            print(f"      {path}")
+        if snap.get("loop_code") in REMEDIABLE:
+            behind += 1
+    if behind:
+        subject = ("supervisor cannot show it is" if behind == 1
+                   else "supervisors cannot show they are")
+        print(f"\n{behind} of {len(found)} {subject} running the operator "
+              f"code that is on disk now.")
+        print("Replace them all with:\n  operator restart-loop --all")
+    return 0

@@ -47,6 +47,8 @@ operator list                 what is running
 operator join alpha           attach your terminal to it
 operator stop alpha           ask its supervisor to stop
 operator recover --all        bring back seats a crash or reboot took down
+operator handoff --instance alpha --status "what you did"
+                              end this session, leave the next one a record
 operator trace                what happened, newest first
 operator verify               has the record been altered
 ```

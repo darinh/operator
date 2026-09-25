@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import json
 
+import exits
 import op
+import paths
+from operator_cli import entry as cli
 
 
 def _spend_file(home, key, amount):
@@ -62,3 +65,153 @@ def test_a_session_ending_files_its_cost_under_the_seat_id(tmp_path):
     assert len(costs) == 1
     assert costs[0]["instance"] == seat_id
     assert costs[0]["amount"] == 3.0
+
+
+# ── the handoff file: one module writes it, the same module reads it ──
+
+
+def _registered(tmp_path, monkeypatch):
+    """A project the catalog knows about, which is what a handoff needs."""
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["project", "register"]) == 0
+    assert paths.catalog_guid(tmp_path).guid
+    return tmp_path
+
+
+def test_the_reader_finds_what_the_writer_wrote(tmp_path, monkeypatch):
+    """The writer lived in `copilot-tools` and the reader here, so nothing
+    ever checked that the two agreed on a location."""
+    work = _registered(tmp_path, monkeypatch)
+    landed = exits.write_handoff(work, "alpha", "did the thing",
+                                 "do the next thing", "beware the cache")
+    state = exits.handoff_state(work, "alpha")
+    assert state.verdict == exits.HANDOFF_WAITING
+    assert state.path == landed
+    body = landed.read_text(encoding="utf-8")
+    assert "did the thing" in body
+    assert "do the next thing" in body
+    assert "beware the cache" in body
+
+
+def test_an_unregistered_project_is_refused_rather_than_guessed(tmp_path,
+                                                                monkeypatch):
+    """`None` is `project_handoff_file`'s answer for "not registered", and it
+    must not become a path under the projects root itself."""
+    monkeypatch.chdir(tmp_path)
+    assert paths.catalog_guid(tmp_path).guid is None
+    assert exits.write_handoff(tmp_path, "alpha", "s") is None
+
+
+def test_the_replace_leaves_no_half_written_file_behind(tmp_path, monkeypatch):
+    """The supervisor stats this path while polling, so a visible temp file is
+    a handoff somebody reads as complete."""
+    work = _registered(tmp_path, monkeypatch)
+    landed = exits.write_handoff(work, "alpha", "first")
+    exits.write_handoff(work, "alpha", "second")
+    assert "second" in landed.read_text(encoding="utf-8")
+    assert "first" not in landed.read_text(encoding="utf-8")
+    assert list(landed.parent.glob("*.tmp")) == []
+
+
+def test_the_restart_marker_is_the_one_the_supervisor_polls(tmp_path):
+    """`supervisor.py` watches `instance.restart_marker` and nothing else."""
+    marker = op.Instance("alpha").restart_marker
+    assert not marker.exists()
+    exits.request_restart("alpha")
+    assert marker.exists()
+
+
+# ── what two reviewers found: the seat key, and the guard on it ──
+
+
+def test_a_seat_whose_name_sanitises_is_filed_where_the_reader_looks(
+        tmp_path, monkeypatch):
+    """The bug both reviewers of PR #28 found independently.
+
+    `safe_instance_id` maps `a.b` to `a-b-69f664`, the supervisor probes with
+    `instance.id`, and filing under the display name put the handoff where the
+    next session does not look while restarting the session anyway.
+    """
+    work = _registered(tmp_path, monkeypatch)
+    seat_id = op.safe_instance_id("a.b")
+    assert seat_id != "a.b", "pick a name that actually sanitises"
+
+    exits.write_handoff(work, seat_id, "filed under the id")
+    state = exits.handoff_state(work, seat_id)
+    assert state.verdict == exits.HANDOFF_WAITING
+    assert state.path.name == f"{seat_id}.md"
+    assert not exits.crash_recovery_verdict(work, seat_id)
+
+
+def test_the_display_name_addresses_nothing_the_reader_will_find(
+        tmp_path, monkeypatch):
+    """The other half: writing under the display name must not look fine."""
+    work = _registered(tmp_path, monkeypatch)
+    exits.write_handoff(work, "a.b", "filed under the display name")
+    assert exits.crash_recovery_verdict(work, op.safe_instance_id("a.b"))
+
+
+def test_a_seat_name_that_is_not_one_path_component_is_refused(tmp_path,
+                                                               monkeypatch):
+    """`project_journal_file` has always checked this and the handoff path
+    did not, because its only caller could not produce a bad name."""
+    work = _registered(tmp_path, monkeypatch)
+    for bad in ("../escape", ".", "", "a/b", "CON"):
+        assert exits.write_handoff(work, bad, "nope") is None, bad
+        assert not exits.request_restart(bad), bad
+
+
+def test_a_write_that_fails_reports_it_and_leaves_no_litter(tmp_path,
+                                                            monkeypatch):
+    """The claim "no temp file left behind" was only ever tested on the happy
+    path, where there is nothing to clean up."""
+    work = _registered(tmp_path, monkeypatch)
+    landed = exits.write_handoff(work, "alpha", "good")
+    monkeypatch.setattr(exits.os, "replace",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("full")))
+    assert exits.write_handoff(work, "alpha", "doomed") is exits.WRITE_FAILED
+    assert list(landed.parent.glob("*.tmp")) == []
+    assert "good" in landed.read_text(encoding="utf-8")
+
+
+def test_a_status_that_cannot_be_encoded_is_reported_and_leaves_no_litter(
+        tmp_path, monkeypatch):
+    """The failure the `except OSError` above it could not catch.
+
+    `UnicodeEncodeError` is a `ValueError`, so an unencodable status escaped
+    as a traceback out of the shipped CLI and left the temp file behind. The
+    status is not mocked here because it does not need to be: POSIX decodes an
+    undecodable argv byte with `surrogateescape`, so `--status $'\\xff'`
+    arrives as exactly this string on the platform half of CI runs on.
+    """
+    work = _registered(tmp_path, monkeypatch)
+    landed = exits.write_handoff(work, "alpha", "good")
+    unencodable = b"\xff".decode("utf-8", "surrogateescape")
+    assert exits.write_handoff(work, "alpha", unencodable) is exits.WRITE_FAILED
+    assert list(landed.parent.glob("*.tmp")) == []
+    assert "good" in landed.read_text(encoding="utf-8")
+
+
+def test_the_restart_marker_is_not_re_sanitised(tmp_path):
+    """`safe_instance_id` is not idempotent, so building an `Instance` from an
+    id that is already sanitised invents a third name."""
+    seat_id = op.safe_instance_id("a.b")
+    assert op.safe_instance_id(seat_id) != seat_id, "the hazard is real"
+    assert exits.request_restart(seat_id)
+    assert (op.RESTART_DIR / seat_id).exists()
+
+
+def test_a_cleanup_that_also_fails_is_said_out_loud(tmp_path, monkeypatch):
+    """A caller told "nothing was left behind" when a temp file remains has
+    been told something false. Reviewer A found the silent `except OSError`.
+    """
+    work = _registered(tmp_path, monkeypatch)
+    exits.write_handoff(work, "alpha", "good")
+    monkeypatch.setattr(exits.os, "replace",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("locked")))
+    monkeypatch.setattr(exits.Path, "unlink",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("held")))
+    said = []
+    monkeypatch.setattr(exits, "log", said.append)
+    assert exits.write_handoff(work, "alpha", "doomed") is exits.WRITE_FAILED
+    assert any("could not remove" in line for line in said), said

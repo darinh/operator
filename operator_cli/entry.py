@@ -13,74 +13,16 @@ from __future__ import annotations
 import json
 import shutil
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 from operator_kernel.argtail import at_dashdash
 
 from . import argv as _argv
-from . import ext, fleet, project, recover, seat
+from . import ext, fleet, handoff, project, recover, seat, verbs
 from .fleet import _bootstrap, _home, _settle_home
 
 
-@dataclass(frozen=True)
-class Verb:
-    tokens: tuple[str, ...]
-    help: str
-    menu: str
-    prompts: tuple[str, ...] = ()
-    extra_menu: tuple[tuple[str, tuple[str, ...]], ...] = ()
-
-
-@dataclass(frozen=True)
-class Item:
-    label: str
-    argv: tuple[str, ...]
-    prompts: tuple[str, ...] = ()
-
-
-VERBS: tuple[Verb, ...] = (
-    Verb(("doctor",), "check that this machine can run operator", "Check this machine"),
-    Verb(("start",), "start a supervised seat (start --name NAME)", "Start a supervised seat"),
-    Verb(("list",), "list running seats", "List running seats"),
-    Verb(("join",), "attach this terminal to a running seat", "Join a running seat", ("name",)),
-    Verb(("stop",), "ask a seat's supervisor to stop", "Stop a supervised seat", ("name",)),
-    Verb(("restart-loop",), "replace a supervisor without stopping the session",
-         "Restart one seat's supervisor", ("name",), extra_menu=(("Restart every running supervisor", ("restart-loop", "--all")),)),
-    Verb(("recover",), "list seats that need recovering after a crash", "List seats that need recovering", extra_menu=(("Recover every seat that needs it", ("recover", "--all")),)),
-    Verb(("project", "register"), "register this directory as a project", "Register this directory as a project"),
-    Verb(("project", "list"), "list registered projects", "List registered projects"),
-    Verb(("project", "forget"), "remove a registration, keep the journal", "Forget a project registration", ("path",)),
-    Verb(("ext", "list"), "list registered extensions", "List extensions"),
-    Verb(("ext", "enable"), "enable an extension", "Enable an extension", ("extension",)),
-    Verb(("ext", "disable"), "disable an extension", "Disable an extension", ("extension",)),
-    Verb(("remember",), "record one claim for this seat", "Remember something about this seat", ("instance", "kind", "text")),
-    Verb(("recall",), "show what earlier sessions recorded", "Recall what this seat recorded", ("instance",)),
-    Verb(("forget",), "stop recalling one journal entry", "Forget one journal entry", ("instance", "id")),
-    Verb(("fleet", "run"), "poll the ledger and ask the extensions", "Run the fleet host"),
-    Verb(("fleet", "proposals"), "show what is waiting for a human", "Show fleet proposals"),
-    Verb(("trace",), "show recent ledger records, newest first", "Show recent ledger records"),
-    Verb(("verify",), "check the ledger chain", "Verify the ledger chain"),
-)
-
-_PROMPT_LABEL = {
-    "name": ("Seat name: ", "seat name"),
-    "instance": ("Seat name: ", "seat name"),
-    "kind": ("Kind (decision, gotcha, disposition, attempt): ", "kind"),
-    "text": ("Text: ", "note"),
-    "id": ("Entry id: ", "entry id"),
-    "path": ("Project directory: ", "directory"),
-    "extension": ("Extension name: ", "extension"),
-}
-
-
-def menu_items() -> tuple[Item, ...]:
-    items = []
-    for verb in VERBS:
-        items.append(Item(verb.menu, verb.tokens, verb.prompts))
-        for label, argv in verb.extra_menu:
-            items.append(Item(label, argv))
-    return tuple(items)
+from .verbs import VERBS, menu_items  # noqa: F401
 
 
 def _print_help(stream) -> None:
@@ -130,18 +72,6 @@ def _ask_needed(prompt: str, what: str) -> "str | None":
         if value:
             return value
         print(f"A {what} is needed.")
-
-
-def _build_argv(item: Item, values: dict[str, str]) -> list[str]:
-    argv = list(item.argv)
-    if "instance" in values:
-        argv = [argv[0], "--instance", values["instance"], *argv[1:]]
-    if "kind" in values:
-        argv += ["--kind", values["kind"]]
-    for key in ("name", "text", "id", "path", "extension"):
-        if key in values:
-            argv += [values[key]]
-    return argv
 
 
 def _prompt_start() -> "list[str] | None":
@@ -202,12 +132,12 @@ def _menu() -> int:
         return dispatch(argv)
     values = {}
     for key in item.prompts:
-        prompt, what = _PROMPT_LABEL[key]
+        prompt, what = verbs.PROMPT_LABEL[key]
         value = _ask_needed(prompt, what)
         if value is None:
             return 2
         values[key] = value
-    argv = _build_argv(item, values)
+    argv = verbs.build_argv(item, values)
     print("Running: operator " + _argv.quote_argv(argv))
     return dispatch(argv)
 
@@ -277,14 +207,8 @@ def _start(rest: list[str]) -> int:
 
 def _list(_rest: list[str]) -> int:
     _bootstrap()
-    from supervisor_control import active_instances
-    found = active_instances()
-    if not found:
-        print("No running seats.")
-        return 0
-    for inst in found:
-        print(f"  {inst.display_name}")
-    return 0
+    from snapshot import list_instances
+    return list_instances()
 
 
 def _named(rest: list[str]) -> str:
@@ -528,6 +452,7 @@ HANDLERS = {
     "stop": _stop,
     "restart-loop": _restart_loop,
     "recover": _recover,
+    "handoff": handoff.main,
     "project": project.main,
     "ext": ext.main,
     "remember": _remember,

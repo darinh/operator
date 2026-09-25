@@ -469,6 +469,30 @@ def test_list_says_so_when_nothing_is_running(monkeypatch, capsys):
     assert "No running seats." in capsys.readouterr().out
 
 
+def test_list_delegates_to_the_board_rather_than_rendering_its_own(monkeypatch,
+                                                                  capsys):
+    """`operator list` had a second, poorer listing of its own in here.
+
+    It printed the display name and nothing else, while the board the
+    preamble's stale CAUTION sends an agent to read names the changed files
+    too. Two renderers for one command is how they came to disagree, so the
+    verb is asserted to own no rendering at all: replacing the board with a
+    sentinel must replace everything the command prints, return value and
+    output both. Checking only the return value leaves a `_list` that prints
+    its own row and then delegates, which is the state this came from, and
+    both Gate 2 reviewers found that hole independently.
+    """
+    import snapshot
+
+    def sentinel():
+        print("the board owns this line")
+        return 7
+
+    monkeypatch.setattr(snapshot, "list_instances", sentinel)
+    assert cli.main(["list"]) == 7
+    assert capsys.readouterr().out == "the board owns this line\n"
+
+
 def test_join_attaches(monkeypatch):
     seen = []
     monkeypatch.setattr(op.MUX, "has_session", lambda session: True)
@@ -766,3 +790,18 @@ def test_the_console_script_is_declared():
     assert "operator-fleet" in text
     assert "operator-seat" in text
     assert "operator-recover" in text
+
+
+# ── operator handoff ────────────────────────────────────────────
+
+
+def test_handoff_is_reachable_from_the_menu(monkeypatch, capsys):
+    """The menu is the documented way in for a human who has not memorised
+    the flags, and `--status` needs a prompt to reach the parser."""
+    choice = _choice_for(("handoff",))
+    printed = []
+    monkeypatch.setattr(cli, "dispatch", lambda argv, **k: printed.append(list(argv)) or 0)
+    _tty(monkeypatch, f"{choice}\nalpha\nfinished the sweep\n")
+    assert cli.main([]) == 0
+    assert printed and printed[-1] == [
+        "handoff", "--instance", "alpha", "--status", "finished the sweep"]
