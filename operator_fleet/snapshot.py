@@ -183,11 +183,12 @@ def list_instances() -> int:
     a remedy applied to some of them.
 
     ``active_instances`` is reached through its module rather than bound at
-    import. The binding a ``from`` import makes is resolved once, before any
-    test or caller can substitute the roster, and the two `test_entry.py`
-    cases that drive `operator list` caught exactly that: they patch
-    `supervisor_control`, the function they are grading read a copy taken at
-    import time, and the listing reported an empty machine.
+    import by a ``from``. Either spelling works if the lookup happens per
+    call, and a function-local ``from`` import would too; what fails is a
+    module-level one, because it is resolved before any caller can substitute
+    the roster. The two `test_entry.py` cases that drive `operator list`
+    caught exactly that: they patch `supervisor_control`, the first draft read
+    a copy taken at import time, and the listing reported an empty machine.
     """
     found = supervisor_control.active_instances()
     if not found:

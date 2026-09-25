@@ -333,6 +333,7 @@ def _code_state_notice(code_state: str, instance: Instance,
         f"now. This is an absence of evidence, not evidence of staleness: {claims} may "
         "be perfectly correct. But it cannot be confirmed, so verify anything load-"
         "bearing — in particular, check for a handoff file yourself rather than "
-        "trusting a claim that none exists. `operator list` reports the same state for "
-        "every instance on this machine."
+        "trusting a claim that none exists. `operator list` asks the same question "
+        "of every seat with a running supervisor, and names the ones that cannot "
+        "answer it."
     )
