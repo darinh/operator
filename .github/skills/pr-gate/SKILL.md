@@ -90,7 +90,13 @@ is the point.
    blocks on Windows, which already cost a full round trip. WSL reproduces Linux faster than CI.
 9. Does this add a command, flag, or entry point? The owner wants one `operator` entry point
    with a menu, not a family of binaries somebody has to memorise.
-10. What did I learn that belongs in this list? Add it.
+10. **Did a probe that reported a pass actually run?** A shell `cd` that fails leaves the previous
+    directory in place, so the commands still succeed against the wrong target and read as proof.
+    On 2026-09-24 a comma-path check created no directory, because Windows refuses a double quote
+    in a filename, and the register that followed returned the repo's own guid. An apostrophe is
+    legal, so the imprecise version of this sentence would have sent the next reader looking for
+    the wrong character. Assert the precondition the probe needs, not just its exit code.
+11. What did I learn that belongs in this list? Add it.
 
 ## Merging
 
@@ -111,7 +117,7 @@ cascade on everything stacked on top. One combined PR instead. Large PRs are fin
 
 ## Growing this file
 
-Question 10 is the mechanism. When something gets missed, add the question that would have
+Question 11 is the mechanism. When something gets missed, add the question that would have
 caught it. Where a check can replace a question, write it into `preflight.py` instead.
 
 Do not delete a question because it keeps being answered "no". A question about an invariant
