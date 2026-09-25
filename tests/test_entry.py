@@ -469,6 +469,20 @@ def test_list_says_so_when_nothing_is_running(monkeypatch, capsys):
     assert "No running seats." in capsys.readouterr().out
 
 
+def test_list_delegates_to_the_board_rather_than_rendering_its_own(monkeypatch):
+    """`operator list` had a second, poorer listing of its own in here.
+
+    It printed the display name and nothing else, while the board the
+    preamble's stale CAUTION sends an agent to read names the changed files
+    too. Two renderers for one command is how they came to disagree, so the
+    verb is asserted to own no rendering at all: replacing the board with a
+    sentinel must replace everything the command prints.
+    """
+    import snapshot
+    monkeypatch.setattr(snapshot, "list_instances", lambda: 7)
+    assert cli.main(["list"]) == 7
+
+
 def test_join_attaches(monkeypatch):
     seen = []
     monkeypatch.setattr(op.MUX, "has_session", lambda session: True)
