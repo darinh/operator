@@ -92,9 +92,10 @@ is the point.
    with a menu, not a family of binaries somebody has to memorise.
 10. **Did a probe that reported a pass actually run?** A shell `cd` that fails leaves the previous
     directory in place, so the commands still succeed against the wrong target and read as proof.
-    On 2026-09-24 a comma-path check created no directory, because Windows refuses a quote in a
-    filename, and the register that followed returned the repo's own guid. Assert the precondition
-    the probe needs, not just its exit code.
+    On 2026-09-24 a comma-path check created no directory, because Windows refuses a double quote
+    in a filename, and the register that followed returned the repo's own guid. An apostrophe is
+    legal, so the imprecise version of this sentence would have sent the next reader looking for
+    the wrong character. Assert the precondition the probe needs, not just its exit code.
 11. What did I learn that belongs in this list? Add it.
 
 ## Merging
