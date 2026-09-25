@@ -161,6 +161,31 @@ def test_every_advertised_command_is_a_program_this_project_installs(
     assert seen, "no commands were extracted, so this proved nothing"
 
 
+def test_every_advertised_operator_verb_is_one_the_cli_dispatches(
+        monkeypatch, tmp_path):
+    """Checking the executable is not checking the command.
+
+    The test above asks only whether `shlex.split(template)[0]` is one of our
+    console scripts, so `operator listt` passes it: the typo is in the verb,
+    and nothing reads the verb. That gap is not hypothetical here, because the
+    two commands the preamble advertises only in its stale and mismatch
+    branches, `operator list` and `operator restart-loop`, are the two no test
+    ever runs. Running them is not the fix: `restart-loop` would replace a
+    supervisor. Dispatchability is what can be checked without side effects.
+    """
+    seen = 0
+    for template in _every_advertised_command(monkeypatch, tmp_path):
+        parts = shlex.split(template)
+        if parts[0] != "operator":
+            continue
+        assert len(parts) > 1, f"`{template}` names no verb at all"
+        seen += 1
+        assert parts[1] in entry.HANDLERS, (
+            f"the preamble advertises `{template}`, but {parts[1]!r} is not "
+            f"a verb `operator` dispatches {sorted(entry.HANDLERS)}")
+    assert seen, "no operator commands were extracted, so this proved nothing"
+
+
 def test_no_command_is_advertised_outside_backticks(monkeypatch, tmp_path):
     """Backticks are what makes a command visible to the extractor above.
 

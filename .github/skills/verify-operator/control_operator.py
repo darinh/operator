@@ -1,8 +1,9 @@
 """Drive the operator CLIs against a disposable operator home, and keep the proof.
 
 **Nothing here knows about any particular extension.** It drives what every
-operator install has: the two console scripts, the ledger, the proposal queue,
-the seat journal, and the activation file. `enable` takes any extension by name
+operator install has: the console scripts, the ledger, the proposal queue, the
+seat journal, the session handoff, and the activation file. `enable` takes any
+extension by name
 and `seed-ledger` takes any record shape, so an install with no extensions at all
 is fully drivable and an extension this file has never heard of needs no change
 to it.
@@ -460,8 +461,8 @@ def cmd_operator(args) -> int:
 def cmd_gate(args) -> int:
     """Ask the kernel's launch gate whether a seat may start, and report.
 
-    The one hook the two console scripts cannot reach. `admit_launch` is a
-    *kernel* hook on the seat launch path, and `operator-fleet` lists it at
+    The one hook none of the shipped console scripts reaches. `admit_launch` is
+    a *kernel* hook on the seat launch path, and `operator-fleet` lists it at
     discovery without ever calling it -- the fleet hooks and the kernel hooks
     are disjoint sets. That made it the last unverifiable thing in the map.
 

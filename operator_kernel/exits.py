@@ -214,7 +214,13 @@ def write_handoff(workdir: Path, instance_id: str, status: str,
         handoff_file.parent.mkdir(parents=True, exist_ok=True)
         tmp.write_text("\n".join(body), encoding="utf-8")
         os.replace(tmp, handoff_file)
-    except OSError:
+    except (OSError, UnicodeError):
+        # `UnicodeError` belongs here with `OSError` because the text is not
+        # this module's to vouch for. POSIX decodes an undecodable argv byte
+        # with `surrogateescape`, so `--status $'\xff'` arrives as a lone
+        # surrogate that `write_text` refuses *after* opening the temp file.
+        # Catching only `OSError` let that escape as a traceback and left the
+        # litter this function's docstring promises it removes.
         log(f"  Could not write the handoff at {handoff_file}")
         try:
             tmp.unlink()

@@ -408,7 +408,8 @@ def test_the_documented_state_globs_are_all_present():
     for promised in ("trace.jsonl", "proposals.jsonl", "proposals.handled.jsonl",
                      "fleet-failures.jsonl", "fleet-tail.json", "extensions.json",
                      "operator.log", "extensions/*.json", "projects/catalog.csv",
-                     "projects/*/journal/*.jsonl"):
+                     "projects/*/journal/*.jsonl", "projects/*/handoff/*.md",
+                     "restart/*"):
         assert promised in control.STATE_GLOBS
 
 
