@@ -239,10 +239,8 @@ def test_a_supervisor_that_is_not_running_is_not_described(monkeypatch, capsys):
     assert op.list_instances() == 0
     out = capsys.readouterr().out
 
-    assert out.splitlines()[0] == "  alpha", (
+    assert out == "  alpha\n", (
         f"a seat with no supervisor was given a verdict about one: {out!r}")
-    assert "whatever.py" not in out, out
-    assert "restart-loop" not in out, out
 
 
 def test_a_managed_seat_with_no_supervisor_is_not_on_the_board(
@@ -276,6 +274,11 @@ def _roster(out: str) -> dict:
     stayed green, which would have put one supervisor's changed files under
     another supervisor's name. Indentation is the only thing that attributes
     a path to a seat on this board, so the guard has to read it the same way.
+
+    A repeated seat name is refused rather than overwritten. The first draft
+    of this helper kept the last occurrence, so a board that printed a wrong
+    roster and then a right one read as correct, and that is a hole the
+    occurrence count it replaced did not have.
     """
     rows: dict[str, list[str]] = {}
     current = None
@@ -285,6 +288,7 @@ def _roster(out: str) -> dict:
             rows[current].append(line.strip())
         elif line.strip():
             current = line.strip().split()[0]
+            assert current not in rows, f"{current} was printed twice:\n{out}"
             rows[current] = []
     return rows
 
@@ -311,6 +315,10 @@ def test_every_seat_is_described_with_its_own_state(monkeypatch, capsys):
 
     assert _roster(out) == {"alpha": ["only-alpha.py"], "beta": [], "gamma": []}, (
         f"a seat was given another seat's changed files:\n{out}")
+    # The roster stops at the footer, so ownership alone would not see a path
+    # repeated below it. Both halves are needed and neither subsumes the other.
+    assert out.count("only-alpha.py") == 1, (
+        f"alpha's changed file was printed more than once:\n{out}")
     rows = {n: next(ln for ln in lines if ln.startswith(f"  {n}")) for n in states}
     assert rows["beta"].strip() == "beta", (
         f"a current supervisor was given somebody else's verdict: {rows['beta']}")
