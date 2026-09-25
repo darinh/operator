@@ -469,18 +469,28 @@ def test_list_says_so_when_nothing_is_running(monkeypatch, capsys):
     assert "No running seats." in capsys.readouterr().out
 
 
-def test_list_delegates_to_the_board_rather_than_rendering_its_own(monkeypatch):
+def test_list_delegates_to_the_board_rather_than_rendering_its_own(monkeypatch,
+                                                                  capsys):
     """`operator list` had a second, poorer listing of its own in here.
 
     It printed the display name and nothing else, while the board the
     preamble's stale CAUTION sends an agent to read names the changed files
     too. Two renderers for one command is how they came to disagree, so the
     verb is asserted to own no rendering at all: replacing the board with a
-    sentinel must replace everything the command prints.
+    sentinel must replace everything the command prints, return value and
+    output both. Checking only the return value leaves a `_list` that prints
+    its own row and then delegates, which is the state this came from, and
+    both Gate 2 reviewers found that hole independently.
     """
     import snapshot
-    monkeypatch.setattr(snapshot, "list_instances", lambda: 7)
+
+    def sentinel():
+        print("the board owns this line")
+        return 7
+
+    monkeypatch.setattr(snapshot, "list_instances", sentinel)
     assert cli.main(["list"]) == 7
+    assert capsys.readouterr().out == "the board owns this line\n"
 
 
 def test_join_attaches(monkeypatch):

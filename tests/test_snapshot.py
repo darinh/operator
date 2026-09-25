@@ -239,9 +239,27 @@ def test_a_supervisor_that_is_not_running_is_not_described(monkeypatch, capsys):
     assert op.list_instances() == 0
     out = capsys.readouterr().out
 
-    assert "alpha" in out, "the seat is running and must still be listed"
+    assert out.splitlines()[0] == "  alpha", (
+        f"a seat with no supervisor was given a verdict about one: {out!r}")
     assert "whatever.py" not in out, out
     assert "restart-loop" not in out, out
+
+
+def test_a_managed_seat_with_no_supervisor_is_not_on_the_board(
+        monkeypatch, capsys):
+    """The board-side half of the scope the fallback CAUTION had to narrow to.
+
+    `tests/test_preamble.py` grades the sentence. This grades the fact behind
+    it, against the real roster rather than a patched one, because the
+    exclusion is `active_instances`'s and not the board's.
+    """
+    op.Instance("stopped").claim("tok")
+    monkeypatch.setattr(op.MUX, "available", lambda: True)
+    monkeypatch.setattr(op.MUX, "list_sessions", lambda: [])
+    monkeypatch.setattr(op, "_running_loop_pid", lambda i: None)
+
+    assert op.list_instances() == 0
+    assert capsys.readouterr().out.strip() == "No running seats."
 
 
 def test_no_running_seats_is_not_a_failure(monkeypatch, capsys):
@@ -250,16 +268,32 @@ def test_no_running_seats_is_not_a_failure(monkeypatch, capsys):
     assert capsys.readouterr().out.strip() == "No running seats."
 
 
-def test_every_seat_is_described_with_its_own_state(monkeypatch, capsys):
-    """The other clause that names this command, and the other way to fake it.
+def _roster(out: str) -> dict:
+    """The seat rows and the paths filed beneath each, as a reader sees them.
 
-    Where the stale CAUTION promises the changed files, the fallback one
-    promises that ``operator list`` "reports the same state for every instance
-    on this machine". A board that decided once and printed that verdict down
-    the column would satisfy every other test in this file, because they all
-    look at one seat. So this one gives three seats three different answers
-    and insists each row carries its own, with the stale seat's files against
-    the stale seat and nowhere else.
+    Asserting that a path appears *somewhere* is not asserting whose it is.
+    Reviewer A moved every path line below the last seat and the whole file
+    stayed green, which would have put one supervisor's changed files under
+    another supervisor's name. Indentation is the only thing that attributes
+    a path to a seat on this board, so the guard has to read it the same way.
+    """
+    rows: dict[str, list[str]] = {}
+    current = None
+    for line in out.split("\n\n")[0].splitlines():
+        if line.startswith("      "):
+            assert current is not None, f"a path with no seat above it: {line!r}"
+            rows[current].append(line.strip())
+        elif line.strip():
+            current = line.strip().split()[0]
+            rows[current] = []
+    return rows
+
+
+def test_every_seat_is_described_with_its_own_state(monkeypatch, capsys):
+    """Three seats, three answers, and each path filed under its own seat.
+
+    Every other test here looks at one seat, so a board that decided once and
+    printed that verdict down the column would satisfy all of them.
     """
     states = {"alpha": (op.CODE_STALE, ["only-alpha.py"]),
               "beta": (op.CODE_CURRENT, []),
@@ -272,8 +306,11 @@ def test_every_seat_is_described_with_its_own_state(monkeypatch, capsys):
         "loop_changed": states[inst.display_name][1]})
 
     assert op.list_instances() == 0
-    lines = capsys.readouterr().out.splitlines()
+    out = capsys.readouterr().out
+    lines = out.splitlines()
 
+    assert _roster(out) == {"alpha": ["only-alpha.py"], "beta": [], "gamma": []}, (
+        f"a seat was given another seat's changed files:\n{out}")
     rows = {n: next(ln for ln in lines if ln.startswith(f"  {n}")) for n in states}
     assert rows["beta"].strip() == "beta", (
         f"a current supervisor was given somebody else's verdict: {rows['beta']}")
@@ -281,8 +318,40 @@ def test_every_seat_is_described_with_its_own_state(monkeypatch, capsys):
         assert rows[stale].strip() != stale, f"{stale} was reported as healthy"
     assert rows["alpha"].replace("alpha", "") != rows["gamma"].replace("gamma", ""), (
         f"two different verdicts printed the same words:\n{rows}")
-    assert [ln for ln in lines if "only-alpha.py" in ln] == ["      only-alpha.py"], (
-        f"alpha's changed file was printed against more than alpha:\n{lines}")
+
+
+def test_the_sweep_is_offered_once_however_many_have_gone_behind(
+        monkeypatch, capsys):
+    """Once for the group is the whole point, and `in out` cannot see that.
+
+    A remedy printed per affected supervisor still contains the sweep, so the
+    test that looks for the string passes on the output the sweep exists to
+    replace.
+    """
+    names = ("alpha", "beta", "gamma")
+    monkeypatch.setattr(op, "active_instances",
+                        lambda: [op.Instance(n) for n in names])
+    monkeypatch.setattr(op, "instance_snapshot", lambda inst: {
+        "name": inst.display_name, "id": inst.id, "loop_pid": PID,
+        "loop_code": op.CODE_STALE, "loop_changed": []})
+
+    assert op.list_instances() == 0
+    out = capsys.readouterr().out
+    assert out.count("operator restart-loop --all") == 1, (
+        f"the sweep is offered once per supervisor, not once:\n{out}")
+
+
+def test_an_unknown_supervisor_is_named_but_offered_no_remedy(monkeypatch, capsys):
+    """The exemption, asserted rather than left to the reader of a tuple.
+
+    A restart cannot fix "nobody could look", and offering it anyway spends
+    the operator's trust on the one row nobody has diagnosed. Adding
+    ``unknown`` to ``REMEDIABLE`` left every other test here green.
+    """
+    out = _board(monkeypatch, capsys, op.CODE_UNKNOWN)
+    assert "restart-loop" not in out, (
+        f"a remedy was offered for a supervisor nobody could compare:\n{out}")
+    assert out.splitlines()[0].strip() != "alpha", out
 
 
 def test_a_row_without_the_changed_key_is_still_printed(monkeypatch, capsys):
