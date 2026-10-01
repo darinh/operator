@@ -104,7 +104,7 @@ def main(rest: list[str]) -> int:
         return 1
     if landed is None:
         print("this directory is not a registered project", file=sys.stderr)
-        print("register it with: operator project register", file=sys.stderr)
+        print("start an operator in this directory first", file=sys.stderr)
         return 1
     if landed is WRITE_FAILED:
         print("could not write the handoff", file=sys.stderr)

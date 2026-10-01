@@ -5,20 +5,17 @@ prints help and exits non-zero, so CI cannot hang on a prompt. A verb on the
 command line skips the menu. The menu prints the equivalent command before
 it runs, so the flags are learnable by use.
 
-`operator-fleet`, `operator-seat` and `operator-recover` stay installed.
-This calls the same functions they do.
+One console script. Recover and handoff are verbs of it.
 """
 from __future__ import annotations
 
-import json
 import shutil
 import sys
-from pathlib import Path
 
 from operator_kernel.argtail import at_dashdash
 
 from . import argv as _argv
-from . import ext, fleet, handoff, project, recover, seat, verbs
+from . import handoff, project, recover, verbs
 from .home import _bootstrap, _home, _settle_home
 
 
@@ -207,7 +204,7 @@ def _start(rest: list[str]) -> int:
 
 def _list(_rest: list[str]) -> int:
     _bootstrap()
-    from snapshot import list_instances
+    from .listing import list_instances
     return list_instances()
 
 
@@ -291,157 +288,8 @@ def _doctor(_rest: list[str]) -> int:
     return 0
 
 
-def _restart_loop(rest: list[str]) -> int:
-    _bootstrap()
-    from supervisor_control import restart_all_loops, restart_loop
-    options, literal = at_dashdash(rest)
-    if "--all" in options:
-        return restart_all_loops()
-    name = _named(options)
-    if not name and len(literal) > 1:
-        name = literal[1]
-    return restart_loop(name or None)
-
-
 def _recover(rest: list[str]) -> int:
     return recover.main(rest)
-
-
-def _seat_cmd(verb: str, rest: list[str]) -> int:
-    options, literal = at_dashdash(rest)
-    parent: list[str] = []
-    child: list[str] = []
-    i = 0
-    while i < len(options):
-        arg = options[i]
-        if arg in ("--instance", "--session"):
-            if i + 1 >= len(options):
-                print(f"operator {verb} {arg} needs a value", file=sys.stderr)
-                return 2
-            parent += [arg, options[i + 1]]
-            i += 2
-            continue
-        if arg.startswith("--instance=") or arg.startswith("--session="):
-            parent.append(arg)
-            i += 1
-            continue
-        child.append(arg)
-        i += 1
-    child.extend(literal)
-    return seat.main([*parent, verb, *child], prog="operator")
-
-
-def _remember(rest: list[str]) -> int:
-    return _seat_cmd("remember", rest)
-
-
-def _recall(rest: list[str]) -> int:
-    return _seat_cmd("recall", rest)
-
-
-def _forget(rest: list[str]) -> int:
-    return _seat_cmd("forget", rest)
-
-
-def _fleet(rest: list[str]) -> int:
-    if not rest or rest[0] not in ("run", "proposals", "-h", "--help"):
-        print("Usage: operator fleet run|proposals", file=sys.stderr)
-        return 2
-    return fleet.main(rest)
-
-
-def _ledger_paths() -> "list[Path]":
-    """Every file holding ledger records, oldest first.
-
-    Rotation is a rename, so `trace.jsonl.1` holds records no less real than
-    the live file's. `trace` and `verify` each built this list once and drifted:
-    `trace` guarded on the rotated file existing and then read only the live
-    one, so a home that had rotated with nothing written since printed nothing
-    and exited zero. One list, so a third reader cannot miss the same half.
-    """
-    path = _home(None) / "trace.jsonl"
-    rotated = path.with_suffix(path.suffix + ".1")
-    return [p for p in (rotated, path) if p.exists()]
-
-
-def _trace(rest: list[str]) -> int:
-    _bootstrap()
-    n = 20
-    i = 0
-    while i < len(rest):
-        arg = rest[i]
-        if arg in ("-n", "--lines"):
-            i += 1
-            if i >= len(rest):
-                print("operator trace -n needs a value", file=sys.stderr)
-                return 2
-            try:
-                n = int(rest[i])
-            except ValueError:
-                print("operator trace -n needs an integer", file=sys.stderr)
-                return 2
-        elif arg.startswith("-n") and arg != "-n":
-            try:
-                n = int(arg[2:])
-            except ValueError:
-                print("operator trace -n needs an integer", file=sys.stderr)
-                return 2
-        elif arg in ("-h", "--help"):
-            print("Usage: operator trace [-n N]")
-            return 0
-        else:
-            print(f"operator trace: unexpected argument {arg}",
-                  file=sys.stderr)
-            return 2
-        i += 1
-    if n < 0:
-        print("operator trace -n needs a non-negative integer",
-              file=sys.stderr)
-        return 2
-    import ledger_tail
-    paths = _ledger_paths()
-    if not paths:
-        print(f"no ledger at {_home(None) / 'trace.jsonl'}")
-        return 0
-    records: list[dict] = []
-    lost = 0
-    for each in paths:
-        tail = ledger_tail.LedgerTail(each, state=None)
-        records.extend(tail.snapshot())
-        lost += tail.unreadable
-    records.reverse()
-    for record in records[:n]:
-        print(json.dumps(record, ensure_ascii=True, default=str))
-    if lost:
-        print(f"{lost} line(s) in the ledger could not be read",
-              file=sys.stderr)
-    return 0
-
-
-def _verify(_rest: list[str]) -> int:
-    _bootstrap()
-    import ledger_chain
-    result = ledger_chain.verify(_ledger_paths())
-    if isinstance(result, ledger_chain.Verified):
-        print(f"verified: {result.records} record(s), "
-              f"{result.writers} writer(s)")
-        return 0
-    if isinstance(result, ledger_chain.NoChain):
-        print(f"no chain: {result.records} record(s)")
-        return 0
-    if isinstance(result, ledger_chain.TruncatedTail):
-        print(f"truncated tail: {result.bytes_dropped} byte(s) dropped")
-        return 1
-    if isinstance(result, ledger_chain.Gap):
-        print(f"gap: writer {result.writer} after {result.after_seq} "
-              f"before {result.before_seq}")
-        return 1
-    if isinstance(result, ledger_chain.Broken):
-        print(f"broken: writer {result.writer} seq {result.seq} "
-              f"({result.reason})")
-        return 1
-    print(type(result).__name__)
-    return 1
 
 
 HANDLERS = {
@@ -450,17 +298,8 @@ HANDLERS = {
     "list": _list,
     "join": _join,
     "stop": _stop,
-    "restart-loop": _restart_loop,
     "recover": _recover,
     "handoff": handoff.main,
-    "project": project.main,
-    "ext": ext.main,
-    "remember": _remember,
-    "recall": _recall,
-    "forget": _forget,
-    "fleet": _fleet,
-    "trace": _trace,
-    "verify": _verify,
 }
 
 
@@ -474,10 +313,8 @@ def dispatch(argv: list[str], home: "str | None" = None) -> int:
     than by construction.
 
     This is the only settle on the *routing* path, not in the package.
-    `fleet.py` and `recover.py` settle again inside the delegated CLIs, which
-    still have their own `--home` and are still reachable as their own console
-    scripts. Settling twice is harmless -- it resolves and exports the same
-    string -- and removing it would leave `operator-fleet` unsettled.
+    `recover.py` settles again inside its own `--home`. Settling twice is
+    harmless: it resolves and exports the same string.
     """
     _settle_home(home)
     verb = argv[0]

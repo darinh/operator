@@ -15,7 +15,8 @@ from operator_cli import entry as cli
 
 def _project(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    assert cli.main(["project", "register"]) == 0
+    from operator_cli.project import ensure_registered
+    assert ensure_registered(tmp_path)[0] == 0
     return tmp_path
 
 
@@ -54,7 +55,7 @@ def test_an_unregistered_directory_is_refused_and_the_fix_named(
     assert cli.main(["handoff", "--instance", "alpha", "--status", "x"]) == 1
     err = capsys.readouterr().err
     assert "not a registered project" in err
-    assert "operator project register" in err
+    assert "start an operator in this directory first" in err
     assert not op.Instance("alpha").restart_marker.exists()
 
 

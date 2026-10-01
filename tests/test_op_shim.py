@@ -58,7 +58,7 @@ def test_the_shim_declares_the_roots_it_actually_has():
     every other test in this file while admitting `tests/` and anything else
     that lands in the checkout.
     """
-    assert set(op.SOURCE_ROOTS) == {KERNEL, FLEET}
+    assert set(op.SOURCE_ROOTS) == {KERNEL}
     for root in op.SOURCE_ROOTS:
         assert root.is_dir(), f"{root} is declared a source root and is absent"
 
@@ -133,9 +133,9 @@ def test_the_stray_module_detector_accepts_a_module_from_each_root():
     the second package's modules unbindable.
     """
     assert op.is_repo_module(op.config) is True
-    assert op.is_repo_module(op.snapshot) is True
+    assert op.is_repo_module(op.process_tree) is True
     assert Path(op.config.__file__).resolve().parent == KERNEL
-    assert Path(op.snapshot.__file__).resolve().parent == FLEET
+    assert Path(op.process_tree.__file__).resolve().parent == KERNEL
 
 
 def test_the_stray_module_detector_refuses_a_module_with_no_file():
@@ -173,7 +173,7 @@ def test_the_alias_that_was_wrong_is_pinned_to_the_module_that_is_right():
     The generic checks above are all satisfiable by a self-consistent wrong
     answer, so the one mapping known to have been wrong is written down.
     """
-    assert op._ALIASES["operator_trace"] == "evidence"
+    assert op._ALIASES["operator_liveness"] == "process_identity"
     assert "trace" not in op._MODULE_NAMES, (
         "`trace` is back in the bind list; there is no operator_kernel/trace.py "
         "and it resolves to the standard library's tracing module"
@@ -187,12 +187,7 @@ def test_the_renamed_trace_module_has_what_its_callers_ask_for():
     but an alias pointing at some other real kernel module would pass it while
     still being wrong, and the tests using it would fail somewhere far away.
     """
-    for attribute in ("trace_path", "ancestry"):
-        assert hasattr(op.operator_trace, attribute), (
-            f"`operator_trace` resolves to "
-            f"{getattr(op.operator_trace, '__name__', '?')}, which has no "
-            f"{attribute!r}; the tests using this alias want the module that does"
-        )
+    assert hasattr(op.process_tree, "ancestry")
 
 
 def _source_modules_binding(name: str) -> set[str]:
@@ -250,11 +245,9 @@ def test_the_multiplexer_substitution_reaches_the_module_that_left_the_kernel():
     suite nearly lost seven sessions to. The general check above would pass
     with `snapshot` simply absent from both sides, so this one names it.
     """
-    assert "snapshot" in _source_modules_binding("MUX")
-    assert op.snapshot in op.holders_of("MUX")
-    assert op.snapshot.MUX is op.MUX, (
-        "the fake multiplexer conftest installed did not reach `snapshot`"
-    )
+    assert "supervisor" in _source_modules_binding("MUX")
+    assert op.supervisor in op.holders_of("MUX")
+    assert op.supervisor.MUX is op.MUX
 
 
 # ── the forwarding claim ────────────────────────────────────────

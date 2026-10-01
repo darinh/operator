@@ -51,7 +51,6 @@ def isolated_state(tmp_path, monkeypatch):
     monkeypatch.setattr(op, "OPERATOR_HOME", tmp_path)
     monkeypatch.setattr(op, "RESTART_DIR", restart)
     monkeypatch.setattr(op, "LOG_FILE", tmp_path / "operator.log")
-    monkeypatch.setattr(op, "_RUNNING_CODE", None)
     return tmp_path
 
 
@@ -186,28 +185,6 @@ def test_two_renderings_of_the_same_kind_still_decide(monkeypatch):
     _token_probe(monkeypatch, "psc:Sat Aug  9 18:00:00 2026")
 
     assert op._running_loop_pid(inst) is None
-
-
-def test_a_pre_pin_record_is_still_the_supervisors_own(monkeypatch):
-    """The migration rule reaches the code record too, and it is the record
-    that decides `[supervisor record is not its own]` and drops the row's
-    start instant, adopted flag and began-run flag. A `ps:` record against a
-    `psc:` live probe is the same process rendered twice, so comparing them
-    for equality would have marked every macOS supervisor's record as a
-    leftover on the day the pin landed."""
-    payload = {"pid": 123, "pid_start": "ps:Sat Aug  9 17:25:00 2026"}
-
-    assert op._record_describes(
-        payload, 123, live_start="psc:Sat Aug  9 17:25:00 2026")
-
-
-def test_a_record_of_the_same_kind_still_decides(monkeypatch):
-    """Negative control: within one kind the record comparison is as sharp as
-    it ever was."""
-    payload = {"pid": 123, "pid_start": "psc:Sat Aug  9 17:25:00 2026"}
-
-    assert not op._record_describes(
-        payload, 123, live_start="psc:Sat Aug  9 18:00:00 2026")
 
 
 def test_a_damaged_stamp_does_not_hide_a_readable_pid(monkeypatch):
@@ -533,66 +510,6 @@ def test_a_stale_reader_does_not_delete_a_replacement_after_a_dead_pid(monkeypat
 
 # ── one probe per instance ──────────────────────────────────────
 
-def test_the_listing_asks_who_holds_a_pid_once(monkeypatch):
-    """`instance_snapshot` asks `_running_loop_identity` and then asks the
-    record reader a related question about the same pid. Probing twice is one
-    `ps` fork per instance too many on macOS, which is the cost complaint
-    `loop_record_facts` already exists to answer."""
-    inst = op.Instance("snapped")
-    _write(inst, "4242", "pid_start=win:800")
-    _alive(monkeypatch, 4242)
-    calls = _token_probe(monkeypatch, "win:800")
-    inst.loop_code_file.write_text(
-        json.dumps({"pid": 4242, "pid_start": "win:800", "files": []}),
-        encoding="utf-8")
-    monkeypatch.setattr(op.MUX, "available", lambda: False)
-
-    snap = op.instance_snapshot(inst)
-
-    assert snap["loop_pid"] == 4242
-    assert snap["loop_code"] != op.CODE_MISMATCH, \
-        "the record is the supervisor's own, so the handed-over token agreed"
-    assert calls["n"] == 1
-
-
-def test_an_unprobed_pid_still_gets_the_record_reader_to_look(monkeypatch):
-    """The sentinel exists so "nobody looked" and "looked, and the OS would
-    not say" stay apart. An unstamped pid file leaves the first, and the
-    record reader must still probe -- passing ``None`` instead would silently
-    retire the record's own pid-reuse check."""
-    inst = op.Instance("unprobed")
-    inst.loop_pid_file.write_text("4242\n", encoding="utf-8")
-    _alive(monkeypatch, 4242)
-    calls = _token_probe(monkeypatch, "win:900")
-    inst.loop_code_file.write_text(
-        json.dumps({"pid": 4242, "pid_start": "win:800", "files": []}),
-        encoding="utf-8")
-    monkeypatch.setattr(op.MUX, "available", lambda: False)
-
-    snap = op.instance_snapshot(inst)
-
-    assert snap["loop_pid"] == 4242
-    assert snap["loop_code"] == op.CODE_MISMATCH
-    assert calls["n"] == 1, "the record reader had to ask, because nobody had"
-
-
-def test_a_probe_that_could_not_answer_is_not_asked_twice(monkeypatch):
-    """``None`` is an answer -- "the OS would not say" -- and asking again
-    costs a second fork for a result already known to be unavailable."""
-    inst = op.Instance("silentos")
-    _write(inst, "4242", "pid_start=win:800")
-    _alive(monkeypatch, 4242)
-    calls = _token_probe(monkeypatch, None)
-    inst.loop_code_file.write_text(
-        json.dumps({"pid": 4242, "pid_start": "win:800", "files": []}),
-        encoding="utf-8")
-    monkeypatch.setattr(op.MUX, "available", lambda: False)
-
-    snap = op.instance_snapshot(inst)
-
-    assert snap["loop_pid"] == 4242
-    assert calls["n"] == 1
-
 
 # ── across a reboot ─────────────────────────────────────────────
 #
@@ -712,26 +629,6 @@ def test_a_published_stamp_refuses_a_different_process(monkeypatch):
                         lambda pid: other)
 
     assert op._running_loop_pid(inst) is None
-
-
-def test_the_e2e_harness_reads_a_stamped_pid_file(monkeypatch):
-    """`e2e_restart_loop.read_pid` polls this file to decide the supervisor
-    came up. It read the whole file as one integer, which a stamped file is
-    not, so it would have reported every restart as a failure to start."""
-    spec = importlib.util.spec_from_file_location(
-        "e2e_restart_loop_for_pid_stamp", ROOT / "e2e_restart_loop.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    inst = op.Instance("harness")
-    _token_probe(monkeypatch, "win:1234")
-    _boot_probe(monkeypatch, "instant:900")
-    inst.loop_pid_file.write_text(op._loop_pid_stamp(4242), encoding="utf-8")
-
-    assert module.read_pid(inst.loop_pid_file) == 4242
-    assert module.read_pid(inst.loop_pid_file.with_name("absent.pid")) is None
-    inst.loop_pid_file.write_bytes(b"\xff\xfe4242\n")
-    assert module.read_pid(inst.loop_pid_file) is None, \
-        "a file damaged into invalid UTF-8 must not abort the harness"
 
 
 # ── the boot-relativity predicate ───────────────────────────────

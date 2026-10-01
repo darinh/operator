@@ -140,14 +140,12 @@ def test_fresh_and_adopt_reach_the_loop(home, monkeypatch):
 
 def test_the_exit_code_of_the_loop_is_the_exit_code_of_the_process(home,
                                                                   monkeypatch):
-    """The breakers report through it. `EXIT_NO_PROGRESS` and
-    `EXIT_UNACCOUNTED` are how an unattended run says why it stopped, and a
-    supervisor that swallowed them would make every ending look the same."""
+    """A supervisor that swallowed the loop's code would make every ending
+    look the same."""
     import supervisor
 
-    monkeypatch.setattr(supervisor, "run_loop_mode",
-                        lambda *a, **k: op.EXIT_NO_PROGRESS)
-    assert supervise.main(["--_supervise", "--name", "x"]) == op.EXIT_NO_PROGRESS
+    monkeypatch.setattr(supervisor, "run_loop_mode", lambda *a, **k: 7)
+    assert supervise.main(["--_supervise", "--name", "x"]) == 7
 
 
 def test_the_arguments_the_spawner_sends_are_the_ones_this_accepts():

@@ -1,47 +1,31 @@
 """Extracted from copilot_operator.py. See docs/spike-extraction.md."""
 from __future__ import annotations
 
-import json
 import os
-import re
-import shutil
+import signal
 import subprocess
 import sys
 import time
-import uuid
-import hashlib
-import sqlite3
-import signal
-import contextlib
-import ntpath
-from contextlib import contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
-from paths import primary_repo_root
-from paths import project_dir
-from paths import seat_has_journal
-import claims
-import instance
-import evidence
 import atexit
 
-from breakers import (evaluate_progress, evaluate_unaccounted, workspace_fingerprint)
-from config import (EXIT_NO_PROGRESS, EXIT_UNACCOUNTED, HEALTHY_SESSION_SECONDS, HEARTBEAT_INTERVAL, IS_WINDOWS, LAUNCH_BACKOFF_BASE, MAX_LAUNCH_FAILURES, MAX_NOCHANGE_SESSIONS, MAX_SESSIONS, MAX_UNACCOUNTED_SESSIONS, MUX, OPERATOR_HOME, POLL_INTERVAL, RESTART_PAUSE_SECONDS, SESSION_ID_WAIT, TAB_LOOPING, UUID_RE)
-from extension_seam import held_pause, launch_gate
-from exits import (_record_session_exit, crash_recovery_verdict, ending_was_observed,
-                   handoff_state, HANDOFF_MISSING, HANDOFF_UNKNOWN, HANDOFF_WAITING)
+from config import (HEALTHY_SESSION_SECONDS, IS_WINDOWS, LAUNCH_BACKOFF_BASE,
+                    MAX_LAUNCH_FAILURES, MAX_SESSIONS, MUX, POLL_INTERVAL,
+                    RESTART_PAUSE_SECONDS, SESSION_ID_WAIT, UUID_RE)
+from exits import (handoff_state, HANDOFF_MISSING, HANDOFF_UNKNOWN,
+                   HANDOFF_WAITING)
 from instance import Instance
 from argtail import before_terminator
-from launch import (args_have_explicit_session, extract_agent_from_args, handle_existing_session, has_agent_flag, start_session, with_experimental)
+from launch import (args_have_explicit_session, extract_agent_from_args,
+                    handle_existing_session, has_agent_flag, start_session,
+                    with_experimental)
 from mux import MuxError
 from preamble import build_preamble
-from mandate import mandate_path, read_mandate
 from probes import die, log, marker_set, marker_state, remove_file, utcnow
-from provenance import _launch_code_state, running_code_fingerprint
-from session_state import (is_copilot_running, stop_session_gracefully, wait_for_metrics_capture)
-from supervisor_records import (_publish_supervisor_records, _record_supervisor_starting, _running_loop_pid)
-from work_seam import (_loop_heartbeat, _loop_start_session, _loop_work_db,
-                       session_store, set_session_store)
+from session_state import is_copilot_running, stop_session_gracefully
+from supervisor_records import (_publish_supervisor_records,
+                                _record_supervisor_starting, _running_loop_pid)
+
 
 def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                   adopt: bool = False) -> int:
@@ -127,7 +111,7 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
         if not instance.owns_live_session():
             die(f"A session named '{instance.session}' is running but was not "
                 f"started by this operator. Refusing to adopt it.\n"
-                f"  Drop stale state with: operator forget {instance.display_name}")
+                f"Refusing to adopt it.")
         # Last line of defence against two supervisors watching one session:
         # they would relaunch over each other's sessions indefinitely. The
         # handoff lock makes this unlikely; this makes it survivable.
@@ -199,62 +183,7 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
     adopting = adopt
     _publish_supervisor_records(instance, user_args, adopted=adopt,
                                 began_run=began_run)
-    evidence.record_supervisor_start(
-        OPERATOR_HOME, instance=instance.display_name,
-        session=start_session_num, code=running_code_fingerprint())
-
-    # Progress circuit breaker. A fresh run starts a fresh count: --fresh
-    # means "forget the previous run", and inheriting its stalled counter
-    # would stop the new one after fewer sessions than it is owed.
     workdir = Path.cwd()
-    if is_fresh:
-        # The count is reset in memory whether or not the file could be
-        # removed. Deleting it is disk hygiene; if that fails, reading the
-        # stale streak back would let a run started with --fresh stop early,
-        # which is exactly what --fresh promises will not happen.
-        remove_file(instance.nochange_file)
-        nochange = 0
-        remove_file(instance.unaccounted_file)
-        unaccounted = 0
-    else:
-        nochange = instance.read_nochange_count()
-        unaccounted = instance.read_unaccounted_count()
-    if adopt:
-        # This supervisor arrived part-way through a session it did not
-        # start, so the repository state that session began with is not
-        # knowable. Measuring its end against a baseline taken now would read
-        # work it had already finished as no work at all, and could stop a
-        # loop that had just been productive. The adopted session is
-        # unmeasurable by construction; the baseline re-arms from its end.
-        baseline = None
-    else:
-        baseline = workspace_fingerprint(workdir)
-    if nochange is None:
-        log(f"  Progress breaker: re-arms from the next measurable session "
-            f"— cannot read {instance.nochange_file}")
-    elif adopt:
-        log(f"  Progress breaker: re-arms after the adopted session "
-            f"(currently {nochange})")
-    elif baseline is None:
-        log("  Progress breaker: inactive — no readable git state in "
-            f"{workdir}")
-    else:
-        log(f"  Progress breaker: stops the loop after "
-            f"{MAX_NOCHANGE_SESSIONS} consecutive sessions that change "
-            f"nothing (currently {nochange})")
-        log(f"  Unaccounted endings: stops the loop after "
-            f"{MAX_UNACCOUNTED_SESSIONS} consecutive sessions that change "
-            f"nothing and end without a handoff or an observed exit "
-            f"(currently {'unknown' if unaccounted is None else unaccounted})")
-    work_db = None
-    last_heartbeat = 0.0
-    # Built once for the whole run, never per launch: `Host` quarantines an
-    # extension that overran its deadline for the life of the host, and a gate
-    # rebuilt per session forgets that and pays a full deadline every time.
-    gate = launch_gate()
-    # Consecutive refusals, so the wait between re-asks can grow. Cleared as
-    # soon as the gate lets a launch through.
-    held = 0
     try:
         try:
             while session_num <= MAX_SESSIONS:
@@ -270,13 +199,6 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                     # started now is the conservative reading: it can only
                     # delay the healthy-uptime reset, never trigger it early.
                     session_started_at = time.time()
-                    # An adopted session gets a log row and a heartbeat like
-                    # any other. What it does not get is a preamble: nothing
-                    # is being launched to read one, so the assignment is
-                    # resolved for the record and the claim, not to be said.
-                    work_db = _loop_work_db(workdir)
-                    _loop_start_session(work_db, instance, session_num)
-                    last_heartbeat = 0.0
                 else:
                     if marker_set(instance.stop_marker):
                         # A stop request that landed while this supervisor was
@@ -303,45 +225,8 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                         log(f"Session #{session_num}: detach requested before "
                             f"launch — supervisor exiting")
                         return 0
-                    # Asked after the two markers, so a human who said stop is
-                    # not made to wait out an extension's deadline, and before
-                    # anything is claimed, composed or saved, so a refused
-                    # launch leaves no lease and no state behind. Facts only:
-                    # serialised before a process exists to receive them.
-                    admission = gate.admits(
-                        instance=instance.id, session=session_num,
-                        agent=agent, workdir=str(workdir),
-                        fresh=bool(is_fresh), run_started=str(run_started))
-                    if not admission.admit:
-                        # Wait and ask again: same session number, no launch
-                        # failure counted. A refusal is "not now" -- a quiet
-                        # hours window, a cost ceiling -- and spending a
-                        # session number on one would walk an unattended run
-                        # into MAX_SESSIONS having launched nothing. Who
-                        # refused, never why: the reason is an extension's
-                        # prose, it is in the ledger, and this log is a file
-                        # an agent can open (INV-AUTH).
-                        held += 1
-                        pause = held_pause(held)
-                        log(f"Session #{session_num}: launch refused by "
-                            f"{', '.join(n for n, _ in admission.refusals)} "
-                            f"— waiting {pause}s before asking again")
-                        _sleep(pause)
-                        if shutdown["requested"]:
-                            raise KeyboardInterrupt
-                        continue
-                    held = 0
-                    # Both stop channels, re-read because asking took time --
-                    # up to `DEFAULT_CALL_DEADLINE` of somebody else's code. A
-                    # handler sets the flag and a human touches the markers, so
-                    # neither sees the other's request, and checking one leaves
-                    # a window for the very thing the pre-launch check exists
-                    # to prevent: a new session under someone who said stop.
                     if shutdown["requested"]:
                         raise KeyboardInterrupt
-                    if (marker_set(instance.stop_marker)
-                            or marker_set(instance.detach_marker)):
-                        continue
                     launch_args = list(copilot_args)
                     if resume_id:
                         if args_have_explicit_session(launch_args):
@@ -352,76 +237,16 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                             resume_id_used = resume_id
                         resume_id = ""
 
-                    # Messages that arrived while no session was running are
-                    # handed over here, per launch rather than once: the base
-                    # preamble is built per launch too, so mail that arrives
-                    # during session #3 must still reach session #4.
-                    # Read now, archive only once the session is really up.
-                    # The assignment is settled here, before the preamble is
-                    # built, so the agent's first token already knows whether
-                    # it is resuming an item, being offered one, or free.
-                    work_db = _loop_work_db(workdir)
-                    assignment = _loop_start_session(work_db, instance,
-                                                     session_num)
-                    last_heartbeat = 0.0
-                    # Read per launch rather than once at start-up, so editing
-                    # the mandate takes effect at the next session instead of
-                    # requiring nine supervisors to be restarted -- and so the
-                    # digest recorded below describes the text this session
-                    # actually received.
-                    session_mandate = read_mandate(mandate_path(workdir))
-                    evidence.record_mandate_read(
-                        OPERATOR_HOME, instance=instance.id,
-                        session=session_num, mandate=session_mandate)
                     handoff = handoff_state(workdir, instance.id)
                     launch_preamble = build_preamble(
-                        agent, instance,
-                        # All three read the one probe above. Probing again per
-                        # clause would let them disagree with each other and
-                        # with the record written below.
+                        instance,
                         crash_recovery=(had_predecessor
                                         and handoff.verdict == HANDOFF_MISSING),
                         handoff_waiting=(str(handoff.path)
                                          if handoff.verdict == HANDOFF_WAITING
                                          else ""),
                         handoff_unknown=(handoff.verdict == HANDOFF_UNKNOWN),
-                        handoff_written=handoff.written,
-                        # One `stat`, and only to decide whether a clause is
-                        # worth spending. The kernel never reads the journal:
-                        # its contents are a seat's own claims, they are vetted
-                        # where they are rendered, and a supervisor that read
-                        # them would be putting unattributed agent prose on the
-                        # launch path -- which is the whole of backlog 0013.
-                        has_journal=seat_has_journal(workdir, instance.id),
-                        assignment=assignment,
-                        code_state=_launch_code_state(),
-                        mandate=session_mandate,
-                        on_withheld=lambda source, phrases: (
-                            evidence.record_withheld_clause(
-                                OPERATOR_HOME, instance=instance.id,
-                                session=session_num, source=source,
-                                phrases=phrases)))
-                    # Recorded *after* composition, so the record says what the
-                    # session was told rather than what the supervisor saw.
-                    # Written before it, the two came apart in exactly the case
-                    # worth catching: a clause that could not be rendered still
-                    # left a record claiming the handoff had been announced.
-                    evidence.record_handoff_state(
-                        OPERATOR_HOME, instance=instance.id,
-                        session=session_num, verdict=handoff.verdict,
-                        path=handoff.path,
-                        announced=(handoff.verdict in (HANDOFF_WAITING,
-                                                       HANDOFF_UNKNOWN)))
-                    # Queued mail was injected into the preamble here. Mail is not
-                    # part of this kernel: delivery is a concern with its own
-                    # unsolved question -- `send_keys` proves only that a keystroke
-                    # was sent, not that a session was ready, received it, or read
-                    # it -- and a supervision kernel should not be the thing that
-                    # pretends otherwise.
-
-                    # Persist the pending resume id too: if the launch fails or the
-                    # process dies here, the id must survive on disk rather than being
-                    # cleared by a pre-launch write.
+                        handoff_written=handoff.written)
                     instance.save_state(session_num, run_started, resume_id_used)
                     try:
                         start_session(instance, launch_args, session_num,
@@ -475,7 +300,6 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                 # to write an exit code — either way something explains the
                 # ending. A session that simply vanished explains nothing, and
                 # a fingerprint that did not move says nothing about idleness.
-                ending_accounted_for = False
                 while True:
                     if shutdown["requested"]:
                         raise KeyboardInterrupt
@@ -539,11 +363,6 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                         if restart_probe is True:
                             log(f"Session #{session_num}: restart signal detected!")
                             crash_failures = 0
-                            ending_accounted_for = True
-                            _record_session_exit(instance, session_num,
-                                                 stop_state, detach_state,
-                                                 restart_probe,
-                                                 crash_failures, uptime=uptime)
                         else:
                             # No restart was asked for, so the only thing that
                             # can still account for this ending is an exit code:
@@ -551,7 +370,6 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                             # With neither, nobody saw the session end — the
                             # signature of the whole pane being killed — and it
                             # is not chargeable evidence of an idle agent.
-                            ending_accounted_for = ending_was_observed(instance)
                             if uptime is not None and uptime >= HEALTHY_SESSION_SECONDS:
                                 # Healthy run, then death: whatever killed it,
                                 # it is not the startup failure the limit is
@@ -562,10 +380,6 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                                         f"resetting the exit count")
                                 crash_failures = 0
                             crash_failures += 1
-                            _record_session_exit(instance, session_num,
-                                                 stop_state, detach_state,
-                                                 restart_probe,
-                                                 crash_failures, uptime=uptime)
                             ran_for = ("" if uptime is None
                                        else f" after {int(uptime)}s")
                             log(f"Session #{session_num}: copilot exited unexpectedly"
@@ -578,17 +392,9 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                                 return 1
                         restart_requested = True
                         break
-                    # Copilot is confirmed up, so the claim is provably still
-                    # being worked. Throttled: the poll interval is seconds and
-                    # the staleness window is minutes, so one write per minute
-                    # is as much evidence as the cascade can use.
-                    if time.time() - last_heartbeat >= HEARTBEAT_INTERVAL:
-                        _loop_heartbeat(work_db, instance.id)
-                        last_heartbeat = time.time()
                     if marker_set(instance.restart_marker):
                         log(f"Session #{session_num}: restart signal detected!")
                         crash_failures = 0
-                        ending_accounted_for = True
                         # The handoff path arrives here, not above: `handoff`
                         # touches the marker while copilot is still up, so the
                         # supervisor sees the request before it sees the exit.
@@ -606,14 +412,6 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                         # teardown then failed is recoverable by whoever reads
                         # it next; silence about the last thing that happened
                         # before the supervisor died is not.
-                        _record_session_exit(
-                            instance, session_num,
-                            marker_state(instance.stop_marker),
-                            marker_state(instance.detach_marker), True,
-                            crash_failures,
-                            uptime=(None if session_started_at is None
-                                    else time.time() - session_started_at),
-                            session_gone=False)
                         restart_requested = True
                         break
 
@@ -625,64 +423,6 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                     remove_file(instance.restart_marker)
                     stop_session_gracefully(instance)
                     instance.save_state(session_num, run_started)
-
-                    # The session is over and its writes have landed, so this
-                    # is the only honest moment to ask whether it changed
-                    # anything.
-                    current = workspace_fingerprint(workdir)
-                    nochange, verdict = evaluate_progress(
-                        nochange, baseline, current,
-                        ending_accounted_for=ending_accounted_for)
-                    unaccounted = evaluate_unaccounted(unaccounted, verdict)
-                    evidence.record_progress_verdict(
-                        OPERATOR_HOME, instance.id, session_num, verdict, baseline, current, ending_accounted_for, nochange, unaccounted, MAX_NOCHANGE_SESSIONS, MAX_UNACCOUNTED_SESSIONS)
-                    if verdict == "unknown":
-                        log(f"Session #{session_num}: cannot tell whether "
-                            f"anything changed — progress breaker not advanced")
-                    elif verdict == "changed":
-                        instance.save_nochange_count(0)
-                        instance.save_unaccounted_count(0)
-                    elif verdict == "unaccounted":
-                        # Deliberately not charged to the idleness streak. A
-                        # session nobody saw end had usually not committed yet,
-                        # so its unchanged fingerprint is a fact about when it
-                        # died and not about what the agent was doing.
-                        instance.save_unaccounted_count(unaccounted)
-                        log(f"Session #{session_num}: changed nothing in "
-                            f"{workdir} and ended with no handoff and no "
-                            f"observed exit "
-                            f"({unaccounted}/{MAX_UNACCOUNTED_SESSIONS}) — not "
-                            f"counted as idleness")
-                        if unaccounted >= MAX_UNACCOUNTED_SESSIONS:
-                            log(f"Loop stopped: {unaccounted} consecutive "
-                                f"sessions ended unaccounted for and changed "
-                                f"nothing. That is not idleness — something is "
-                                f"ending these sessions. Stopping instead of "
-                                f"starting session #{session_num + 1}.")
-                            log(f"  What ended them: operator evidence "
-                                f"--kind session_exit")
-                            log(f"  Resume with: operator --loop --name "
-                                f"{instance.display_name}")
-                            instance.cleanup_files()
-                            return EXIT_UNACCOUNTED
-                    else:
-                        instance.save_nochange_count(nochange)
-                        log(f"Session #{session_num}: changed nothing in "
-                            f"{workdir} ({nochange}/{MAX_NOCHANGE_SESSIONS})")
-                        if nochange >= MAX_NOCHANGE_SESSIONS:
-                            log(f"Progress breaker tripped: {nochange} "
-                                f"consecutive sessions changed nothing. "
-                                f"Stopping instead of starting session "
-                                f"#{session_num + 1}.")
-                            log(f"  Resume with: operator --loop --name "
-                                f"{instance.display_name}")
-                            instance.cleanup_files()
-                            return EXIT_NO_PROGRESS
-                    # A session whose end could not be measured keeps the old
-                    # baseline, so its work is still counted against the next
-                    # comparison rather than being lost between two unknowns.
-                    if current is not None:
-                        baseline = current
 
                     session_num += 1
                     log(f"Pausing before session #{session_num}...")

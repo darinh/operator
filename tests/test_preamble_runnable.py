@@ -41,11 +41,6 @@ def _launch_preamble(monkeypatch, tmp_path, *, remembered: str = "") -> str:
     monkeypatch.setattr(op, "OPERATOR_HOME", home)
     monkeypatch.chdir(work)
 
-    assert entry.main(["project", "register"]) == 0
-    if remembered:
-        assert entry.main(
-            ["remember", "--instance", SEAT, "--kind", "gotcha", remembered]) == 0
-
     seen: list[str] = []
 
     def capture(instance, args, session_num, remain_on_exit=False, preamble=""):
@@ -122,16 +117,12 @@ def _launch_texts(monkeypatch, tmp_path):
     caller does with these.
     """
     yield _launch_preamble(monkeypatch, tmp_path)
-    yield _launch_preamble(monkeypatch, tmp_path, remembered="node 20 required")
     import preamble as P
     from instance import Instance
     for extra in ({"crash_recovery": True}, {"handoff_unknown": True},
                   {"handoff_waiting": str(tmp_path / "h.md"),
-                   "handoff_written": "2026-09-24T00:00:00Z"},
-                  {"assignment": "do the thing"},
-                  {"code_state": P.CODE_STALE},
-                  {"code_state": P.CODE_MISMATCH}):
-        yield P.build_preamble("a:b", Instance(SEAT), **extra)
+                   "handoff_written": "2026-09-24T00:00:00Z"}):
+        yield P.build_preamble(Instance(SEAT), **extra)
 
 
 def _every_advertised_command(monkeypatch, tmp_path):
@@ -222,81 +213,6 @@ def test_a_fresh_seat_is_told_how_to_restart_itself(monkeypatch, tmp_path):
     assert restart, found
     for template in restart:
         assert _run(template) != 2, f"the preamble advertises `{template}`"
-
-
-def test_the_restart_clause_advertises_the_seat_id_not_the_display_name(
-        monkeypatch, tmp_path):
-    """Both reviewers of this change found the same bug here independently.
-
-    The supervisor probes with `instance.id`, the file is named for it, and
-    `safe_instance_id` maps `a.b` to something else entirely. A clause telling
-    the agent to hand off under its display name files the baton where the
-    next session does not look, and restarts the session regardless.
-    `preamble.py` already makes this exact argument for `operator remember`.
-    """
-    import preamble as P
-    from instance import Instance
-
-    seat = Instance("a.b")
-    assert seat.id != seat.display_name, "pick a name that actually sanitises"
-    restart = [c for c in _commands(P.build_preamble("a:b", seat))
-               if "handoff" in c]
-    assert restart, "no handoff command was advertised at all"
-    for command in restart:
-        assert f"--instance {seat.id}" in command, command
-        assert seat.display_name not in command.replace(seat.id, ""), command
-
-
-def test_a_fresh_seat_is_told_how_to_remember(monkeypatch, tmp_path):
-    found = _commands(_launch_preamble(monkeypatch, tmp_path))
-    assert any("remember" in c for c in found), found
-    for template in found:
-        assert _run(template) != 2, f"the preamble advertises `{template}`"
-
-
-def test_a_seat_with_memory_is_told_how_to_read_it(monkeypatch, tmp_path):
-    """The read clause is conditional, so a launch with an empty journal never
-    advertises recall and never exercises it."""
-    found = _commands(_launch_preamble(monkeypatch, tmp_path,
-                                       remembered="node 20 is required"))
-    assert any("recall" in c for c in found), found
-    for template in found:
-        assert _run(template) != 2, f"the preamble advertises `{template}`"
-
-
-def test_the_two_launches_between_them_cover_both_memory_commands(
-        monkeypatch, tmp_path):
-    """Neither launch alone does, which is how recall went unexecuted once."""
-    fresh = _commands(_launch_preamble(monkeypatch, tmp_path))
-    assert not any("recall" in c for c in fresh)
-
-
-@pytest.mark.parametrize("verb", ["remember", "recall"])
-def test_the_supervisor_still_passes_what_the_clause_needs(
-        verb, monkeypatch, tmp_path):
-    """`has_journal` is the supervisor's to compute and pass. Dropping that one
-    argument would stop every real launch advertising recall, and a test that
-    composed the preamble itself would not notice."""
-    text = _launch_preamble(monkeypatch, tmp_path, remembered="something")
-    assert any(verb in c for c in _commands(text))
-
-
-@pytest.mark.parametrize("template", [
-    'operator recall --instance alpha',
-    'operator remember --instance alpha --kind gotcha "..."',
-    'operator remember --instance alpha --kind "gotcha" "..."',
-])
-def test_a_quoted_option_value_is_not_mangled_into_a_false_failure(
-        template, monkeypatch, tmp_path):
-    """Positive control on the tokenizer.
-
-    posix=False preserved the grouping quotes, so a clause writing --kind
-    "gotcha" reached argparse as the literal '"gotcha"' and was rejected. The
-    guard would have reported CLI incompatibility for a command the CLI
-    accepts, which is the failure mode that gets a guard muted.
-    """
-    _launch_preamble(monkeypatch, tmp_path)
-    assert _run(template) != 2, f"`{template}` is valid but the guard mangled it"
 
 
 def test_an_executable_named_in_a_lone_span_is_still_a_command():

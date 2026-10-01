@@ -75,7 +75,6 @@ POLL_INTERVAL = 10
 #: The claim's staleness window is measured in minutes and the poll interval
 #: in seconds, so writing on every poll would buy no extra evidence and cost
 #: a database write per tick for the lifetime of every loop on the machine.
-HEARTBEAT_INTERVAL = 60
 
 
 MAX_SESSIONS = 1000
@@ -118,24 +117,6 @@ EXIT_GRACE_SECONDS = 20
 # Deliberately not open-ended: the capture is a parse of a Copilot log, and
 # those reach 1.4 GB on this machine.
 METRICS_GRACE_SECONDS = 15
-
-
-def spend_ceiling(environ=None) -> float | None:
-    """None is unlimited. Unreadable values do not bind."""
-    raw = (os.environ if environ is None else environ).get(
-        "OPERATOR_SPEND_CEILING")
-    if raw is None or not str(raw).strip():
-        return None
-    try:
-        value = float(raw)
-    except (TypeError, ValueError):
-        return None
-    if value != value:
-        return None
-    return value
-
-
-SPEND_CEILING = spend_ceiling()
 
 
 # How long a supervisor's startup record may be believed on its age alone,
@@ -203,43 +184,6 @@ SUPERVISOR_STARTUP_ALLOWANCE = SUPERVISOR_STARTUP_GRACE + CLOCK_SKEW_TOLERANCE
 SUPERVISOR_STARTUP_CEILING = 600.0
 
 
-# Consecutive sessions that may change nothing before the loop gives up.
-MAX_NOCHANGE_SESSIONS = 3
-
-
-# Consecutive sessions that may end *unaccounted for* -- neither by a restart
-# request nor by an exit the runner saw -- and change nothing, before the loop
-# gives up.
-#
-# A separate allowance, and a more patient one, because it is answering a
-# different question. Changing nothing is evidence of idleness only when the
-# session ended the way the loop expects; a session that was killed at four
-# minutes has usually not committed yet, so folding it into the idleness
-# streak retires the loops being killed *fastest* -- exactly the ones whose
-# failure has nothing to do with the agent. It is still bounded: an
-# unattended loop that cannot keep a session alive long enough to produce
-# anything burns credits either way, and the healthy-uptime reset means
-# MAX_LAUNCH_FAILURES can never bound it. Five matches the tolerance
-# MAX_LAUNCH_FAILURES gives deaths, rather than the three idleness gets.
-MAX_UNACCOUNTED_SESSIONS = 5
-
-
-# Seconds any single git probe may take before its answer is "unknown".
-GIT_PROBE_TIMEOUT = 30
-
-
-# run_loop_mode's exit code when the progress circuit breaker stopped it.
-EXIT_NO_PROGRESS = 3
-
-
-# run_loop_mode's exit code when the loop was stopped by sessions that kept
-# ending unaccounted for. Distinct from EXIT_NO_PROGRESS because the two carry
-# opposite diagnoses -- "the agent has run out of work" versus "something is
-# killing the sessions" -- and a reader who cannot tell them apart will act on
-# the wrong one.
-EXIT_UNACCOUNTED = 4
-
-
 UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
                      r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
@@ -248,51 +192,6 @@ SESSION_ARG_RE = re.compile(r"^--(continue|resume|connect)(=.*)?$")
 
 
 IS_WINDOWS = platform.system() == "Windows"
-
-
-# Verdicts of the supervisor-staleness check. Defined up here, away from the
-# machinery in `loop_code_state`, because `build_preamble` takes one as a
-# default argument and a default is evaluated when the `def` runs -- so the
-# name has to exist above the first function that mentions it, not merely
-# above the first that calls it.
-CODE_CURRENT = "current"
-
-
-CODE_STALE = "stale"
-
-
-CODE_UNKNOWN = "unknown"
-
-
-CODE_UNRECORDED = "unrecorded"
-
-
-#: The record on disk was not written by the supervisor that is running now.
-#:
-#: A fifth answer rather than a shade of ``CODE_UNKNOWN``, for the reason
-#: `_read_loop_record` keeps "absent" and "could not look" apart: they support
-#: different claims and the remedy text differs. This one is a *positive*
-#: observation -- we read a record and it names somebody else -- so collapsing
-#: it into "cannot tell" would file evidence as an absence of evidence.
-#:
-#: It also has to be reported, and that is the whole point. Adversarial review
-#: caught the first draft returning ``CODE_UNKNOWN`` here, which `operator
-#: list` prints nothing for: the row went completely silent, and this item
-#: exists because a silent row reads exactly like a healthy one.
-CODE_MISMATCH = "mismatch"
-
-
-#: How many numbered clauses the unconditional part of the preamble already
-#: spends, so the optional ones know where to start counting.
-#:
-#: This is an assumption about prose that lives somewhere else, which is the
-#: shape that reads as fact and is checked by nobody. Editing the base text to
-#: add a "(6)" would silently make the first optional clause a duplicate,
-#: because a wrong number here is still a number and every clause after it
-#: stays self-consistently wrong. `test_the_base_clause_count_matches_the_text`
-#: counts the clauses in the rendered preamble instead of trusting this, so the
-#: assumption is falsified by the text rather than restated by it.
-BASE_CLAUSES = 5
 
 
 # Extra Popen/run kwargs for helper subprocesses that must never show a window.
@@ -341,13 +240,11 @@ _PROBE_WARNED: set[str] = set()
 CATALOG_UNREADABLE = _CatalogUnreadable()
 
 
-TAB_LOOPING = 3
 
 
 FILE_ABSENT = _FileAbsent()
 
 
-_RUNNING_CODE: "dict | None" = None
 
 
 #: "Nobody has probed this pid yet", as distinct from ``None``, which means

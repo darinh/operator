@@ -18,13 +18,11 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 import instance
-import evidence
 from paths import guid_is_usable, project_handoff_file
 
-from config import CATALOG_UNREADABLE, MAX_LAUNCH_FAILURES, OPERATOR_HOME
+from config import CATALOG_UNREADABLE
 from presence import path_present
 from probes import log
-from provenance import running_code_fingerprint
 
 #: A handoff from the previous session is on disk and waiting to be read.
 HANDOFF_WAITING = "waiting"
@@ -349,61 +347,3 @@ def ending_was_observed(instance) -> bool:
     if not instance.exit_file_cleared:
         return False
     return read_exit_code(instance) is not None
-
-
-def _record_session_exit(instance, session_num: int,
-                         stop_state, detach_state, restart_state,
-                         consecutive: int, uptime: float | None = None,
-                         session_gone: bool = True) -> None:
-    """Trace a session ending, with the evidence the decision was made on.
-
-    The supervisor polls liveness rather than waiting on the child, so it has
-    never had an exit *code* to log -- but the runner writes one to the exit
-    file, and that is the difference between "copilot crashed" and "copilot
-    shut down cleanly and nobody asked us to expect it". Reading it here costs
-    one file read on a path that only runs when a session has already ended.
-
-    ``restart_state`` is passed in rather than probed here. It used to be
-    re-read off disk, and the only call site was the branch that had *already*
-    established the restart marker was absent -- so the field could not carry
-    ``True`` in any record, over 979 recorded exits. A field that cannot vary
-    records nothing, and this one was read as proof that no session had ever
-    ended by handoff when all it showed was where the call sat.
-
-    It takes the caller's tri-state probe, not a ``bool``. ``marker_set``
-    collapses "not there" and "could not look" into one answer, which is the
-    right trade for deciding a branch and the wrong one for a record somebody
-    will later read as an observation.
-
-    ``session_gone`` is False on the one path that fires while copilot is still
-    up (a restart requested mid-session, which is what `handoff` does). No exit
-    code can belong to a live process, so none is read: `start_session` clears
-    the exit file, but a clearing that failed would otherwise let a previous
-    session's code be recorded against this one.
-    """
-    try:
-        code: "int | None" = read_exit_code(instance) if session_gone else None
-        try:
-            pid = instance.copilot_pid()
-        except Exception:
-            pid = None
-        evidence.record_session_exit(
-            OPERATOR_HOME,
-            instance=instance.display_name,
-            session=session_num,
-            pid=pid,
-            markers={"stop": stop_state, "detach": detach_state,
-                     "restart": restart_state,
-                     "exit_code": code,
-                     "uptime_s": None if uptime is None else int(uptime)},
-            consecutive=consecutive,
-            limit=MAX_LAUNCH_FAILURES,
-            code=running_code_fingerprint().get("digest"),
-        )
-        # The seat id, not the display name: the launch gate reads spend under
-        # `instance.id`, and `safe_instance_id` is not idempotent, so recording
-        # under the display name files the cost where no ceiling will find it.
-        evidence.record_session_cost(
-            OPERATOR_HOME, instance=instance.id, session=session_num)
-    except Exception:
-        return

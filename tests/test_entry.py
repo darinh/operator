@@ -136,8 +136,8 @@ def test_unknown_command_prints_help(capsys):
 def test_the_verb_table_is_not_empty():
     """Otherwise the two loops below pass over nothing."""
     names = {verb.tokens[0] for verb in cli.VERBS}
-    assert len(cli.VERBS) >= 10
-    assert names >= {"doctor", "start", "list", "join", "stop", "trace", "verify"}
+    assert len(cli.VERBS) >= 7
+    assert names >= {"doctor", "start", "list", "join", "stop", "recover", "handoff"}
 
 
 def test_every_menu_entry_maps_to_a_verb():
@@ -229,20 +229,6 @@ def test_printed_command_round_trips_a_quote_and_a_dollar():
 
 def test_menu_offers_recover_all():
     assert any(item.argv == ("recover", "--all") for item in cli.menu_items())
-
-
-def test_menu_offers_project_verbs():
-    items = {item.argv for item in cli.menu_items()}
-    assert ("project", "register") in items
-    assert ("project", "list") in items
-    assert ("project", "forget") in items
-
-
-def test_menu_offers_ext_verbs():
-    items = {item.argv for item in cli.menu_items()}
-    assert ("ext", "list") in items
-    assert ("ext", "enable") in items
-    assert ("ext", "disable") in items
 
 
 def test_doctor_is_first_on_the_menu():
@@ -368,14 +354,6 @@ def test_start_registers_an_unregistered_directory(tmp_path, monkeypatch, capsys
     assert paths.catalog_guid(tmp_path).guid
 
 
-def test_operator_remember_help_names_instance(capsys):
-    assert cli.main(["remember", "--help"]) == 0
-    out = capsys.readouterr().out.lower()
-    assert "--instance" in out
-    assert "usage: operator remember" in out
-    assert "operator-seat" not in out
-
-
 def test_start_spawns_the_background_supervisor(monkeypatch, capsys):
     import supervisor
     seen = {}
@@ -482,13 +460,13 @@ def test_list_delegates_to_the_board_rather_than_rendering_its_own(monkeypatch,
     its own row and then delegates, which is the state this came from, and
     both Gate 2 reviewers found that hole independently.
     """
-    import snapshot
+    from operator_cli import listing
 
     def sentinel():
         print("the board owns this line")
         return 7
 
-    monkeypatch.setattr(snapshot, "list_instances", sentinel)
+    monkeypatch.setattr(listing, "list_instances", sentinel)
     assert cli.main(["list"]) == 7
     assert capsys.readouterr().out == "the board owns this line\n"
 
@@ -562,40 +540,6 @@ def test_doctor_ok_when_the_machine_is_ready(monkeypatch, capsys):
     assert "doctor: ok" in out
 
 
-def test_restart_loop_names_one_seat(monkeypatch):
-    import supervisor_control
-    seen = []
-    monkeypatch.setattr(supervisor_control, "restart_loop",
-                        lambda target: seen.append(target) or 0)
-    assert cli.main(["restart-loop", "alpha"]) == 0
-    assert seen == ["alpha"]
-
-
-def test_restart_loop_all_after_terminator_is_not_a_sweep(monkeypatch):
-    import supervisor_control
-    swept = []
-    named = []
-    monkeypatch.setattr(supervisor_control, "restart_all_loops",
-                        lambda: swept.append(True) or 0)
-    monkeypatch.setattr(supervisor_control, "restart_loop",
-                        lambda target: named.append(target) or 0)
-    assert cli.main(["restart-loop", "--", "--all"]) == 0
-    assert swept == []
-    assert named == ["--all"]
-
-
-def test_restart_loop_all_sweeps(monkeypatch):
-    import supervisor_control
-    called = []
-    monkeypatch.setattr(supervisor_control, "restart_all_loops",
-                        lambda: called.append("--all") or 0)
-    monkeypatch.setattr(supervisor_control, "restart_loop",
-                        lambda target: (_ for _ in ()).throw(
-                            AssertionError("single restart")))
-    assert cli.main(["restart-loop", "--all"]) == 0
-    assert called == ["--all"]
-
-
 def test_recover_delegates(monkeypatch):
     seen = []
     monkeypatch.setattr(cli.recover, "main", lambda argv: seen.append(argv) or 0)
@@ -603,193 +547,12 @@ def test_recover_delegates(monkeypatch):
     assert seen == [["--all"]]
 
 
-def test_remember_stops_options_at_the_terminator(monkeypatch):
-    seen = []
-    monkeypatch.setattr(cli.seat, "main", lambda argv, **k: seen.append(list(argv)) or 0)
-    assert cli.main([
-        "remember", "--instance", "alpha", "--kind", "decision",
-        "--", "--instance=beta", "some text",
-    ]) == 0
-    assert seen == [[
-        "--instance", "alpha", "remember", "--kind", "decision",
-        "--", "--instance=beta", "some text",
-    ]]
-
-
-def test_session_after_terminator_is_journal_text(monkeypatch):
-    seen = []
-    monkeypatch.setattr(cli.seat, "main", lambda argv, **k: seen.append(list(argv)) or 0)
-    assert cli.main([
-        "remember", "--instance", "alpha", "--kind", "decision",
-        "--", "--session=99", "note",
-    ]) == 0
-    assert seen[0][-3:] == ["--", "--session=99", "note"]
-    assert seen[0][0:2] == ["--instance", "alpha"]
-
-
-def test_home_after_terminator_is_journal_text(monkeypatch, tmp_path):
-    seen = []
-    monkeypatch.setattr(cli.seat, "main", lambda argv, **k: seen.append(list(argv)) or 0)
-    assert cli.main([
-        "--home", str(tmp_path),
-        "remember", "--instance", "alpha", "--kind", "decision",
-        "--", "--home=/elsewhere", "note",
-    ]) == 0
-    assert "--home=/elsewhere" in seen[0]
-    assert seen[0][-1] == "note"
-    assert os.environ["COPILOT_OPERATOR_HOME"] == str(tmp_path)
-
-
-def test_remember_delegates_to_seat(monkeypatch):
-    seen = []
-    monkeypatch.setattr(cli.seat, "main", lambda argv, **k: seen.append(argv) or 0)
-    assert cli.main(["remember", "--instance", "prism", "--kind", "gotcha",
-                     "tail by inode"]) == 0
-    assert seen == [["--instance", "prism", "remember", "--kind", "gotcha",
-                     "tail by inode"]]
-
-
-def test_recall_delegates_to_seat(monkeypatch):
-    seen = []
-    monkeypatch.setattr(cli.seat, "main", lambda argv, **k: seen.append(argv) or 0)
-    assert cli.main(["recall", "--instance", "prism"]) == 0
-    assert seen == [["--instance", "prism", "recall"]]
-
-
-def test_forget_delegates_to_seat(monkeypatch):
-    seen = []
-    monkeypatch.setattr(cli.seat, "main", lambda argv, **k: seen.append(argv) or 0)
-    assert cli.main(["forget", "--instance", "prism", "abc"]) == 0
-    assert seen == [["--instance", "prism", "forget", "abc"]]
-
-
-def test_fleet_run_delegates(monkeypatch):
-    seen = []
-    monkeypatch.setattr(cli.fleet, "main", lambda argv: seen.append(argv) or 0)
-    assert cli.main(["fleet", "run", "--rounds", "1"]) == 0
-    assert seen == [["run", "--rounds", "1"]]
-
-
-def test_fleet_proposals_delegates(monkeypatch):
-    seen = []
-    monkeypatch.setattr(cli.fleet, "main", lambda argv: seen.append(argv) or 0)
-    assert cli.main(["fleet", "proposals", "--drain"]) == 0
-    assert seen == [["proposals", "--drain"]]
-
-
-def test_fleet_without_a_subcommand_refuses(capsys):
-    assert cli.main(["fleet"]) == 2
-    assert "operator fleet run|proposals" in capsys.readouterr().err
-
-
-def test_trace_prints_newest_first_with_a_limit(tmp_path, capsys):
-    path = tmp_path / "trace.jsonl"
-    path.write_text(
-        json.dumps({"n": 1}) + "\n"
-        + json.dumps({"n": 2}) + "\n"
-        + json.dumps({"n": 3}) + "\n",
-        encoding="utf-8")
-    assert cli.main(["--home", str(tmp_path), "trace", "-n", "2"]) == 0
-    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()
-             if line.strip()]
-    assert [row["n"] for row in lines] == [3, 2]
-
-
-def test_trace_says_so_when_the_ledger_is_missing(tmp_path, capsys):
-    assert cli.main(["--home", str(tmp_path), "trace"]) == 0
-    assert "no ledger" in capsys.readouterr().out
-
-
-def test_trace_reads_the_rotated_half_when_the_live_file_is_empty(tmp_path,
-                                                                 capsys):
-    """The case where the old reader returned success with no output at all.
-
-    `trace.jsonl` rotates by rename, so every record can be in `trace.jsonl.1`
-    with nothing written since. The guard already knew that file could hold
-    records; the reader ignored it and printed nothing, which reads as an
-    empty ledger rather than as a reader that did not look.
-    """
-    (tmp_path / "trace.jsonl.1").write_text(
-        json.dumps({"n": 1}) + "\n"
-        + json.dumps({"n": 2}) + "\n"
-        + json.dumps({"n": 3}) + "\n",
-        encoding="utf-8")
-    (tmp_path / "trace.jsonl").write_text("", encoding="utf-8")
-    assert cli.main(["--home", str(tmp_path), "trace"]) == 0
-    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()
-             if line.strip()]
-    assert [row["n"] for row in lines] == [3, 2, 1]
-
-
-def test_trace_spans_the_rotation_oldest_in_the_rotated_file(tmp_path, capsys):
-    (tmp_path / "trace.jsonl.1").write_text(
-        json.dumps({"n": 1}) + "\n" + json.dumps({"n": 2}) + "\n",
-        encoding="utf-8")
-    (tmp_path / "trace.jsonl").write_text(
-        json.dumps({"n": 3}) + "\n" + json.dumps({"n": 4}) + "\n",
-        encoding="utf-8")
-    assert cli.main(["--home", str(tmp_path), "trace"]) == 0
-    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()
-             if line.strip()]
-    assert [row["n"] for row in lines] == [4, 3, 2, 1]
-
-
-def test_trace_and_verify_count_the_same_records(tmp_path, capsys):
-    """`verify` reading five while `trace` shows two is the reportable shape."""
-    import ledger_chain
-    writer = ledger_chain.Writer("w1")
-    (tmp_path / "trace.jsonl.1").write_text(
-        "".join(json.dumps(writer.stamp({"event": str(i)})) + "\n"
-                for i in range(3)),
-        encoding="utf-8")
-    (tmp_path / "trace.jsonl").write_text(
-        "".join(json.dumps(writer.stamp({"event": str(i)})) + "\n"
-                for i in range(3, 5)),
-        encoding="utf-8")
-    assert cli.main(["--home", str(tmp_path), "trace", "-n", "100"]) == 0
-    shown = len([line for line in capsys.readouterr().out.splitlines()
-                 if line.strip()])
-    assert cli.main(["--home", str(tmp_path), "verify"]) == 0
-    assert "5 record(s)" in capsys.readouterr().out
-    assert shown == 5
-
-
-def test_verify_prints_a_verified_chain(tmp_path, capsys):
-    import ledger_chain
-    writer = ledger_chain.Writer("w1")
-    path = tmp_path / "trace.jsonl"
-    path.write_text(
-        json.dumps(writer.stamp({"event": "one"})) + "\n"
-        + json.dumps(writer.stamp({"event": "two"})) + "\n",
-        encoding="utf-8")
-    assert cli.main(["--home", str(tmp_path), "verify"]) == 0
-    out = capsys.readouterr().out
-    assert out.startswith("verified:")
-    assert "2 record(s)" in out
-    assert "1 writer(s)" in out
-
-
-def test_verify_prints_a_gap(tmp_path, capsys):
-    import ledger_chain
-    writer = ledger_chain.Writer("alice")
-    first = writer.stamp({"event": "one"})
-    writer.stamp({"event": "two"})
-    third = writer.stamp({"event": "three"})
-    path = tmp_path / "trace.jsonl"
-    path.write_text(json.dumps(first) + "\n" + json.dumps(third) + "\n",
-                    encoding="utf-8")
-    assert cli.main(["--home", str(tmp_path), "verify"]) == 1
-    out = capsys.readouterr().out
-    assert out.startswith("gap:")
-    assert "alice" in out
-
-
 def test_the_console_script_is_declared():
     text = (REPO / "pyproject.toml").read_text(encoding="utf-8")
     assert 'operator = "operator_cli.entry:main"' in text
-    assert "operator-fleet" in text
-    assert "operator-seat" in text
-    assert "operator-recover" in text
+    assert "operator-fleet" not in text
+    assert "operator-seat" not in text
+    assert "operator-recover" not in text
 
 
 # ── operator handoff ────────────────────────────────────────────
