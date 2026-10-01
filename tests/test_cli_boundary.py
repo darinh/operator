@@ -7,8 +7,8 @@ from test_kernel_boundary import (MAX_MODULE_CODE_LINES, MAX_MODULE_LINES,
                                   REPO, code_lines)
 
 CLI = REPO / "operator_cli"
-MAX_CLI_CODE_LINES = 1400
-MAX_CLI_TOTAL_LINES = 1900
+MAX_CLI_CODE_LINES = 782
+MAX_CLI_TOTAL_LINES = 1061
 
 
 def cli_modules() -> list[Path]:
