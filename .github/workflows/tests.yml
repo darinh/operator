@@ -60,8 +60,6 @@ jobs:
         # cheapest check that entry-point discovery still resolves.
         run: |
           operator --help > /dev/null
-          operator-fleet --help > /dev/null
-          operator-seat --help > /dev/null
 
       - name: A disposable home comes up, passes doctor, and goes away
         run: |

@@ -70,11 +70,11 @@ is the point.
 
 0. **What authorised this?** Name the human request, issue, or approved item this traces to. An
    agent that satisfies every mechanical check while doing work nobody asked for is the failure
-   `docs/plan.md` section 3.2 exists to prevent, and no other question here would catch it.
+   this gate exists to prevent, and no other question here would catch it.
 1. Does this change a contract something else depends on? Ledger record shape, exit codes, file
    names, console script names, a seam another package reaches through.
-2. Which documents name the behaviour I changed? On 2026-09-20 `docs/ledger.md` claimed a
-   detection the code did not make.
+2. Which documents name the behaviour I changed? A document that claims a detection the
+   code does not make is how a later reader trusts the wrong thing.
 3. Does the PR description claim anything the code does not do? Read it against the diff as if
    someone else wrote it.
 4. Did I raise a budget or threshold to make something fit? Name it and say why that beat
