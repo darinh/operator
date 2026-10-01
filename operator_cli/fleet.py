@@ -37,65 +37,20 @@ import time
 from pathlib import Path
 
 
+from .home import _bootstrap as _kernel_bootstrap, _home, _settle_home  # noqa: F401
+
+
 def _bootstrap() -> None:
-    """Put the kernel and fleet directories on `sys.path`.
-
-    The modules in both packages import each other flatly -- `evidence.py` is
-    `import evidence`, not `from operator_kernel import evidence` -- so they
-    need their *directory* on the path rather than their package. That is not
-    an accident of the tests: `extensions.py` spawns its worker as a script
-    path specifically so "the kernel directory lands on the child's `sys.path`
-    without anyone arranging it", and `tests/op.py` arranges the same thing.
-
-    Located from the installed packages rather than from this file's parents,
-    so it works from a checkout and from site-packages alike. Idempotent, and
-    it never reorders a path entry that is already there: this runs before
-    anything is imported, and a caller who has already arranged their own path
-    has a reason.
-    """
+    """Kernel directory, then the fleet directory. Idempotent."""
+    _kernel_bootstrap()
     import operator_fleet
-    import operator_kernel
 
-    for package in (operator_fleet, operator_kernel):
-        origin = getattr(package, "__file__", None)
-        if not origin:
-            continue
-        directory = str(Path(origin).resolve().parent)
-        if directory not in sys.path:
-            sys.path.insert(0, directory)
-
-
-def _home(given: "str | None") -> Path:
-    """Where operator state lives, by the same rule the kernel uses.
-
-    Duplicated from `config.operator_home()` rather than imported, because this
-    runs *before* `_bootstrap` has made that importable and because a `--home`
-    flag has to win over both. The rule is a documented constant, not logic.
-    """
-    if given:
-        return Path(given).expanduser()
-    override = os.environ.get("COPILOT_OPERATOR_HOME")
-    return Path(override) if override else Path.home() / ".operator"
-
-
-def _settle_home(given: "str | None") -> Path:
-    """Resolve the home and make every child process agree with it.
-
-    `--home` used to move the ledger and the proposal queue and nothing else.
-    Extensions run in spawned workers that inherit this environment and resolve
-    the operator home *themselves*, so a relocated fleet read its activation
-    config and wrote its extension state under the real `~/.operator` -- either
-    staying inert while the given home held an `extensions.json`, or mixing one
-    fleet's state into another's. A reviewer found it; the CLI's own tests had
-    hidden it by setting the variable and the flag to the same path.
-
-    Exported unconditionally rather than only when `--home` was given, so that
-    parent and child are reading the same string rather than independently
-    agreeing on a default.
-    """
-    home = _home(given)
-    os.environ["COPILOT_OPERATOR_HOME"] = str(home)
-    return home
+    origin = getattr(operator_fleet, "__file__", None)
+    if not origin:
+        return
+    directory = str(Path(origin).resolve().parent)
+    if directory not in sys.path:
+        sys.path.insert(0, directory)
 
 
 def _run(args) -> int:

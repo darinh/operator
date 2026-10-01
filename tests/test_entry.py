@@ -805,3 +805,9 @@ def test_handoff_is_reachable_from_the_menu(monkeypatch, capsys):
     assert cli.main([]) == 0
     assert printed and printed[-1] == [
         "handoff", "--instance", "alpha", "--status", "finished the sweep"]
+
+
+def test_the_front_door_bootstraps_from_the_shared_home_helper():
+    from operator_cli import home
+    assert cli._bootstrap is home._bootstrap
+    assert cli._settle_home is home._settle_home

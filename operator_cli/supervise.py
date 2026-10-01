@@ -23,7 +23,7 @@ import sys
 
 from operator_kernel.argtail import at_dashdash
 
-from .fleet import _bootstrap
+from .home import _bootstrap
 
 #: Flags addressed to the supervisor. Everything else belongs to Copilot and is
 #: passed through untouched -- argparse would reject those instead, and they are

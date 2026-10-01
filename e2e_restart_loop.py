@@ -147,7 +147,7 @@ def main() -> int:
     os.environ["OPERATOR_NO_TAB_PROGRESS"] = "1"
 
     sys.path.insert(0, str(REPO))
-    from operator_cli.fleet import _bootstrap
+    from operator_cli.home import _bootstrap
     _bootstrap()
     import mux as mux_module
     from instance import Instance

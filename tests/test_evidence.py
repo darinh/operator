@@ -27,6 +27,7 @@ import multiprocessing
 from pathlib import Path
 
 import evidence
+import process_tree
 from ledger_chain import Broken, Gap, NoChain, TruncatedTail, Verified, verify
 
 
@@ -37,6 +38,10 @@ def _write_chained_records(path_str, count, tag):
     for i in range(count):
         assert ev._append(path, {"event": "probe", "tag": tag, "i": i},
                           chain=True) is True
+
+
+def test_ancestry_is_the_process_tree_walk():
+    assert evidence.ancestry is process_tree.ancestry
 
 
 def budgeted_size(record: dict) -> int:

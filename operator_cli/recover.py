@@ -15,7 +15,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .fleet import _bootstrap, _settle_home
+from .home import _bootstrap, _settle_home
 
 
 def _recover(args) -> int:

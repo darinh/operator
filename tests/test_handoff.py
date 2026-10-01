@@ -236,3 +236,8 @@ def test_the_refusal_says_how_to_pass_a_value_that_looks_like_a_flag(
     assert cli.main(["handoff", "--instance", "alpha", f"--status={status}",
                      "--no-restart"]) == 0
     assert _body(work) == _expected_body(status)
+
+
+def test_handoff_bootstraps_from_the_shared_home_helper():
+    from operator_cli import handoff, home
+    assert handoff._bootstrap is home._bootstrap
