@@ -40,13 +40,13 @@ choose, and stays under the rule in full.
 """
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 from typing import NamedTuple
 
 import pytest
 
-import seat
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -251,7 +251,7 @@ def test_a_squashed_branch_is_still_an_authorship_claim(history):
     claims = [c.sha for c in commits_under_the_rule(repo=history.root,
                                                    since=base)]
     assert squashed in claims
-    assert not seat.is_agent_identity(history.at(squashed).name,
+    assert not is_agent_identity(history.at(squashed).name,
                                       history.at(squashed).email)
 
 
@@ -339,7 +339,7 @@ def test_no_commit_under_the_rule_is_authored_by_a_human_identity():
     offenders = [
         f"{c.sha[:8]} {c.name} <{c.email}>"
         for c in commits_making_an_authorship_claim()
-        if not seat.is_agent_identity(c.name, c.email)
+        if not is_agent_identity(c.name, c.email)
     ]
     assert offenders == [], (
         "these commits are authored under an identity that reads as a person:\n  "
@@ -363,7 +363,19 @@ def test_every_commit_under_the_rule_names_an_accountable_human():
     )
 
 
-# -- seat identity ------------------------------------------------
+# -- agent identity -----------------------------------------------
+def is_agent_identity(name: str, email: str) -> bool:
+    """Whether a commit identity is an agent's rather than a person's.
+
+    A shape rather than a list: agent names are created freely, and a list of
+    known names goes stale in the direction that lets a human identity through.
+    """
+    return bool(
+        re.search(r"^[^@]*\+agent[^@]*@", email)
+        or re.search(r"\(agent\)$", name)
+    )
+
+
 @pytest.mark.parametrize("name, email, expected", [
     pytest.param("kernel (agent)",
                  "darin+agent-kernel@users.noreply.github.com", True,
@@ -376,43 +388,4 @@ def test_every_commit_under_the_rule_names_an_accountable_human():
                  id="a word containing no agent marker"),
 ])
 def test_the_identity_shape_check_separates_agents_from_people(name, email, expected):
-    assert seat.is_agent_identity(name, email) is expected
-
-
-def test_a_seat_identity_round_trips_as_an_agent():
-    name, email = seat.seat_identity("api-refactor")
-    assert seat.is_agent_identity(name, email)
-    assert "api-refactor" in email
-
-
-@pytest.mark.parametrize("bad", [
-    pytest.param("a1b2c3d4", id="a bare hex prefix -- the session-id suggestion"),
-    pytest.param("2f8c1e9a4b7d", id="a longer hash"),
-    pytest.param("235a42ce-4546-41da", id="a uuid prefix"),
-    pytest.param("session-4", id="named for a session"),
-    pytest.param("kernel-2026", id="a trailing run number"),
-])
-def test_a_session_shaped_id_is_refused(bad):
-    """A seat outlives its sessions, so it cannot be named after one.
-
-    Deriving the identity from a session mints a new author on every restart:
-    hundreds of one-off names in the log, and no per-seat history for effort
-    estimates or calibration to be computed against. The refusal is loud
-    because the damage is invisible until somebody asks a question the history
-    can no longer answer.
-    """
-    with pytest.raises(seat.SeatIdError):
-        seat.validate_seat_id(bad)
-
-
-@pytest.mark.parametrize("good", ["kernel", "api-refactor", "billing-tests", "web-ui"])
-def test_a_seat_named_for_its_work_is_accepted(good):
-    assert seat.validate_seat_id(good) == good
-
-
-def test_the_trailers_name_the_accountable_human_and_keep_the_session_out_of_the_name():
-    trailers = seat.commit_trailers("kernel", session=42)
-    assert any(t.startswith("Co-authored-by:") for t in trailers)
-    assert any("kernel#42" in t for t in trailers)
-    name, _ = seat.seat_identity("kernel")
-    assert "42" not in name, "the session number leaked into the identity"
+    assert is_agent_identity(name, email) is expected
