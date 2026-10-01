@@ -99,203 +99,55 @@ def test_a_directory_outside_a_checkout_is_refused(tmp_path):
 # ── activation ───────────────────────────────────────────────────────────
 
 
-def test_enabling_writes_the_shape_the_kernel_requires(run, capsys):
-    control.cmd_enable(SimpleNamespace(run=str(run), extension="seat-watch",
-                                       setting=["failures=3"]))
-    config = json.loads((run / "home" / "extensions.json").read_text("utf-8"))
-    assert config["seat-watch"] == {"enabled": True, "failures": 3}
 
 
-def test_a_setting_is_json_typed_not_stringified(run):
-    control.cmd_enable(SimpleNamespace(run=str(run), extension="x",
-                                       setting=["n=2", "flag=true", "word=hi"]))
-    entry = json.loads((run / "home" / "extensions.json").read_text("utf-8"))["x"]
-    assert entry["n"] == 2 and entry["flag"] is True and entry["word"] == "hi"
 
 
-def test_enabling_a_second_extension_keeps_the_first(run):
-    control.cmd_enable(SimpleNamespace(run=str(run), extension="a", setting=None))
-    control.cmd_enable(SimpleNamespace(run=str(run), extension="b", setting=None))
-    config = json.loads((run / "home" / "extensions.json").read_text("utf-8"))
-    assert set(config) == {"a", "b"}
 
 
-def test_a_corrupt_activation_file_is_replaced_rather_than_crashing(run):
-    """The harness must still be able to set up a run after a corrupt-config test."""
-    (run / "home" / "extensions.json").write_text("{not json", encoding="utf-8")
-    control.cmd_enable(SimpleNamespace(run=str(run), extension="a", setting=None))
-    config = json.loads((run / "home" / "extensions.json").read_text("utf-8"))
-    assert config["a"]["enabled"] is True
 
 
 # ── seeding ──────────────────────────────────────────────────────────────
 
 
-def test_ledger_records_are_appended_one_per_line(run):
-    control.cmd_seed_ledger(SimpleNamespace(
-        run=str(run), records=None,
-        record=['{"event":"session_exit","instance":"s"}', '{"event":"other"}']))
-    lines = (run / "home" / "trace.jsonl").read_text("utf-8").strip().splitlines()
-    assert len(lines) == 2
-    assert json.loads(lines[0])["event"] == "session_exit"
 
 
-def test_a_seeded_record_gets_a_timestamp_it_did_not_supply(run):
-    control.cmd_seed_ledger(SimpleNamespace(run=str(run), records=None,
-                                            record=['{"event":"e"}']))
-    record = json.loads((run / "home" / "trace.jsonl").read_text("utf-8").strip())
-    assert record["ts"].endswith("Z")
 
 
-def test_a_supplied_timestamp_is_not_overwritten(run):
-    control.cmd_seed_ledger(SimpleNamespace(
-        run=str(run), records=None, record=['{"event":"e","ts":"2020-01-01T00:00:00Z"}']))
-    record = json.loads((run / "home" / "trace.jsonl").read_text("utf-8").strip())
-    assert record["ts"] == "2020-01-01T00:00:00Z"
 
 
-def test_seeding_nothing_is_refused_rather_than_silently_doing_nothing(run):
-    with pytest.raises(SystemExit):
-        control.cmd_seed_ledger(SimpleNamespace(run=str(run), records=None,
-                                                record=None))
 
 
-def test_seeding_appends_rather_than_replacing(run):
-    for _ in range(2):
-        control.cmd_seed_ledger(SimpleNamespace(run=str(run), records=None,
-                                                record=['{"event":"e"}']))
-    lines = (run / "home" / "trace.jsonl").read_text("utf-8").strip().splitlines()
-    assert len(lines) == 2
 
 
-def test_a_seeded_proposal_is_attributed(run):
-    control.cmd_seed_queue(SimpleNamespace(run=str(run), extension="fixture-x",
-                                           record=None, abandoned=False, pad_to_bytes=None))
-    record = json.loads((run / "home" / "proposals.jsonl").read_text("utf-8").strip())
-    assert record["extension"] == "fixture-x"
-    assert record["ts"].endswith("Z")
 
 
-def test_an_abandoned_batch_is_not_written_to_the_live_queue(run):
-    """The orphan a crashed drain leaves behind, which the next drain adopts."""
-    control.cmd_seed_queue(SimpleNamespace(run=str(run), extension="fixture-x",
-                                           record=None, abandoned=True, pad_to_bytes=None))
-    home = run / "home"
-    assert not (home / "proposals.jsonl").exists()
-    orphans = list(home.glob("proposals.draining.*.jsonl"))
-    assert len(orphans) == 1
-    assert json.loads(orphans[0].read_text("utf-8").strip())["extension"] == "fixture-x"
 
 
-def test_two_abandoned_batches_do_not_collide(run):
-    """`_claim` keys orphans on pid AND a nanosecond stamp; so must the fixture."""
-    for _ in range(2):
-        control.cmd_seed_queue(SimpleNamespace(run=str(run), extension="x",
-                                               record=None, abandoned=True, pad_to_bytes=None))
-    assert len(list((run / "home").glob("proposals.draining.*.jsonl"))) == 2
 
 
-def test_padding_reaches_the_size_at_which_the_host_refuses(run):
-    """`_append_proposal` compares st_size, so only bulk matters."""
-    target = 200_000
-    control.cmd_seed_queue(SimpleNamespace(run=str(run), extension="filler",
-                                           record=None, abandoned=False,
-                                           pad_to_bytes=target))
-    assert (run / "home" / "proposals.jsonl").stat().st_size >= target
 
 
-def test_padding_still_leaves_parseable_lines(run):
-    """A queue of unreadable bulk would prove the wrong refusal."""
-    control.cmd_seed_queue(SimpleNamespace(run=str(run), extension="filler",
-                                           record=None, abandoned=False,
-                                           pad_to_bytes=50_000))
-    body = (run / "home" / "proposals.jsonl").read_text(encoding="utf-8")
-    for line in body.splitlines():
-        if line.strip():
-            json.loads(line)
 
 
 # ── rotating the ledger ──────────────────────────────────────────
 
 
-def test_rotating_renames_rather_than_copying(run):
-    """The appender rotates by rename; a copy would leave two live files."""
-    trace = run / "home" / "trace.jsonl"
-    trace.parent.mkdir(parents=True, exist_ok=True)
-    trace.write_text('{"event":"e"}\n', encoding="utf-8")
-
-    control.cmd_rotate_ledger(SimpleNamespace(run=str(run)))
-
-    assert not trace.exists(), "the live ledger should be gone after a rename"
-    assert (run / "home" / "trace.jsonl.1").read_text(encoding="utf-8") == (
-        '{"event":"e"}\n')
 
 
-def test_rotating_twice_replaces_the_previous_rotation(run):
-    """`_rotate_if_needed` keeps one `.1` and no more; the fixture must match."""
-    trace = run / "home" / "trace.jsonl"
-    trace.parent.mkdir(parents=True, exist_ok=True)
-    trace.write_text("first\n", encoding="utf-8")
-    control.cmd_rotate_ledger(SimpleNamespace(run=str(run)))
-    trace.write_text("second\n", encoding="utf-8")
-    control.cmd_rotate_ledger(SimpleNamespace(run=str(run)))
-
-    assert (run / "home" / "trace.jsonl.1").read_text(encoding="utf-8") == "second\n"
-    assert not list((run / "home").glob("trace.jsonl.2"))
 
 
-def test_rotating_nothing_is_refused_rather_than_silently_succeeding(run):
-    with pytest.raises(SystemExit):
-        control.cmd_rotate_ledger(SimpleNamespace(run=str(run)))
 
 
 # ── padding a journal ────────────────────────────────────────────
 
 
-def test_journal_padding_does_not_overshoot_its_target(run):
-    """An imprecise pad cannot isolate a boundary, which is its whole purpose.
-
-    Two things made it overshoot: a buffered handle, so `stat()` lagged the
-    writes, and Windows translating each "\\n" into "\\r\\n", one byte per line
-    the count never saw.
-    """
-    target = 300_000
-    control.cmd_seed_journal(SimpleNamespace(run=str(run), seat="cap-seat",
-                                             pad_to_bytes=target))
-    path = (run / "home" / "projects" / "guid-1" / "journal" / "cap-seat.jsonl")
-    assert path.stat().st_size <= target
 
 
-def test_journal_padding_gets_close_enough_to_be_useful(run):
-    """Within one record of the target, or a boundary test cannot be set up."""
-    target = 300_000
-    control.cmd_seed_journal(SimpleNamespace(run=str(run), seat="cap-seat",
-                                             pad_to_bytes=target))
-    path = (run / "home" / "projects" / "guid-1" / "journal" / "cap-seat.jsonl")
-    assert target - path.stat().st_size < 1000
 
 
-def test_journal_padding_writes_entries_the_reader_can_parse(run):
-    """Padding with junk would prove a refusal caused by the wrong thing."""
-    control.cmd_seed_journal(SimpleNamespace(run=str(run), seat="cap-seat",
-                                             pad_to_bytes=20_000))
-    path = (run / "home" / "projects" / "guid-1" / "journal" / "cap-seat.jsonl")
-    lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    assert lines
-    for line in lines:
-        record = json.loads(line)
-        assert record["instance"] == "cap-seat"
-        assert record["verified"] is False
 
 
-def test_journal_padding_appends_to_what_is_already_there(run):
-    """It must extend a real journal, not replace one."""
-    path = (run / "home" / "projects" / "guid-1" / "journal" / "cap-seat.jsonl")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text('{"id":"keepme","instance":"cap-seat"}\n', encoding="utf-8")
-    control.cmd_seed_journal(SimpleNamespace(run=str(run), seat="cap-seat",
-                                             pad_to_bytes=20_000))
-    assert "keepme" in path.read_text(encoding="utf-8")
 
 
 # ── evidence ─────────────────────────────────────────────────────────────
@@ -303,24 +155,23 @@ def test_journal_padding_appends_to_what_is_already_there(run):
 
 def test_evidence_captures_the_state_the_skill_promises(run):
     home = run / "home"
-    (home / "trace.jsonl").write_text('{"event":"e"}\n', encoding="utf-8")
-    (home / "proposals.jsonl").write_text('{"extension":"x"}\n', encoding="utf-8")
-    (home / "extensions.json").write_text("{}", encoding="utf-8")
     (home / "operator.log").write_text("log line\n", encoding="utf-8")
+    catalog = home / "projects" / "catalog.csv"
+    catalog.parent.mkdir(parents=True, exist_ok=True)
+    catalog.write_text("repo,guid\n", encoding="utf-8")
     control.cmd_evidence(SimpleNamespace(run=str(run), label="snap"))
 
     captured = {p.name for p in (run / "artifacts" / "snap").iterdir()}
-    assert {"trace.jsonl", "proposals.jsonl", "extensions.json",
-            "operator.log", "MANIFEST.txt"} <= captured
+    assert {"operator.log", "projects__catalog.csv", "MANIFEST.txt"} <= captured
 
 
 def test_a_nested_state_file_keeps_its_path_in_its_name(run):
-    journal = run / "home" / "projects" / "guid-1" / "journal"
-    journal.mkdir(parents=True)
-    (journal / "seat-a.jsonl").write_text('{"id":"1"}\n', encoding="utf-8")
+    handoff = run / "home" / "projects" / "guid-1" / "handoff"
+    handoff.mkdir(parents=True)
+    (handoff / "seat-a.md").write_text("# Handoff\n", encoding="utf-8")
     control.cmd_evidence(SimpleNamespace(run=str(run), label="snap"))
     names = {p.name for p in (run / "artifacts" / "snap").iterdir()}
-    assert "projects__guid-1__journal__seat-a.jsonl" in names
+    assert "projects__guid-1__handoff__seat-a.md" in names
 
 
 def test_doctor_checks_every_console_script_the_harness_drives(run):
@@ -329,7 +180,7 @@ def test_doctor_checks_every_console_script_the_harness_drives(run):
     door became drivable, which Reviewer B caught."""
     source = _SOURCE.read_text(encoding="utf-8")
     checked = source.split('for name in (', 1)[1].split(')', 1)[0]
-    for name in ("operator", "operator-fleet", "operator-seat"):
+    for name in ("operator",):
         assert f'"{name}"' in checked, (name, checked)
 
 
@@ -394,22 +245,19 @@ def test_the_front_door_can_be_pointed_somewhere_unregistered(monkeypatch, run,
 
 
 def test_two_labels_do_not_overwrite_each_other(run):
-    (run / "home" / "trace.jsonl").write_text("a\n", encoding="utf-8")
+    (run / "home" / "operator.log").write_text("a\n", encoding="utf-8")
     control.cmd_evidence(SimpleNamespace(run=str(run), label="before"))
-    (run / "home" / "trace.jsonl").write_text("a\nb\n", encoding="utf-8")
+    (run / "home" / "operator.log").write_text("a\nb\n", encoding="utf-8")
     control.cmd_evidence(SimpleNamespace(run=str(run), label="after"))
-    before = (run / "artifacts" / "before" / "trace.jsonl").read_text("utf-8")
-    after = (run / "artifacts" / "after" / "trace.jsonl").read_text("utf-8")
+    before = (run / "artifacts" / "before" / "operator.log").read_text("utf-8")
+    after = (run / "artifacts" / "after" / "operator.log").read_text("utf-8")
     assert before != after
 
 
 def test_the_documented_state_globs_are_all_present():
     """SKILL.md lists these by name; a silent removal would shrink every proof."""
-    for promised in ("trace.jsonl", "proposals.jsonl", "proposals.handled.jsonl",
-                     "fleet-failures.jsonl", "fleet-tail.json", "extensions.json",
-                     "operator.log", "extensions/*.json", "projects/catalog.csv",
-                     "projects/*/journal/*.jsonl", "projects/*/handoff/*.md",
-                     "restart/*"):
+    for promised in ("operator.log", "projects/catalog.csv",
+                     "projects/*/handoff/*.md", "restart/*"):
         assert promised in control.STATE_GLOBS
 
 
@@ -436,7 +284,7 @@ def test_teardown_twice_is_not_an_error(run):
 
 
 def test_flags_after_the_separator_reach_the_console_script(monkeypatch):
-    """`-- run --rounds 1` must arrive as the user typed it, without the `--`."""
+    """`-- list --help` must arrive as the user typed it, without the `--`."""
     seen = {}
 
     def fake(run, label, argv, cwd):
@@ -445,55 +293,16 @@ def test_flags_after_the_separator_reach_the_console_script(monkeypatch):
 
     monkeypatch.setattr(control, "_invoke", fake)
     monkeypatch.setattr(control, "_script", lambda name: name)
-    control.main(["fleet", "--run", "r", "--", "run", "--rounds", "1"])
-    assert seen["argv"][-3:] == ["run", "--rounds", "1"]
+    monkeypatch.setattr(control, "_meta", lambda r: {"repo": str(r)})
+    control.main(["operator", "--run", "r", "--", "list", "--help"])
+    assert seen["argv"][-2:] == ["list", "--help"]
     assert "--" not in seen["argv"]
 
 
-def test_the_run_home_is_passed_to_operator_fleet(monkeypatch, run):
-    seen = {}
-
-    def fake(run_, label, argv, cwd):
-        seen["argv"] = argv
-        return 0
-
-    monkeypatch.setattr(control, "_invoke", fake)
-    monkeypatch.setattr(control, "_script", lambda name: name)
-    control.main(["fleet", "--run", str(run), "--", "proposals"])
-    assert "--home" in seen["argv"]
-    assert seen["argv"][seen["argv"].index("--home") + 1] == str(run / "home")
 
 
-def test_seat_commands_run_from_the_registered_checkout(monkeypatch, run):
-    """The journal is resolved from the working directory, so this is not cosmetic."""
-    seen = {}
-
-    def fake(run_, label, argv, cwd):
-        seen["cwd"] = cwd
-        return 0
-
-    monkeypatch.setattr(control, "_invoke", fake)
-    monkeypatch.setattr(control, "_script", lambda name: name)
-    control.main(["seat", "--run", str(run), "--", "recall"])
-    meta = json.loads((run / "run.json").read_text("utf-8"))
-    assert seen["cwd"] == Path(meta["repo"])
 
 
-def test_the_working_directory_can_be_overridden(monkeypatch, run, tmp_path):
-    """Needed to drive the refusal from a directory that is not a project."""
-    seen = {}
-
-    def fake(run_, label, argv, cwd):
-        seen["cwd"] = cwd
-        return 0
-
-    monkeypatch.setattr(control, "_invoke", fake)
-    monkeypatch.setattr(control, "_script", lambda name: name)
-    elsewhere = tmp_path / "not-a-project"
-    elsewhere.mkdir()
-    control.main(["seat", "--run", str(run), "--cwd", str(elsewhere),
-                  "--", "recall"])
-    assert seen["cwd"] == elsewhere.resolve()
 
 
 def test_addressing_a_run_that_was_never_created_is_refused(tmp_path):
@@ -504,81 +313,10 @@ def test_addressing_a_run_that_was_never_created_is_refused(tmp_path):
 # ── the launch gate ──────────────────────────────────────────────
 
 
-def test_the_gate_runs_in_a_child_process(monkeypatch, run, tmp_path):
-    """In-process would resolve OPERATOR_HOME at import, before the redirect.
-
-    The kernel captures the home when `config` is imported, so a gate call that
-    ran here would address whatever home this process already resolved -- which
-    is the leak the suite's own conftest guard exists to stop.
-    """
-    seen = {}
-
-    def fake(run_, label, argv, cwd):
-        seen["argv"] = argv
-        return 0
-
-    monkeypatch.setattr(control, "_invoke", fake)
-    control.main(["gate", "--run", str(run), "--workdir", str(tmp_path)])
-    assert seen["argv"][0] == sys.executable
-    assert seen["argv"][1] == "-c"
 
 
-def test_the_gate_child_is_given_this_runs_home(monkeypatch, run, tmp_path):
-    seen = {}
-
-    def fake(run_, label, argv, cwd):
-        seen["argv"] = argv
-        return 0
-
-    monkeypatch.setattr(control, "_invoke", fake)
-    control.main(["gate", "--run", str(run), "--workdir", str(tmp_path)])
-    assert str(run / "home") in seen["argv"]
 
 
-def test_the_gate_is_pointed_at_the_kernel_directory(monkeypatch, run, tmp_path):
-    """The kernel's modules import each other flatly, so the directory is the path.
-
-    Located from the checkout recorded at `up`, never from `Path.cwd()`: `gate`
-    has to work from anywhere, like every other verb.
-    """
-    seen = {}
-
-    def fake(run_, label, argv, cwd):
-        seen["argv"] = argv
-        return 0
-
-    checkout = control.repo_root(Path(__file__).resolve().parent)
-    meta = json.loads((run / "run.json").read_text("utf-8"))
-    meta["repo"] = str(checkout)
-    (run / "run.json").write_text(json.dumps(meta), encoding="utf-8")
-
-    monkeypatch.setattr(control, "_invoke", fake)
-    monkeypatch.chdir(tmp_path)
-    control.main(["gate", "--run", str(run), "--workdir", str(tmp_path)])
-    kernel = [a for a in seen["argv"] if a.endswith("operator_kernel")]
-    assert kernel, f"no kernel directory in {seen['argv']}"
-    assert (Path(kernel[0]) / "extension_seam.py").is_file()
 
 
-def test_the_gate_resolves_the_workdir_it_is_given(monkeypatch, run, tmp_path):
-    """A relative path must be resolved here, against the caller's cwd.
-
-    The child runs from wherever `_invoke` puts it, so a relative `--workdir`
-    that survived unresolved would name a different directory there -- and the
-    gate would report on a repository nobody asked about, or on none at all.
-    Asserted with a genuinely relative path: an absolute one makes `resolve()`
-    a no-op and the test passes whether the call is there or not.
-    """
-    seen = {}
-
-    def fake(run_, label, argv, cwd):
-        seen["argv"] = argv
-        return 0
-
-    monkeypatch.setattr(control, "_invoke", fake)
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "somewhere").mkdir()
-    control.main(["gate", "--run", str(run), "--workdir", "somewhere"])
-    assert "somewhere" not in seen["argv"], "the relative path was passed through"
-    assert str((tmp_path / "somewhere").resolve()) in seen["argv"]
 

@@ -68,35 +68,12 @@ required state, commands and observable proof.
 
 ## Core features
 
-No extension required for any of these.
-
-- [Seat memory](./seat-memory.md) — `operator-seat remember` / `recall` /
-  `forget`, the authority-vetting envelope, and supersession.
-- [Proposal queue](./proposal-queue.md) — `operator-fleet proposals`, the
-  rename-claim drain, the archive, and abandoned-batch recovery.
-- [Fleet host](./fleet-host.md) — `operator-fleet run`, rounds, discovery,
-  inert-by-default, the ledger cursor, and isolation.
 - [Session handoff](./session-handoff.md) — `operator handoff`, the file the next
   launch announces, the restart marker, and the seat-id key both share.
 
-## Optional layer
-
-- [Extensions](./extensions.md) — the activation gate, plus `seat-watch` and
-  `worktree-janitor` as worked examples of verifying an extension end to end.
-  Read this only when changing an extension or the gate itself.
-- [Launch admission](./launch-admission.md) — the **kernel** hook
-  `admit_launch`, where an extension's refusal holds a seat closed. Unreachable
-  through the two console scripts; driven through `control_operator.py gate`.
-
 ## Coverage gaps
 
-None outstanding. Every feature the map names is driven against real code.
-
-Recorded here so a later run knows these were checked rather than assumed: the
-4 MB queue refusal, the 4 MB journal refusal, the 600-character entry
-truncation, the `fleet.stop` marker, following a ledger rotation without losing
-records, `worktree-janitor` proposing a merged worktree while protecting a dirty
-one, and a `worktree-guard` refusal holding a launch and then lifting.
+None outstanding. The feature this map names is driven against real code.
 
 The one thing this skill still does not drive is the supervisor loop itself —
 `run_loop_mode`, its relaunch behaviour and its breakers. `gate` reaches the

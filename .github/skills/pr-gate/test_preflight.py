@@ -28,7 +28,7 @@ def test_a_source_changed_without_its_test_fails():
 
 def test_a_source_changed_with_its_test_passes():
     ok, _detail = preflight.sources_have_tests(
-        ["operator_kernel/evidence.py", "tests/test_evidence.py"])
+        ["operator_kernel/preamble.py", "tests/test_preamble.py"])
     assert ok is True
 
 
@@ -43,7 +43,7 @@ def test_an_existing_test_file_is_not_enough_on_its_own():
 
 def test_non_source_paths_are_ignored():
     ok, _detail = preflight.sources_have_tests(
-        ["docs/ledger.md", ".audit/trail.tsv", "README.md"])
+        ["README.md", "notes.txt"])
     assert ok is True
 
 
@@ -61,18 +61,18 @@ def test_a_new_kernel_module_absent_from_the_op_shim_fails():
 
 def test_a_kernel_module_already_in_the_shim_passes():
     ok, _detail = preflight.kernel_modules_are_bound(
-        ["operator_kernel/ledger_chain.py"])
+        ["operator_kernel/process_tree.py"])
     assert ok is True
 
 
 def test_touching_no_kernel_module_is_not_a_failure():
-    ok, detail = preflight.kernel_modules_are_bound(["operator_bench/score.py"])
+    ok, detail = preflight.kernel_modules_are_bound(    ["operator_cli/listing.py"])
     assert ok is True
     assert "no kernel modules" in detail
 
 
 def test_a_diff_touching_no_budget_guard_passes():
-    ok, detail = preflight.budgets_not_raised(["operator_kernel/evidence.py"])
+    ok, detail = preflight.budgets_not_raised(["operator_kernel/preamble.py"])
     assert ok is True
     assert "no budget guard touched" in detail
 
@@ -265,7 +265,7 @@ def test_an_unreadable_op_shim_is_not_a_bound_module(monkeypatch):
     monkeypatch.setattr(preflight.Path, "read_text",
                         lambda self, **kw: (_ for _ in ()).throw(OSError("nope")))
     ok, detail = preflight.kernel_modules_are_bound(
-        ["operator_kernel/ledger_chain.py"])
+        ["operator_kernel/process_tree.py"])
     assert ok is False
     assert "nothing is established" in detail
 
@@ -343,7 +343,7 @@ def test_a_quoted_mention_does_not_register_a_module(monkeypatch):
     bound, problem = preflight._module_names()
     assert problem is None
     assert "is_repo_module" not in bound
-    assert "evidence" in bound
+    assert "preamble" in bound
 
     real = (preflight.REPO / "tests" / "op.py").read_text(encoding="utf-8")
     salted = real + '\n# "new_guard" has not been registered yet\n'
@@ -359,7 +359,7 @@ def test_an_unparseable_shim_establishes_nothing(monkeypatch):
     monkeypatch.setattr(preflight.Path, "read_text",
                         lambda self, **kw: "def broken(:\n")
     ok, detail = preflight.kernel_modules_are_bound(
-        ["operator_kernel/ledger_chain.py"])
+        ["operator_kernel/process_tree.py"])
     assert ok is False
     assert "nothing is established" in detail
 

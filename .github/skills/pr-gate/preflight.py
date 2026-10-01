@@ -9,8 +9,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent.parent.parent
-SOURCE_DIRS = ("operator_kernel", "operator_fleet", "operator_cli",
-               "operator_extensions", "operator_memory", "operator_bench")
+SOURCE_DIRS = ("operator_kernel", "operator_cli")
 
 #: The workflow that actually runs the tests, from .github/workflows/tests.yml.
 #: Matching on any workflow would let an unrelated green run certify the tests.

@@ -26,8 +26,8 @@ before the file is a restart racing the thing it exists to announce.
 - Use `--instance=<seat>` and `--status=<text>` if you prefer joined flags.
 - Choose "Hand off to the next session" from the `operator` menu, which prompts
   for the seat name and the status and prints the command before running it.
-- Every launch preamble advertises this command to its seat as key fact (2),
-  already filled in with that seat's id.
+- Every launch preamble advertises this command, already filled in with that
+  seat's id.
 
 ## Driving it with control_operator
 
@@ -84,7 +84,7 @@ Preconditions:
   where the next session will not look, while the restart happens anyway. The
   preamble advertises the id for this reason; pass what it printed.
 - **The working directory decides the project**, exactly as it does for
-  `operator-seat`. The helper runs from the registered checkout unless `--cwd`
+  `operator handoff`. The helper runs from the registered checkout unless `--cwd`
   says otherwise.
 - **`--no-restart` is a switch and takes no value.** It is deliberately absent
   from the value-flag list, so writing `--no-restart yes` makes `yes` a stray
