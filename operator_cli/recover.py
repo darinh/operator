@@ -1,11 +1,5 @@
 """`operator recover` brings back the seats a crash or a reboot took down.
 
-A seat is not a process. It is an identity with a journal, a handoff and a
-session number that accumulate over a project's life, and that is the whole
-difference between this and a task runner: the longer a seat works somewhere,
-the more it knows about it. Losing the machine should cost it the process, not
-the continuity.
-
 Nothing here decides anything. `supervisor_control` decides which seats were
 running when the machine went down and what continuing one means; this parses
 arguments and calls in.

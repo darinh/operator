@@ -71,7 +71,7 @@ is the point.
 0. **What authorised this?** Name the human request, issue, or approved item this traces to. An
    agent that satisfies every mechanical check while doing work nobody asked for is the failure
    this gate exists to prevent, and no other question here would catch it.
-1. Does this change a contract something else depends on? Ledger record shape, exit codes, file
+1. Does this change a contract something else depends on? Exit codes, file
    names, console script names, a seam another package reaches through.
 2. Which documents name the behaviour I changed? A document that claims a detection the
    code does not make is how a later reader trusts the wrong thing.

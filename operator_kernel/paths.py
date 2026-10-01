@@ -193,13 +193,9 @@ def project_handoff_file(cwd: Path,
     if found.guid is None:
         return None
     if instance_id and not guid_is_usable(instance_id):
-        # The same gate `project_journal_file` puts on a seat name, for the
-        # same reason and by the same function. It arrived later here because
-        # the only caller was the supervisor, which passes `instance.id` and
-        # could not produce a bad one. `operator handoff` takes the name from
-        # a command line, where `--instance ../elsewhere` addressed a file
-        # outside `handoff/` and `operator handoff --instance .` addressed the
-        # project directory itself.
+        # A seat name is one path component. `operator handoff` takes it
+        # from the command line, where `--instance ../elsewhere` would
+        # address a file outside `handoff/`.
         return None
     base = project_dir(found.guid)
     if instance_id:

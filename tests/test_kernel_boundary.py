@@ -21,37 +21,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 KERNEL = REPO / "operator_kernel"
-
-#: The second source package. It is not the kernel and is deliberately not
-#: held to the kernel's budget, but it is this repository's code and the suite
-#: may import it -- so the scan below has to know the name exists. Its own
-#: rules live in `test_fleet_boundary.py`; see that file for why an extraction
-#: that made lines free on the far side of a boundary would be a fiction.
-FLEET = REPO / "operator_fleet"
-
-#: The packages that are neither kernel nor fleet, and are imported by their
-#: own name rather than by having their directory put on the path. They exist
-#: because the extension system needed two things the kernel may not grow: code
-#: that is *third party by construction* (`operator_extensions`, which is held
-#: to importing nothing of ours -- see `test_extension_packaging.py`) and an
-#: entry point (`operator_cli`, which is what finally starts the fleet host).
-#:
-#: They are listed here so the suite may import them. That is the whole of what
-#: this grants: their own budgets and import rules live in
-#: `test_extension_packaging.py`, and adding a name here does not exempt
-#: anything from those.
-EXTENSIONS = REPO / "operator_extensions"
 CLI = REPO / "operator_cli"
-
-#: A seat's memory of itself (`docs/seat-identity.md`). It imports the kernel
-#: and the kernel does not import it -- the same arrow `operator_fleet` sits on
-#: -- but it is *not* on `pythonpath` as a directory, deliberately: its module
-#: is called `journal`, which is an ordinary enough word that putting it on the
-#: flat path is how `snapshot` nearly became the collision that made seventy
-#: tests grade the wrong repository. It is imported as `operator_memory.journal`
-#: and nothing else may spell it.
-MEMORY = REPO / "operator_memory"
-BENCH = REPO / "operator_bench"
 
 #: What the kernel may import beyond the standard library and itself. Empty on
 #: purpose: a supervision kernel that needs a third-party package has stopped
@@ -118,19 +88,6 @@ MAX_MODULE_LINES = 602
 #: is *tighter* than what it replaces, not looser -- prose no longer consumes
 #: budget, so every line that does is one the kernel has to justify.
 #:
-#: **If this needs raising, cut before you raise, and cut here first:** the
-#: project catalogue (`projects_root`, `project_dir`, `catalog_rows`,
-#: `guid_is_usable`) exists to resolve one handoff path and one working
-#: directory. Both become arguments the caller passes once continuity moves to
-#: the ledger, and roughly 250 lines leave with them.
-#:
-#: That rule has been followed once already, and the headroom below the two
-#: numbers is what it bought rather than slack anyone left. The kernel stood at
-#: 4,091 and exactly 9,000 with nothing further able to land; `snapshot.py`
-#: moved to `operator_fleet/` (60 code, 106 total) because describing a fleet
-#: is not supervising one and no kernel module imported it. A cut only counts
-#: if the lines are not free where they land, so `test_fleet_boundary.py`
-#: charges for them there.
 #: The kernel-wide *total*-line ceiling is deliberately absent, and this is the
 #: record of why -- it existed, at 9000, and was removed after being measured.
 #:
@@ -222,38 +179,13 @@ def code_lines(source: str) -> int:
         counted.update(range(token.start[0], token.end[0] + 1))
     return len(counted)
 
-#: The ceiling on the kernel as a whole.
-#:
-#: 7000 first, from the extraction spike's measurement of ~6000 plus room.
-#: Raised once, to 7500, when `seat.py` took it to 7022 -- and the raise was
-#: made only after checking for fat and not finding any: the project catalogue
-#: helpers in `paths.py` look like they do not belong until you follow them to
-#: `crash_recovery_verdict`, which needs the handoff path, and to the
-#: supervisor, which needs the primary checkout. Identity is real supervision
-#: surface too; the kernel decides who commits, and backlog 0013 is what happens
-#: when nothing does.
-#:
-#: **If this needs raising again, cut before you raise, and cut here first:**
-#: the project catalogue (`projects_root`, `project_dir`, `catalog_rows`,
-#: `guid_is_usable`) exists to resolve one handoff path and one working
-#: directory. Both become arguments the caller passes once continuity moves to
-#: the ledger, and roughly 250 lines leave with them.
-
 
 def kernel_modules() -> list[Path]:
     return sorted(KERNEL.glob("*.py"))
 
 
-def fleet_modules() -> list[Path]:
-    return sorted(FLEET.glob("*.py"))
-
-
 def _module_names() -> set[str]:
     return {p.stem for p in kernel_modules()}
-
-
-def _fleet_module_names() -> set[str]:
-    return {p.stem for p in fleet_modules()}
 
 
 def _source_package_names() -> set[str]:
@@ -265,7 +197,7 @@ def _source_package_names() -> set[str]:
     does not count, which is what keeps a stray folder from silently widening
     what the suite may import.
     """
-    return {path.name for path in (EXTENSIONS, CLI, MEMORY, BENCH)
+    return {path.name for path in (CLI,)
             if (path / "__init__.py").exists()}
 
 
@@ -330,20 +262,11 @@ def test_the_kernel_imports_nothing_it_is_defined_as_not_being():
 
     stdlib = sys.stdlib_module_names
     ours = _module_names()
-    fleet = _fleet_module_names()
     offenders: list[str] = []
     for path in kernel_modules():
         for name in imported_names(path.read_text(encoding="utf-8")):
             if name in FORBIDDEN:
                 offenders.append(f"{path.name}: {name} (forbidden)")
-            elif name in fleet:
-                # Named separately because "undeclared" would read as an
-                # oversight in this list. It is not: the arrow between these
-                # two packages points one way on purpose, and `snapshot` left
-                # the kernel precisely because nothing in it imported that
-                # file. A kernel module importing one now would make the
-                # extraction a rename.
-                offenders.append(f"{path.name}: {name} (fleet, not kernel)")
             elif name not in stdlib and name not in ours and name not in ALLOWED_THIRD_PARTY:
                 offenders.append(f"{path.name}: {name} (undeclared)")
     assert offenders == [], (
@@ -406,7 +329,6 @@ def test_the_test_suite_imports_nothing_from_outside_this_repository():
 
     stdlib = sys.stdlib_module_names
     kernel = _module_names()
-    fleet = _fleet_module_names()
     packages = _source_package_names()
     local = _importable_suite_names()
     offenders: list[str] = []
@@ -416,7 +338,6 @@ def test_the_test_suite_imports_nothing_from_outside_this_repository():
                 offenders.append(
                     f"{path.relative_to(REPO)}: {name} (forbidden)")
             elif (name not in stdlib and name not in kernel
-                    and name not in fleet
                     and name not in packages
                     and name not in local
                     and name not in ALLOWED_TEST_THIRD_PARTY):
@@ -437,15 +358,8 @@ def test_there_are_suite_modules_to_check():
     assert len(_importable_suite_names()) >= 5
 
 
-def test_the_source_packages_the_suite_may_import_are_the_two_expected():
-    """A widening of what the suite may import should be a decision.
-
-    `_source_package_names` reads the filesystem, so a new top-level package
-    with an `__init__.py` would join it silently -- and the name it grants is
-    exactly the kind that resolved to `../copilot-tools/` and made seventy
-    tests grade the wrong repository. Naming them here means adding a third is
-    an edit somebody makes on purpose.
-    """
+def test_the_source_packages_the_suite_may_import_is_the_one_expected():
+    """A widening of what the suite may import should be a decision."""
     assert _source_package_names() == {"operator_cli"}
 
 

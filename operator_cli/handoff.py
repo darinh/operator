@@ -91,8 +91,7 @@ def main(rest: list[str]) -> int:
         print(USAGE, file=sys.stderr)
         return 2
     if not guid_is_usable(seat):
-        # The same refusal `operator-seat` makes, by the same predicate. A
-        # seat name is one component of a filename the next session has to
+        # A seat name is one component of a filename the next session has to
         # find, so `../elsewhere` is not a seat this can write for.
         print(f"the seat name {seat!r} is not usable", file=sys.stderr)
         return 2

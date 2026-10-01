@@ -19,10 +19,9 @@ tests were written against. Two properties make it safe to do that:
    bound into the namespace -- taking `op.operator_trace`, `op.main` and every
    other public name in it along the way.
 
-   It said "a kernel module" until `snapshot` left for `operator_fleet/`. The
-   widening is to the repository and no further, which is where the failure it
-   caught actually lives: `trace` is refused for being *foreign*, not for being
-   outside `operator_kernel/`, and the two controls below now pin both halves.
+   `trace` is refused for being foreign. The controls below pin both halves:
+   a standard-library module, and a file in this checkout that is not a source
+   root.
 """
 from __future__ import annotations
 
@@ -35,7 +34,6 @@ import op
 
 REPO = Path(__file__).resolve().parent.parent
 KERNEL = REPO / "operator_kernel"
-FLEET = REPO / "operator_fleet"
 
 
 def _bound_modules():
@@ -125,12 +123,11 @@ def test_the_stray_module_detector_refuses_a_repository_file_outside_the_roots()
     assert op.is_repo_module(conftest) is False
 
 
-def test_the_stray_module_detector_accepts_a_module_from_each_root():
+def test_the_stray_module_detector_accepts_a_kernel_module():
     """Negative control: a predicate that refuses everything also 'passes'.
 
-    One module per root, because a predicate that only ever checks
-    `SOURCE_ROOTS[0]` passes a one-module version of this test while making
-    the second package's modules unbindable.
+    There is one source root. Two modules from it, so a predicate that
+    accepts only the first name it is shown still has to accept a second.
     """
     assert op.is_repo_module(op.config) is True
     assert op.is_repo_module(op.exits) is True
@@ -154,8 +151,8 @@ def test_every_alias_resolves_to_a_module_the_shim_binds(alias):
     `_MODULE_NAMES` contained `"trace"` and `_ALIASES["operator_trace"]` was
     `"trace"`, so membership held and both names resolved to the identical
     (wrong) module, satisfying every assertion here. The tests that would have
-    caught it are `test_every_module_the_shim_binds_lives_in_the_kernel` and
-    `test_the_renamed_trace_module_has_what_its_callers_ask_for`. An earlier
+    caught it are `test_every_module_the_shim_binds_lives_in_this_repository`
+    and `test_each_alias_has_what_its_callers_ask_for`. An earlier
     version of this docstring claimed the credit; it was wrong, and a wrong
     claim about which test catches which defect is how the wrong one gets
     deleted later as redundant.
@@ -180,14 +177,14 @@ def test_the_alias_that_was_wrong_is_pinned_to_the_module_that_is_right():
     )
 
 
-def test_the_renamed_trace_module_has_what_its_callers_ask_for():
-    """The alias being *a* kernel module is not enough; it must be the right one.
+def test_each_alias_has_what_its_callers_ask_for():
+    """A self-consistent mapping can still point at the wrong module.
 
-    Both halves are needed. `operator_trace -> trace` failed the test above,
-    but an alias pointing at some other real kernel module would pass it while
-    still being wrong, and the tests using it would fail somewhere far away.
+    `test_loop_pid_identity` asks `operator_liveness` for a start token.
+    `paths` asks `install_manifest` for `path_present`.
     """
-    assert hasattr(op.exits, "handoff_state")
+    assert hasattr(op.operator_liveness, "process_start_token")
+    assert hasattr(op.install_manifest, "path_present")
 
 
 def _source_modules_binding(name: str) -> set[str]:
@@ -198,13 +195,8 @@ def _source_modules_binding(name: str) -> set[str]:
     forgot invisible twice: absent from the expected set and absent from the
     write, so the assertion passes by agreeing with the defect.
 
-    It scans every root rather than `operator_kernel/` alone, and that is the
-    half the extraction of `snapshot` would otherwise have deleted in silence.
-    `snapshot` binds `MUX`; scanning only the kernel drops it from the expected
-    set, so a shim that stopped forwarding to it would agree with the check --
-    while `instance_snapshot` quietly asked the developer's real multiplexer
-    whether a session exists. A guard that shrinks along with its subject is
-    the failure mode this file exists to record.
+    It scans `SOURCE_ROOTS` rather than a hard-coded directory, so a root
+    added later is not dropped from the expected set in silence.
     """
     holders: set[str] = set()
     for root in op.SOURCE_ROOTS:
@@ -235,15 +227,11 @@ def test_the_forwarding_map_matches_what_the_source_says(monkeypatch):
         )
 
 
-def test_the_multiplexer_substitution_reaches_the_module_that_left_the_kernel():
-    """The property `snapshot`'s move had to preserve, asserted by name.
+def test_the_supervisor_binds_the_shim_mux():
+    """`conftest` installs its fake by writing `op.MUX`.
 
-    `conftest`'s autouse guard installs its fake by writing `op.MUX`. If that
-    write stops reaching `operator_fleet/snapshot.py`, `instance_snapshot`
-    keeps the `Mux` bound at import and starts asking the developer's live
-    server whether a session exists -- read-only, and still the boundary this
-    suite nearly lost seven sessions to. The general check above would pass
-    with `snapshot` simply absent from both sides, so this one names it.
+    The general check above passes if `supervisor` binds `MUX` on neither
+    side. This one names the module the substitution has to reach.
     """
     assert "supervisor" in _source_modules_binding("MUX")
     assert op.supervisor in op.holders_of("MUX")

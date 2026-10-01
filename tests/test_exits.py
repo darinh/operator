@@ -37,8 +37,7 @@ def test_the_restart_marker_is_the_one_the_supervisor_polls(tmp_path):
 
 def test_a_seat_name_that_is_not_one_path_component_is_refused(tmp_path,
                                                                monkeypatch):
-    """`project_journal_file` has always checked this and the handoff path
-    did not, because its only caller could not produce a bad name."""
+    """A seat name that is not one path component writes nothing."""
     work = _registered(tmp_path, monkeypatch)
     for bad in ("../escape", ".", "", "a/b", "CON"):
         assert exits.write_handoff(work, bad, "nope") is None, bad

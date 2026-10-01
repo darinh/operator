@@ -149,7 +149,7 @@ def test_an_absent_file_is_no_supervisor():
 def test_a_file_that_is_not_utf8_is_no_supervisor():
     """`read_text` raises `UnicodeDecodeError` -- a `ValueError`, not an
     `OSError` -- for a file damaged into invalid UTF-8. Letting that escape
-    would take `operator list`, `stop` and `restart-loop` down for every
+    would take `operator list` and `stop` down for every
     instance over one corrupt file belonging to one. Caught by adversarial
     review: splitting the old single `except (OSError, ValueError)` into a
     read and a parse dropped exactly this case."""
@@ -342,9 +342,9 @@ def test_a_live_supervisor_stays_a_looping_instance(monkeypatch):
 #
 # Every one of these leaves the answer exactly as it was before the stamp
 # existed. Turning any of them into "stopped" would drop the instance from
-# `active_instances`, silence all four supervisor notices at once, and let
-# `restart-loop` start a second supervisor on top of a live one -- so the
-# blindness this item is about is the cheaper of the two errors here.
+# `active_instances`, so `operator list` and `operator stop` lose a live
+# supervisor. The blindness this item is about is the cheaper of the two
+# errors here.
 
 def test_a_pid_file_predating_the_stamp_is_still_believed(monkeypatch):
     """Every supervisor running when this landed wrote a bare pid."""
@@ -456,9 +456,9 @@ def test_the_pid_file_is_published_by_rename(monkeypatch):
 
 
 def test_publishing_falls_back_when_the_rename_fails(monkeypatch):
-    """An unwritten pid file costs the session its `stop`, its `restart-loop`
-    and its row in the listing. That is worse than the narrow window the
-    rename closes, so the fallback is deliberate."""
+    """An unwritten pid file costs the session its `stop` and its row in
+    the listing. That is worse than the narrow window the rename closes,
+    so the fallback is deliberate."""
     inst = op.Instance("fallback")
     monkeypatch.setattr(op.os, "replace", _raise_oserror)
 
@@ -569,8 +569,8 @@ def test_a_missing_boot_stamp_does_not_refute(monkeypatch):
 def test_an_absolute_token_never_asks_for_the_boot(monkeypatch):
     """A `win:` token is a FILETIME and a `ps:` token a wall-clock date;
     neither can collide across a reboot, so the probe would be a subprocess
-    per call -- on `operator list`'s per-instance path and `restart-loop`'s
-    twice-a-second poll -- for a question already answered."""
+    per call -- on `operator list`'s per-instance path and on
+    `launch_status`'s poll -- for a question already answered."""
     inst = op.Instance("absolute")
     _write(inst, "4242", "pid_start=win:1234", "boot=uuid:aaa")
     _alive(monkeypatch, 4242)

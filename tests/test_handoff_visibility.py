@@ -14,8 +14,7 @@ north star: **a session that skipped the handoff produced a transcript
 identical to one that had nothing to read.** Nothing on the machine recorded
 which of those two had happened.
 
-So the remedy is the one used for the mandate: state the observed thing, name
-the address, and write down that it was said. Every prohibition below has a
+Every prohibition below has a
 control asserting it fires, because a guard that cannot fire reads exactly
 like coverage.
 """
@@ -333,7 +332,7 @@ def test_the_loop_tells_a_session_when_nobody_could_look(monkeypatch, tmp_path):
     is what caught the argument being dropped.
     """
     # Denied for the handoff only. Blanketing `path_present` also blinds the
-    # stop/detach marker probes, and the loop then spends its whole
+    # stop-marker probes, and the loop then spends its whole
     # unreadable-marker budget at the poll interval -- 50 seconds, for a test
     # that asserts one sentence. It is also a different test than the one
     # intended: the loop would be exercising its marker branch, not its

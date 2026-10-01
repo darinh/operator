@@ -8,7 +8,7 @@ def build_preamble(instance: Instance, *, crash_recovery: bool = False,
                    handoff_waiting: str = "",
                    handoff_unknown: bool = False,
                    handoff_written: str = "") -> str:
-    """What a session is told. Mechanism only: no mandate, no assignment.
+    """What a session is told. Mechanism only.
 
     When to hand off is the repository's business. This says that a handoff
     ends the session, and where a waiting one is, and nothing about timing.
