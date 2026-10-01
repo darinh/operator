@@ -40,7 +40,7 @@ Preconditions:
   `python .github/skills/verify-operator/control_operator.py operator --run <run> --label handoff-unregistered --cwd <some-temp-dir> -- handoff --instance verify-handoff --status "should not land"`.
   Exit `1`, and stderr names the unregistered directory and the fix:
   `this directory is not a registered project` then
-  `register it with: operator project register`.
+  `start an operator in this directory first`.
 - **Write one without ending the session.** Run
   `control_operator.py operator --run <run> --label handoff-write -- handoff --instance verify-handoff --status "drove the front door" --next "read it back" --no-restart`.
   Exit `0`, and stdout is `handoff written to <run>/home/projects/<guid>/handoff/verify-handoff.md`.

@@ -90,7 +90,7 @@ FORBIDDEN = frozenset({
 #: twenty well-sized modules is navigable at any total, which is why this is
 #: the only total-line ceiling here -- see the note on `MAX_KERNEL_CODE_LINES`
 #: about the kernel-wide one that used to sit beside it.
-MAX_MODULE_LINES = 634
+MAX_MODULE_LINES = 602
 
 #: The complexity budget, in **code** lines -- docstrings, comments and blanks
 #: excluded.
@@ -166,11 +166,11 @@ MAX_MODULE_LINES = 634
 #: Raised from 4100 when crash recovery landed: the kernel had 40 lines of it
 #: left, which is not room for a capability the tool was missing. Re-set at the
 #: measured size plus room, the same rule it was set by.
-MAX_KERNEL_CODE_LINES = 2654
+MAX_KERNEL_CODE_LINES = 2199
 
 #: Per-module code ceiling, the same split applied one file down.
 #: `runner.py` is the largest at 325.
-MAX_MODULE_CODE_LINES = 342
+MAX_MODULE_CODE_LINES = 325
 
 
 def code_lines(source: str) -> int:
@@ -355,12 +355,11 @@ def test_the_kernel_imports_nothing_it_is_defined_as_not_being():
 
 
 def suite_modules() -> list[Path]:
-    """Every checked-in test module, `tests/pending/` included.
+    """Every checked-in test module under `tests/`.
 
-    Pending is scanned even though it is not collected. A test in there is
-    source this repository ships, and the moment somebody moves one back it is
-    live -- so excluding it would put the hole exactly where the next port
-    lands.
+    Nested modules are scanned too. A test that is not collected is still
+    source this repository ships, and excluding it would put the hole exactly
+    where the next port lands.
     """
     return sorted((REPO / "tests").rglob("*.py"))
 
@@ -368,12 +367,10 @@ def suite_modules() -> list[Path]:
 def _importable_suite_names() -> set[str]:
     """Test modules importable as top-level names.
 
-    Only `tests/` itself is on `pythonpath` (see pyproject), so
-    `tests/pending/test_restart_all_loops.py` does NOT make
-    `test_restart_all_loops` importable. Counting it as local would let an
+    Only `tests/` itself is on `pythonpath` (see pyproject), so a nested file
+    does not make its stem importable. Counting it as local would let an
     outside module of that name through the scan below on the strength of a
-    nested file that shares its stem -- accepting a stranger because somebody
-    unrelated has the same name.
+    nested file that shares its stem.
     """
     return {p.stem for p in (REPO / "tests").glob("*.py")}
 
@@ -450,19 +447,6 @@ def test_the_source_packages_the_suite_may_import_are_the_two_expected():
     an edit somebody makes on purpose.
     """
     assert _source_package_names() == {"operator_cli"}
-
-
-def test_only_top_level_test_modules_count_as_importable():
-    """`tests/pending/` is scanned, but its stems are not importable names.
-
-    Both halves matter and they pull in opposite directions, which is why they
-    are pinned together: a pending file must be READ by the scan, and its name
-    must not be accepted as a local module by it.
-    """
-    assert "test_restart_all_loops" not in _importable_suite_names(), (
-        "a nested test stem is being treated as an importable top-level name, "
-        "so an outside module of that name would pass the scan"
-    )
 
 
 def test_the_suite_import_scan_would_catch_the_import_that_prompted_it():

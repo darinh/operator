@@ -44,16 +44,11 @@ VERBS: tuple[Verb, ...] = (
 PROMPT_LABEL = {
     "name": ("Seat name: ", "seat name"),
     "instance": ("Seat name: ", "seat name"),
-    "kind": ("Kind (decision, gotcha, disposition, attempt): ", "kind"),
-    "text": ("Text: ", "note"),
-    "id": ("Entry id: ", "entry id"),
-    "path": ("Project directory: ", "directory"),
     "status": ("What you completed: ", "status"),
-    "extension": ("Extension name: ", "extension"),
 }
 
 #: Prompt keys the CLI passes as `--key value` rather than positionally.
-FLAGGED = ("instance", "kind", "status")
+FLAGGED = ("instance", "status")
 
 
 def menu_items() -> tuple[Item, ...]:
@@ -77,7 +72,7 @@ def build_argv(item: Item, values: dict[str, str]) -> list[str]:
     for key in FLAGGED[1:]:
         if key in values:
             argv += [f"--{key}", values[key]]
-    for key in ("name", "text", "id", "path", "extension"):
+    for key in ("name",):
         if key in values:
             argv += [values[key]]
     return argv

@@ -239,7 +239,7 @@ def test_menu_start_does_not_inject_an_agent(monkeypatch, capsys):
     import supervisor
     seen = {}
 
-    def fake(instance, copilot_args, is_fresh, adopt=False, cwd=None):
+    def fake(instance, copilot_args, is_fresh, cwd=None):
         seen.update(name=instance.display_name, args=list(copilot_args))
         return 9
 
@@ -260,7 +260,7 @@ def test_menu_start_passes_an_agent_and_can_attach(monkeypatch):
     spawned = {}
     attached = []
 
-    def fake(instance, copilot_args, is_fresh, adopt=False, cwd=None):
+    def fake(instance, copilot_args, is_fresh, cwd=None):
         spawned.update(name=instance.display_name, args=list(copilot_args))
         return 3
 
@@ -302,7 +302,7 @@ def test_a_menu_started_seat_exports_the_home_its_child_reads(monkeypatch):
     import supervisor
     seen = {}
 
-    def fake(instance, copilot_args, is_fresh, adopt=False, cwd=None):
+    def fake(instance, copilot_args, is_fresh, cwd=None):
         seen["home"] = os.environ.get("COPILOT_OPERATOR_HOME")
         return 7
 
@@ -330,7 +330,7 @@ def test_a_typed_home_still_reaches_the_child(monkeypatch, tmp_path):
     import supervisor
     seen = {}
 
-    def fake(instance, copilot_args, is_fresh, adopt=False, cwd=None):
+    def fake(instance, copilot_args, is_fresh, cwd=None):
         seen["home"] = os.environ.get("COPILOT_OPERATOR_HOME")
         return 7
 
@@ -358,7 +358,7 @@ def test_start_spawns_the_background_supervisor(monkeypatch, capsys):
     import supervisor
     seen = {}
 
-    def fake(instance, copilot_args, is_fresh, adopt=False, cwd=None):
+    def fake(instance, copilot_args, is_fresh, cwd=None):
         seen.update(name=instance.display_name, args=list(copilot_args),
                     fresh=is_fresh)
         return 4242
@@ -401,7 +401,7 @@ def test_start_accepts_a_positional_name(monkeypatch, capsys):
     import supervisor
     seen = {}
 
-    def fake(instance, copilot_args, is_fresh, adopt=False, cwd=None):
+    def fake(instance, copilot_args, is_fresh, cwd=None):
         seen.update(name=instance.display_name, args=list(copilot_args))
         return 1
 
@@ -414,7 +414,7 @@ def test_start_keeps_the_parent_name_past_the_terminator(monkeypatch):
     import supervisor
     seen = {}
 
-    def fake(instance, copilot_args, is_fresh, adopt=False, cwd=None):
+    def fake(instance, copilot_args, is_fresh, cwd=None):
         seen.update(name=instance.display_name, args=list(copilot_args))
         return 1
 
@@ -552,7 +552,9 @@ def test_the_console_script_is_declared():
     assert 'operator = "operator_cli.entry:main"' in text
     assert "operator-fleet" not in text
     assert "operator-seat" not in text
-    assert "operator-recover" not in text
+    block = text.split("[project.scripts]", 1)[1].split("[", 1)[0]
+    scripts = [line.strip() for line in block.splitlines() if line.strip()]
+    assert scripts == ['operator = "operator_cli.entry:main"']
 
 
 # ── operator handoff ────────────────────────────────────────────

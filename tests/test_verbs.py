@@ -41,15 +41,6 @@ def test_a_flagged_prompt_becomes_a_flag_and_a_positional_stays_bare():
     assert verbs.build_argv(item, {"name": "alpha"}) == ["join", "alpha"]
 
 
-def test_instance_goes_in_front_of_the_verbs_own_tokens():
-    """`operator-seat` declares --instance on the top-level parser, so it has
-    to precede the subcommand."""
-    item = verbs.Item("x", ("remember",), ("instance", "kind", "text"))
-    assert verbs.build_argv(
-        item, {"instance": "alpha", "kind": "gotcha", "text": "note"}) == [
-        "remember", "--instance", "alpha", "--kind", "gotcha", "note"]
-
-
 def test_every_verb_says_something_on_both_surfaces():
     """The table feeds the help text and the menu, and a verb that is blank on
     either is invisible to whichever reader uses that one."""
