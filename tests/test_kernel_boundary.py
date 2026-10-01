@@ -90,7 +90,7 @@ FORBIDDEN = frozenset({
 #: twenty well-sized modules is navigable at any total, which is why this is
 #: the only total-line ceiling here -- see the note on `MAX_KERNEL_CODE_LINES`
 #: about the kernel-wide one that used to sit beside it.
-MAX_MODULE_LINES = 800
+MAX_MODULE_LINES = 634
 
 #: The complexity budget, in **code** lines -- docstrings, comments and blanks
 #: excluded.
@@ -166,11 +166,11 @@ MAX_MODULE_LINES = 800
 #: Raised from 4100 when crash recovery landed: the kernel had 40 lines of it
 #: left, which is not room for a capability the tool was missing. Re-set at the
 #: measured size plus room, the same rule it was set by.
-MAX_KERNEL_CODE_LINES = 4600
+MAX_KERNEL_CODE_LINES = 2654
 
 #: Per-module code ceiling, the same split applied one file down.
-#: `supervisor.py` is the largest at 446.
-MAX_MODULE_CODE_LINES = 500
+#: `runner.py` is the largest at 325.
+MAX_MODULE_CODE_LINES = 342
 
 
 def code_lines(source: str) -> int:
