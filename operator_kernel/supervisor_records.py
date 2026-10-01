@@ -23,7 +23,6 @@ import process_identity
 from config import (CLOCK_SKEW_TOLERANCE, LOOP_PID_BOOT_KEY, LOOP_PID_START_KEY, SUPERVISOR_STARTUP_CEILING, SUPERVISOR_STARTUP_GRACE, _UNPROBED)
 from instance import Instance
 from probes import _pid_alive, log, remove_file
-from provenance import _save_loop_code
 
 def _save_loop_args(instance: Instance, user_args: list[str]) -> None:
     """Record how loop mode was invoked so it can be reproduced later."""
@@ -95,11 +94,6 @@ def _publish_supervisor_records(instance: Instance, user_args: list[str],
     # Recorded so this supervisor can be replaced later without guessing how
     # it was started. Written every time, so it tracks the live invocation.
     _save_loop_args(instance, user_args)
-    # ...and which operator source it is actually running, and whether it
-    # took over a session rather than starting one. A supervisor keeps the
-    # code it imported for the whole run, so this is the only place either
-    # answer is still knowable.
-    _save_loop_code(instance, adopted=adopted, began_run=began_run)
     _write_loop_pid_file(instance, os.getpid())
     # The pid file now answers the liveness question, so the startup record
     # has nothing left to say. Removed after the pid file exists, never

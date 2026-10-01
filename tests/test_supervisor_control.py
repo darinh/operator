@@ -207,14 +207,6 @@ def test_a_spawn_that_fails_is_reported_rather_than_raised(home, monkeypatch):
     assert recover_loop(inst) == 1
 
 
-def test_a_missing_session_names_operator_start(home, capsys):
-    from supervisor_control import restart_loop
-    assert restart_loop("ghost") == 1
-    err = capsys.readouterr().err
-    assert "operator start --name ghost" in err
-    assert "operator --loop" not in err
-
-
 def test_launch_status_is_dead_when_the_pid_is_gone(monkeypatch):
     import supervisor_control as sc
     monkeypatch.setattr(sc, "_pid_alive", lambda pid: False)

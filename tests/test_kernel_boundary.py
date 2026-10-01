@@ -75,7 +75,6 @@ FORBIDDEN = frozenset({
     "project_instructions", "backlog_tool", "handoff_tool", "conversation_log",
     "conversation_viewer", "operator_mail", "mail_affiliation", "setup_tools",
     "operator_session", "operator_work", "operator_worktree",
-    "operator_bench",
 })
 
 #: The ceiling on a single kernel module. `copilot_operator.py` reached 9,120
@@ -450,8 +449,7 @@ def test_the_source_packages_the_suite_may_import_are_the_two_expected():
     tests grade the wrong repository. Naming them here means adding a third is
     an edit somebody makes on purpose.
     """
-    assert _source_package_names() == {"operator_extensions", "operator_cli",
-                                       "operator_memory", "operator_bench"}
+    assert _source_package_names() == {"operator_cli"}
 
 
 def test_only_top_level_test_modules_count_as_importable():
@@ -461,11 +459,6 @@ def test_only_top_level_test_modules_count_as_importable():
     are pinned together: a pending file must be READ by the scan, and its name
     must not be accepted as a local module by it.
     """
-    scanned = {p.name for p in suite_modules()}
-    assert "test_restart_all_loops.py" in scanned, (
-        "the scan no longer reads tests/pending/, which is where the next "
-        "cross-repository import will arrive"
-    )
     assert "test_restart_all_loops" not in _importable_suite_names(), (
         "a nested test stem is being treated as an importable top-level name, "
         "so an outside module of that name would pass the scan"

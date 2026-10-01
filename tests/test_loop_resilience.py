@@ -17,7 +17,6 @@ def isolated_state(tmp_path, monkeypatch):
     monkeypatch.setattr(op, "RESTART_DIR", restart)
     monkeypatch.setattr(op, "LOG_FILE", tmp_path / "operator.log")
     monkeypatch.setattr(op, "COPILOT_LOG_DIR", tmp_path / "logs")
-    monkeypatch.setattr(op, "TABS_FILE", tmp_path / "tabs.json")
     monkeypatch.setattr(op, "POLL_INTERVAL", 0)
     monkeypatch.setattr(op, "LAUNCH_BACKOFF_BASE", 0)
     monkeypatch.setattr(op, "RESTART_PAUSE_SECONDS", 0)
@@ -31,9 +30,6 @@ def isolated_state(tmp_path, monkeypatch):
     workdir = tmp_path / "not-a-repo"
     workdir.mkdir()
     monkeypatch.chdir(workdir)
-    assert op.workspace_fingerprint(workdir) is None, (
-        "these tests require the progress breaker to be inactive; "
-        f"{workdir} unexpectedly has readable git state")
     return tmp_path
 
 
@@ -361,130 +357,10 @@ def test_an_unexaminable_handoff_is_never_reported_as_a_crash(
 # ── a session that ended by handoff must be recorded as one ─────
 
 
-def test_a_session_ended_by_a_restart_request_is_traced(monkeypatch, tmp_path):
-    """`restart=True` was unreachable, and the evidence was read as proof.
-
-    `_record_session_exit` sat only in the branch that had already established
-    the restart marker was absent, so the field it wrote could not take any
-    other value. 979 recorded exits all said `restart=False`, and that was
-    read as "no session has ever ended by handoff" when it only ever showed
-    where the call sat. The handoff path arrives via the *live-session* branch
-    -- `handoff` touches the marker while copilot is still up -- so this drives
-    that branch specifically, with a multiplexer session that exists.
-    """
-    import json
-
-    operator_trace = op.operator_trace
-    from conftest import FakeMux
-
-    inst = op.Instance("handoff-ender")
-    mux = FakeMux()
-    monkeypatch.setattr(op, "MUX", mux)
-    monkeypatch.setattr(op, "SESSION_ID_WAIT", 0)
-
-    def script(n, instance):
-        if n == 1:
-            # The session comes up here rather than being pre-created: an
-            # instance whose session already exists at loop start is refused
-            # outright by `handle_existing_session`, so pre-creating it would
-            # test the refusal instead of the restart path.
-            mux.sessions[instance.session] = {
-                "cwd": "", "argv": [], "remain_on_exit": True, "dead": False}
-            # Still running: no exit file. This is the handoff shape.
-            instance.restart_marker.touch()
-        else:
-            instance.exit_file.write_text("0", encoding="utf-8")
-            instance.stop_marker.touch()
-
-    _loop_with_handoff(monkeypatch, tmp_path / "next-session.md", script)
-    op.run_loop_mode(inst, ["--agent", "test:agent"], is_fresh=True)
-
-    exits = [json.loads(x) for x in
-             operator_trace.trace_path(op.OPERATOR_HOME)
-             .read_text(encoding="utf-8").splitlines()
-             if json.loads(x).get("event") == "session_exit"]
-
-    assert exits, "a session ending by restart request must be recorded at all"
-    assert exits[0]["markers"]["restart"] is True
-    assert exits[0]["instance"] == "handoff-ender"
-    assert exits[0]["markers"]["exit_code"] is None, (
-        "copilot was still up, so no exit code can belong to this session; "
-        "reading a stale one would give it the crash signature exactly")
 
 
-def test_a_restart_request_seen_after_the_session_is_gone_is_traced(
-        monkeypatch, tmp_path):
-    """The other restart branch: the marker is there but copilot has already
-    exited. Also must not be filed as an unexplained death."""
-    import json
-
-    operator_trace = op.operator_trace
-
-    def script(n, instance):
-        instance.exit_file.write_text("0", encoding="utf-8")
-        if n == 1:
-            instance.restart_marker.touch()
-        else:
-            instance.stop_marker.touch()
-
-    _loop_with_handoff(monkeypatch, tmp_path / "next-session.md", script)
-
-    inst = op.Instance("gone-with-marker")
-    op.run_loop_mode(inst, ["--agent", "test:agent"], is_fresh=True)
-
-    exits = [json.loads(x) for x in
-             operator_trace.trace_path(op.OPERATOR_HOME)
-             .read_text(encoding="utf-8").splitlines()
-             if json.loads(x).get("event") == "session_exit"]
-
-    assert exits
-    assert exits[0]["markers"]["restart"] is True
-    assert exits[0]["consecutive"] == 0, (
-        "a requested restart is not a consecutive unexplained exit and must "
-        "not be counted toward the give-up limit")
 
 
-def test_an_unreadable_restart_probe_is_traced_as_unknown(
-        monkeypatch, tmp_path):
-    """"Not there" and "could not look" must not be the same record.
-
-    `marker_set` answers False for both, which is correct for the branch --
-    one more poll is cheap -- but the old call wrote that same False into the
-    evidence, so a probe that failed was filed as a definite absence. That is the
-    first defect in this file wearing different clothes: a reader cannot
-    recover the difference afterwards, and the whole point of the record is to
-    be read later by somebody who was not there.
-    """
-    import json
-
-    operator_trace = op.operator_trace
-
-    inst = op.Instance("unreadable-restart")
-    real_present = op.path_present
-    monkeypatch.setattr(
-        op, "path_present",
-        lambda p: None if Path(p) == inst.restart_marker else real_present(p))
-
-    def script(n, instance):
-        instance.exit_file.write_text("0", encoding="utf-8")
-        if n > 1:
-            instance.stop_marker.touch()
-
-    _loop_with_handoff(monkeypatch, tmp_path / "next-session.md", script)
-    op.run_loop_mode(inst, ["--agent", "test:agent"], is_fresh=True)
-
-    exits = [json.loads(x) for x in
-             operator_trace.trace_path(op.OPERATOR_HOME)
-             .read_text(encoding="utf-8").splitlines()
-             if json.loads(x).get("event") == "session_exit"]
-
-    assert exits, "the ending must still be recorded"
-    assert exits[0]["markers"]["restart"] is None, (
-        "an unreadable probe must be recorded as 'nobody could tell', not as "
-        "the absence the branch had to assume to keep polling")
-    assert exits[0]["markers"]["stop"] is False, (
-        "the readable probes must still record their real answer -- without "
-        "this the assertion above would also pass if every marker went null")
 
 
 def test_a_continued_run_without_a_resume_id_still_has_a_predecessor(
@@ -677,47 +553,6 @@ def test_stop_marker_stops_session_and_supervisor(monkeypatch):
     assert not inst.loop_pid_file.exists()
 
 
-def test_an_unexplained_exit_is_traced_with_its_real_exit_code(monkeypatch):
-    """Reproduces the 2026-08-03 die-off: copilot shuts down cleanly, no
-    marker explains it, and the loop counts a crash.
-
-    `operator.log` can only say "exited unexpectedly", which reads as a crash
-    and is why seven loops looked like a machine-wide fault. The runner has
-    written the real code to the exit file all along; the evidence now records
-    it, so rc=0 -- an orderly shutdown nobody asked us to expect -- is
-    distinguishable from a session that actually died.
-
-    This is also the event no invocation log can see: not one operator command
-    is run during it.
-    """
-    import json
-
-    operator_trace = op.operator_trace
-
-    def clean_exit_no_marker(instance, args, session_num,
-                             remain_on_exit=False, preamble=""):
-        instance.exit_file.write_text("0", encoding="utf-8")
-
-    monkeypatch.setattr(op, "start_session", clean_exit_no_marker)
-
-    inst = op.Instance("tracer")
-    rc = op.run_loop_mode(inst, ["--agent", "test:agent"], is_fresh=True)
-    assert rc == 1, "five unexplained exits should end the loop"
-
-    lines = operator_trace.trace_path(op.OPERATOR_HOME).read_text(
-        encoding="utf-8").splitlines()
-    exits = [json.loads(x) for x in lines
-             if json.loads(x).get("event") == "session_exit"]
-    assert len(exits) == op.MAX_LAUNCH_FAILURES, (
-        "every unexplained exit should be traced, not just the last")
-    assert [e["consecutive"] for e in exits] == list(
-        range(1, op.MAX_LAUNCH_FAILURES + 1))
-    assert exits[-1]["giving_up"] is True
-    assert exits[0]["giving_up"] is False
-    assert all(e["instance"] == "tracer" for e in exits)
-    assert exits[-1]["markers"]["exit_code"] == 0, (
-        "the exit code the runner recorded is the whole point")
-    assert exits[-1]["markers"]["restart"] is False
 
 
 # -- the handoff is keyed by instance ---------------------------

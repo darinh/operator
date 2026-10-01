@@ -4,20 +4,10 @@ from __future__ import annotations
 import op
 
 
-def test_spend_is_bound_by_the_shim():
-    assert "spend" in op._MODULE_NAMES
-    assert op.is_repo_module(op.spend) is True
-    assert hasattr(op.spend, "seat_spend")
-
-
-def test_ledger_chain_is_bound_by_the_shim():
-    """A new kernel module is invisible to monkeypatching unless it is listed.
-
-    That already happened in this repository. ledger_chain is the next one.
-    """
-    assert "ledger_chain" in op._MODULE_NAMES
-    assert op.is_repo_module(op.ledger_chain) is True
-    assert hasattr(op.ledger_chain, "verify_records")
+def test_process_tree_is_bound_by_the_shim():
+    assert "process_tree" in op._MODULE_NAMES
+    assert op.is_repo_module(op.process_tree) is True
+    assert hasattr(op.process_tree, "ancestry")
 
 
 def test_argtail_is_bound_by_the_shim():

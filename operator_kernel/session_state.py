@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import instance
 
-from config import EXIT_GRACE_SECONDS, METRICS_GRACE_SECONDS, MUX
+from config import EXIT_GRACE_SECONDS, MUX
 from presence import path_present
 from instance import Instance
 from mux import MuxError
@@ -92,45 +92,6 @@ def _wait_until(satisfied, timeout: float, interval: float) -> bool:
 
 def wait_for_exit(instance: Instance, timeout: int = EXIT_GRACE_SECONDS) -> bool:
     return _wait_until(lambda: not is_copilot_running(instance), timeout, 1)
-
-
-def wait_for_metrics_capture(instance: Instance,
-                             timeout: int = METRICS_GRACE_SECONDS) -> bool:
-    """Wait for the runner to finish capturing metrics, bounded. True if it did.
-
-    The runner publishes its exit marker the instant Copilot terminates and
-    captures metrics afterwards -- deliberately, so a dead session is
-    relaunched in seconds rather than the 95 minutes measured on this machine.
-    The marker therefore no longer implies that session's metrics are in the
-    database, and everything that reads the database on the way out has to
-    wait for the runner itself, which is :func:`pane_program_running`.
-
-    Every shutdown path waits: the attached single-session summary, and loop
-    mode's six endings, three of which destroy the pane immediately afterwards
-    and would take an unfinished capture with them. The relaunch path
-    deliberately does not -- pausing for a log parse before starting the next
-    session is the delay this removed, and a capture cut short there is
-    recoverable with `operator ingest` where the wait is not recoverable at
-    all.
-
-    Bounded, and the bound is what makes it safe: the capture is a parse of a
-    log with no ceiling on its size -- 1.4 GB on this machine, one capture
-    measured at 13.3 hours -- so waiting unconditionally would hang a
-    terminal. A thin summary is recoverable; a prompt that never returns is
-    not.
-
-    A multiplexer that cannot be asked ends the wait rather than spending the
-    whole timeout on a question nobody can answer. ``OSError`` as well as
-    ``MuxError``: :meth:`Mux.has_session` shells out through ``subprocess.run``
-    and raises no ``MuxError`` of its own, so a missing multiplexer binary
-    arrives as ``OSError`` alone and catching only the library's exception
-    would end an attached session with a traceback instead of a summary.
-    """
-    try:
-        return _wait_until(lambda: not pane_program_running(instance),
-                           timeout, 0.5)
-    except (MuxError, OSError):
-        return False
 
 
 def stop_session_gracefully(instance: Instance) -> None:

@@ -124,40 +124,6 @@ class Instance:
         return RESTART_DIR / f"{self.id}.loopargs.json"
 
     @property
-    def loop_code_file(self) -> Path:
-        """Which operator source the running supervisor actually loaded.
-
-        A supervisor is long-lived and imported its code once, at startup, so
-        a fix landing afterwards does not reach it (that is what
-        ``restart-loop`` is for). Nothing recorded *which* code it started
-        with, so neither a person nor the evidence could tell a supervisor
-        running today's fix from one running last week's — and the records
-        both produce are byte-identical in shape.
-        """
-        return RESTART_DIR / f"{self.id}.loopcode.json"
-
-    @property
-    def nochange_file(self) -> Path:
-        """Consecutive sessions that left the project's git state untouched.
-
-        On disk rather than in memory because a supervisor can be replaced
-        mid-run (``operator restart-loop``), and a breaker that forgets its
-        count every time the supervisor is swapped would never trip.
-        """
-        return RESTART_DIR / f"{self.id}.nochange"
-
-    @property
-    def unaccounted_file(self) -> Path:
-        """Consecutive sessions that ended unaccounted for and changed nothing.
-
-        Kept apart from ``nochange_file`` rather than sharing its count: two
-        killed sessions and one idle one are not three of anything, and
-        summing them is what let a loop be retired for idleness it never
-        showed. On disk for the same reason as the streak beside it.
-        """
-        return RESTART_DIR / f"{self.id}.unaccounted"
-
-    @property
     def restart_lock_file(self) -> Path:
         """Held while a supervisor handoff is in progress.
 
@@ -279,67 +245,13 @@ class Instance:
         except (OSError, ValueError):
             return None
 
-    def read_nochange_count(self) -> int | None:
-        """Consecutive no-change sessions recorded so far.
-
-        ``None`` means the count could not be established, which is not the
-        same as zero: silently reading an unreadable counter as "no evidence
-        of stalling yet" is how a circuit breaker ends up permanently off
-        without anyone noticing.
-        """
-        return self._read_streak(self.nochange_file)
-
-    def read_unaccounted_count(self) -> int | None:
-        """Consecutive unaccounted-for endings recorded so far.
-
-        Same tri-state as ``read_nochange_count`` and for the same reason.
-        """
-        return self._read_streak(self.unaccounted_file)
-
-    def _read_streak(self, path: Path) -> int | None:
-        present = path_present(path)
-        if present is False:
-            return 0
-        if present is None:
-            return None
-        try:
-            value = int(path.read_text(encoding="utf-8").strip())
-        except (OSError, ValueError):
-            return None
-        return value if value >= 0 else None
-
-    def save_nochange_count(self, count: int) -> bool:
-        """Persist the streak. ``False`` when it could not be written.
-
-        Losing this costs the breaker its memory across a supervisor swap,
-        never the running session, so — like ``_save_loop_args`` — it must not
-        take an unattended supervisor down with it.
-        """
-        return self._save_streak(self.nochange_file, count, "no-change")
-
-    def save_unaccounted_count(self, count: int) -> bool:
-        """Persist the unaccounted-ending streak. ``False`` when it could not
-        be written, on the same terms as ``save_nochange_count``."""
-        return self._save_streak(self.unaccounted_file, count, "unaccounted")
-
-    def _save_streak(self, path: Path, count: int, label: str) -> bool:
-        tmp = RESTART_DIR / f"{path.name}.tmp"
-        try:
-            tmp.write_text(f"{count}\n", encoding="utf-8")
-            os.replace(tmp, path)
-        except OSError as exc:
-            log(f"  Warning: could not record the {label} count: {exc}")
-            return False
-        return True
-
     def cleanup_files(self) -> None:
         for path in (self.restart_marker, self.managed_file, self.spec_file,
                      self.pid_file, self.exit_file, self.session_file,
                      self.loop_pid_file, self.loop_startup_file,
                      self.detach_marker, self.stop_marker,
-                     self.loop_args_file, self.loop_code_file,
-                     self.restart_lock_file,
-                     self.nochange_file, self.unaccounted_file):
+                     self.loop_args_file,
+                     self.restart_lock_file):
             remove_file(path)
 
 

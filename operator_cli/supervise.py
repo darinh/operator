@@ -65,8 +65,7 @@ def main(argv: "list[str] | None" = None) -> int:
     if "--_supervise" not in args:
         print("operator_cli.supervise is how a supervisor process is started, "
               "not a command.", file=sys.stderr)
-        print("  Use `operator-fleet` or `operator-seat`; this is spawned for "
-              "you.", file=sys.stderr)
+        print("  It is spawned for you by `operator start`.", file=sys.stderr)
         return 2
     name, copilot_args, is_fresh, adopt = parse(args)
     if not name:

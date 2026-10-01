@@ -30,7 +30,6 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 KERNEL = REPO / "operator_kernel"
-FLEET = REPO / "operator_fleet"
 
 #: Every directory this repository puts on `pythonpath`. `operator_fleet/`
 #: joined the day `snapshot.py` was cut out of the kernel, and it had to join
@@ -39,7 +38,7 @@ FLEET = REPO / "operator_fleet"
 #: a scanned directory to an unscanned one answers it by not asking. `snapshot`
 #: is a far more ordinary word than `supervisor_records`, so the package that
 #: gained it is exactly the one that needed the check.
-PACKAGES = (KERNEL, FLEET)
+PACKAGES = (KERNEL,)
 
 
 def kernel_module_names() -> list[str]:
@@ -84,17 +83,12 @@ def test_every_package_contributes_names_to_the_scan():
     outright, because it is the one whose scanning coverage this commit put at
     risk by moving it out of the directory that had it.
     """
-    assert set(PACKAGES) == {KERNEL, FLEET}, (
+    assert set(PACKAGES) == {KERNEL}, (
         "a source package left `PACKAGES`. Everything in this file scans that "
-        "tuple, so a package removed from it is not reported as unchecked -- "
-        "it stops being asked about."
+        "tuple, so a package removed from it is not reported as unchecked."
     )
     names = kernel_module_names()
-    assert "snapshot" in names, (
-        "`snapshot` is the module this package boundary was created by moving. "
-        "If it is absent from the scan, the scan is not covering "
-        "operator_fleet/ and this file is silently back to one package."
-    )
+    assert "supervisor" in names
     for package in PACKAGES:
         found = {p.stem for p in package.glob("*.py") if p.stem != "__init__"}
         assert found, f"{package.name} contributes no module names to the scan"

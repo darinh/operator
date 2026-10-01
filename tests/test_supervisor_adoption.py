@@ -43,7 +43,6 @@ def adoptable(tmp_path, monkeypatch):
     monkeypatch.setattr(op, "RESTART_DIR", restart)
     monkeypatch.setattr(op, "LOG_FILE", tmp_path / "operator.log")
     monkeypatch.setattr(op, "COPILOT_LOG_DIR", tmp_path / "logs")
-    monkeypatch.setattr(op, "TABS_FILE", tmp_path / "tabs.json")
     monkeypatch.setattr(op, "POLL_INTERVAL", 0)
     monkeypatch.setattr(op, "LAUNCH_BACKOFF_BASE", 0)
     monkeypatch.setattr(op, "RESTART_PAUSE_SECONDS", 0)
@@ -282,30 +281,3 @@ def test_an_adopted_session_keeps_its_own_number(adoptable, monkeypatch):
     assert "#8" not in log, "adoption consumed a session number for no launch"
 
 
-def test_the_progress_breaker_rearms_after_an_adopted_session(adoptable,
-                                                              monkeypatch):
-    """This supervisor never saw the state that session began with.
-
-    Measuring against a baseline taken part-way through would compare the
-    repository to itself and report a session that had been working for an hour
-    as having changed nothing.
-    """
-    inst = op.Instance("rearms")
-    _live(adoptable, inst)
-    _own(inst)
-    monkeypatch.setattr(op, "start_session", _must_not_launch)
-    monkeypatch.setattr(op, "workspace_fingerprint", lambda cwd: "unmoving")
-
-    def stop_at_once(instance):
-        instance.stop_marker.touch()
-        return False
-
-    monkeypatch.setattr(op, "is_copilot_running", stop_at_once)
-    monkeypatch.setattr(op, "stop_session_gracefully", lambda instance: None)
-
-    op.run_loop_mode(inst, ["--agent", "test:agent"], is_fresh=False, adopt=True)
-
-    log = op.LOG_FILE.read_text(encoding="utf-8")
-    assert "re-arms after the adopted session" in log, (
-        f"the breaker measured an adopted session against a baseline it never "
-        f"saw; the log says:\n{log[-600:]}")

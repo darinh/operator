@@ -10,12 +10,27 @@ import ctypes
 import os
 import platform
 import subprocess
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from mux import Mux                                   # noqa: E402
-from claims import parse_ts                               # noqa: E402
+
+_TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def parse_ts(value: "str | None") -> "datetime | None":
+    """A stored timestamp as an aware datetime, or None if it will not read."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.strptime(value, _TS_FORMAT)
+    except (TypeError, ValueError):
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 #: How far apart two *computed* boot instants may be and still be one boot.

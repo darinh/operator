@@ -35,17 +35,13 @@ from pathlib import Path
 #: resolved imports differently from the suite that loads it would make that
 #: refusal the only thing standing between two answers, and it is cheaper to
 #: agree than to rely on it.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "operator_fleet"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "operator_kernel"))
 
 _MODULE_NAMES = (
-    "config", "paths", "gitio", "probes", "presence", "instance", "launch",
-    "session_state", "provenance", "supervisor_records", "breakers", "exits",
-    "preamble", "supervisor", "supervisor_control", "evidence", "ledger_chain",
-    "claims",
-    "snapshot", "process_identity", "mux", "console", "sqlite_store",
-    "version", "mandate", "work_seam", "extension_seam", "spend", "fleet_host",
-    "ledger_tail", "argtail",
+    "config", "paths", "probes", "presence", "instance", "launch",
+    "session_state", "supervisor_records", "exits", "preamble", "supervisor",
+    "supervisor_control", "process_tree", "process_identity", "mux", "console",
+    "version", "argtail", "seat",
 )
 
 #: Names the tests were written against, mapped to what the kernel calls them
@@ -64,13 +60,10 @@ _MODULE_NAMES = (
 _ALIASES = {
     "operator_liveness": "process_identity",
     "install_manifest": "presence",
-    "operator_trace": "evidence",
-    "work_claims": "claims",
 }
 
 
 KERNEL = Path(__file__).resolve().parent.parent / "operator_kernel"
-FLEET = Path(__file__).resolve().parent.parent / "operator_fleet"
 
 #: Every source package in this repository. `snapshot` left the kernel for
 #: `operator_fleet/` -- describing a fleet is not supervising one -- and it has
@@ -90,7 +83,7 @@ FLEET = Path(__file__).resolve().parent.parent / "operator_fleet"
 #: boundary that keeps the kernel a kernel is `test_kernel_boundary.py`'s
 #: import scan, which got *stronger* with this move -- `snapshot` is no longer
 #: a name any kernel module is allowed to import.
-SOURCE_ROOTS = (KERNEL, FLEET)
+SOURCE_ROOTS = (KERNEL,)
 
 
 def is_repo_module(module) -> bool:
@@ -174,7 +167,6 @@ _ns = _KernelNamespace(__name__)
 _ns.__dict__["_MODULE_NAMES"] = _MODULE_NAMES
 _ns.__dict__["_ALIASES"] = _ALIASES
 _ns.__dict__["KERNEL"] = KERNEL
-_ns.__dict__["FLEET"] = FLEET
 _ns.__dict__["SOURCE_ROOTS"] = SOURCE_ROOTS
 _ns.__dict__["is_repo_module"] = is_repo_module
 _ns.__dict__["Path"] = Path
