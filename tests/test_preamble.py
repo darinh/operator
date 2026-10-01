@@ -38,4 +38,4 @@ def test_preamble_names_the_handoff_command_for_this_instance():
     assert "operator handoff --instance alpha" in text
     assert "when context gets heavy" not in text
     assert "remember" not in text
-    assert "nobody is reading" in text
+    assert "Nobody is reading" in text
