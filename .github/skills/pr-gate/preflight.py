@@ -91,8 +91,8 @@ def sources_have_tests(files: list[str] | None,
         if stem == "__init__" or path in removal_only:
             continue
         test = f"tests/test_{stem}.py"
-        if test not in changed:
-            unguarded.append(f"{path} (wanted {test} in this diff)")
+        if test not in changed or test in removal_only:
+            unguarded.append(f"{path} (wanted {test} to gain lines in this diff)")
     return (not unguarded), ("each changed source changed its test too"
                              if not unguarded else "; ".join(unguarded))
 
@@ -112,10 +112,12 @@ def budgets_not_raised(files: list[str] | None, base: str = "main",
               and ("boundary" in p or p.endswith("test_extension_packaging.py"))]
     if not guards:
         return True, "no budget guard touched"
-    # Compared by name across every guard, deleted ones included, because a
-    # budget moved to a new file is still the same budget. Lowering is not
-    # raising. A new name, or a value this cannot read, counts as raised.
-    old: dict[str, int] = {}
+    # A ceiling is compared with its own file's old value. One with none there
+    # moved, or is new: it is compared with the lowest old value of that name
+    # in any guard, deleted ones included, so a budget moved to a new file is
+    # still the same budget. Lowering is not raising. A new name, or a value
+    # this cannot read, counts as raised.
+    old: dict[tuple[str, str], int] = {}
     added: list[tuple[str, str, str, str]] = []
     for path in guards:
         code, out = run("git", "diff", "-U0", f"{base}...HEAD", "--", path)
@@ -129,11 +131,20 @@ def budgets_not_raised(files: list[str] | None, base: str = "main",
             value = value.replace("_", "")
             if sign == "-":
                 if value.isdigit():
-                    old[name] = max(old.get(name, 0), int(value))
+                    key = (path, name)
+                    old[key] = min(old.get(key, int(value)), int(value))
             else:
                 added.append((path, name, value, line[1:].strip()))
+
+    def before(path: str, name: str) -> "int | None":
+        if (path, name) in old:
+            return old[(path, name)]
+        elsewhere = [v for (_, n), v in old.items() if n == name]
+        return min(elsewhere) if elsewhere else None
+
     raised = [f"{path}: {text}" for path, name, value, text in added
-              if not value.isdigit() or name not in old or int(value) > old[name]]
+              if not value.isdigit() or before(path, name) is None
+              or int(value) > before(path, name)]
     if not raised:
         return True, "no ceiling moved"
     if reason:

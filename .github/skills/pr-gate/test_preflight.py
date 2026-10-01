@@ -216,7 +216,25 @@ def test_a_source_that_only_lost_lines_needs_no_test_change():
     ok, detail = preflight.sources_have_tests(
         ["operator_kernel/claims.py", "operator_kernel/supervisor.py"], removed)
     assert ok is False
-    assert detail == "operator_kernel/supervisor.py (wanted tests/test_supervisor.py in this diff)"
+    assert detail == ("operator_kernel/supervisor.py "
+                      "(wanted tests/test_supervisor.py to gain lines in this diff)")
+
+
+def test_a_test_that_only_lost_lines_does_not_cover_a_source_that_gained_them():
+    ok, detail = preflight.sources_have_tests(
+        ["operator_kernel/supervisor.py", "tests/test_supervisor.py"],
+        {"tests/test_supervisor.py"})
+    assert ok is False
+    assert "operator_kernel/supervisor.py" in detail
+
+
+def test_a_ceiling_is_compared_with_its_own_file_before_any_other(monkeypatch):
+    files = ["tests/test_a_boundary.py", "tests/test_b_boundary.py"]
+    _guard_diffs(monkeypatch, {files[0]: "-MAX_DUP = 100\n+MAX_DUP = 200\n",
+                               files[1]: "-MAX_DUP = 1000\n+MAX_DUP = 1000\n"})
+    ok, detail = preflight.budgets_not_raised(files)
+    assert ok is False
+    assert detail.endswith("tests/test_a_boundary.py: MAX_DUP = 200")
 
 
 def test_a_deleted_kernel_module_need_not_be_in_the_shim():
