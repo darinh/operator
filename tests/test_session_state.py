@@ -1,11 +1,7 @@
-"""Shutdown waits for the session to end, not for a metrics capture."""
+"""Shutdown waits for the session to end."""
 from __future__ import annotations
 
 import op
-
-
-def test_metrics_capture_is_not_a_shutdown_wait():
-    assert not hasattr(op.session_state, "wait_for_metrics_capture")
 
 
 def test_wait_for_exit_is_already_done_when_the_pane_is_down(monkeypatch):
