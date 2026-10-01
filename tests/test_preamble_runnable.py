@@ -11,7 +11,6 @@ import re
 import shlex
 
 import op
-import pytest
 
 from operator_cli import entry
 
@@ -40,6 +39,9 @@ def _launch_preamble(monkeypatch, tmp_path, *, remembered: str = "") -> str:
     monkeypatch.setattr(op, "RESTART_DIR", tmp_path / "restart")
     monkeypatch.setattr(op, "OPERATOR_HOME", home)
     monkeypatch.chdir(work)
+
+    from operator_cli.project import ensure_registered
+    assert ensure_registered()[0] == 0
 
     seen: list[str] = []
 
@@ -208,11 +210,35 @@ def test_a_fresh_seat_is_told_how_to_restart_itself(monkeypatch, tmp_path):
     Naming it is not enough, which is the whole lesson of this file: the
     command is run, so a clause that drifts from the parser fails here.
     """
+    from instance import Instance, restart_marker_for
+    from paths import project_handoff_file
+
     found = _commands(_launch_preamble(monkeypatch, tmp_path))
     restart = [c for c in found if "handoff" in c]
-    assert restart, found
-    for template in restart:
-        assert _run(template) != 2, f"the preamble advertises `{template}`"
+    assert len(restart) == 1, found
+    seat_id = Instance(SEAT).id
+    handoff = project_handoff_file(tmp_path / "work", seat_id)
+    marker = restart_marker_for(seat_id)
+    assert not handoff.exists() and not marker.exists()
+    assert _run(restart[0]) == 0, f"the preamble advertises `{restart[0]}`"
+    assert handoff.read_text(encoding="utf-8").strip()
+    assert marker.exists()
+
+
+def test_the_restart_clause_advertises_the_seat_id_not_the_display_name():
+    """The supervisor probes with `instance.id` and the handoff file is named
+    for it, so a clause naming the display name files the handoff where the
+    next session does not look."""
+    import preamble as P
+    from instance import Instance
+
+    seat = Instance("a.b")
+    assert seat.id != seat.display_name, "pick a name that actually sanitises"
+    restart = [c for c in _commands(P.build_preamble(seat)) if "handoff" in c]
+    assert restart, "no handoff command was advertised at all"
+    for command in restart:
+        assert f"--instance {seat.id}" in command, command
+        assert seat.display_name not in command.replace(seat.id, ""), command
 
 
 def test_an_executable_named_in_a_lone_span_is_still_a_command():
