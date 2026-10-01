@@ -45,14 +45,12 @@ def _request_supervisor_stop(instance: Instance,
     stopped itself. The invariant on return is that either a supervisor holds
     the marker, or it is gone because we removed it.
 
-    The default budget carries ``METRICS_GRACE_SECONDS`` for the same reason
-    ``_do_restart_loop`` derives its own from ``POLL_INTERVAL``: the
-    supervisor's stop branch waits for the runner's metrics capture before it
-    exits, so a budget that does not know that expires while the supervisor is
-    still doing what it was asked to do. The caller then kills the session
-    itself, out from under a supervisor mid-shutdown. Spelled as a sum rather
-    than folded into one number so that tuning the wait cannot silently
-    un-tune this.
+    The default budget carries ``METRICS_GRACE_SECONDS`` because the
+    supervisor's stop branch waits for the runner before it exits. A budget
+    that does not know that expires while the supervisor is still doing what
+    it was asked to do. The caller then kills the session itself, out from
+    under a supervisor mid-shutdown. Spelled as a sum rather than folded into
+    one number so that tuning the wait cannot silently un-tune this.
     """
     instance.stop_marker.touch()
     pid, starting = _supervisor_status(instance)
@@ -86,10 +84,9 @@ def recoverable_instances() -> list[Instance]:
 
     `active_instances` asks who is here *now*, and after a reboot the answer is
     nobody: the multiplexer server is gone and every supervisor pid belongs to
-    a previous boot. That is the whole gap this closes. A seat is not a process
-    -- it is an identity with a journal, a handoff and a session number that
-    accumulate -- and losing the machine should cost it the process, not the
-    continuity.
+    a previous boot. That is the whole gap this closes. Losing the machine
+    should cost the seat its process, not the recorded arguments and session
+    number a clean stop removes.
 
     The discriminator is what a clean stop leaves behind, which is nothing:
     `cleanup_files` removes the ownership claim and the recorded loop
@@ -114,10 +111,8 @@ def recoverable_instances() -> list[Instance]:
 def recover_loop(instance: Instance) -> int:
     """Start a supervisor for a seat whose machine went down under it.
 
-    Not ``--fresh``. Fresh means forget the previous run, which would restart
-    the session numbering, discard the resume id and re-arm the breakers that
-    were counting. The seat continues: same run, next session, its journal and
-    handoff exactly where it left them.
+    Not ``--fresh``. Fresh would restart the session numbering and discard
+    the resume id. The seat continues the same run.
     """
     target = instance.display_name
     user_args, recorded_cwd = _load_loop_args(instance)
@@ -127,7 +122,7 @@ def recover_loop(instance: Instance) -> int:
         return 1
     if dir_present(Path(recorded_cwd)) is False:
         # Recovering it somewhere else would point the seat at a different
-        # project, and its journal is keyed to the one it was working in.
+        # project than the one it recorded.
         print(f"The directory '{target}' was working in no longer exists:",
               file=sys.stderr)
         print(f"  {recorded_cwd}", file=sys.stderr)

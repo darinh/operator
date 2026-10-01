@@ -1,17 +1,7 @@
-"""The process a supervisor runs in, and the entry point that had gone missing.
+"""The process a supervisor runs in.
 
 `supervisor._spawn_background_loop` starts a supervisor by launching this
-module. It used to launch `supervisor.py` itself, by `__file__` -- and nothing
-in that file has ever read `--_supervise`, because the argument handling stayed
-behind in the 9,120-line module the supervision loop was ported out of.
-
-So every supervisor the kernel spawned ran a file with no entry point and
-exited 0. Nothing reported it, because exiting 0 is what success looks like.
-The visible consequence was in `restart_loop`, which asks the old supervisor to
-detach *before* spawning the replacement: the session kept running and its
-supervisor was simply gone. Measured before the fix -- running the exact
-command `_spawn_background_loop` built produced no output, no pid file, no log
-line, and exit 0.
+module.
 
 **These call `main()` in-process on purpose.** A subprocess does not inherit
 `conftest`'s multiplexer guard, so it drives the developer's real tmux: an

@@ -32,8 +32,8 @@ def _save_loop_args(instance: Instance, user_args: list[str]) -> None:
         tmp.write_text(json.dumps(payload), encoding="utf-8")
         os.replace(tmp, instance.loop_args_file)
     except OSError as exc:
-        # Losing this costs a faithful restart-loop, never the running
-        # session, so it must not take the supervisor down with it.
+        # Losing this costs a faithful recover, never the running session,
+        # so it must not take the supervisor down with it.
         log(f"  Warning: could not record loop args: {exc}")
 
 
@@ -55,39 +55,12 @@ def _load_loop_args(instance: Instance) -> tuple[list[str], str | None]:
 
 
 def _publish_supervisor_records(instance: Instance, user_args: list[str]) -> None:
-    """Write this supervisor's startup records, pid file last.
+    """Write the args record, then the pid file, then drop the startup record.
 
-    The order is the point, which is why these three writes live in one named
-    function instead of inline where they cannot be tested. Every reader of
-    the *code record* gates on the loop pid file first — `_instance_summary`
-    and `list_instances` both require `snap["loop_pid"]` before they will say
-    anything about `loop_code` — so among those readers the pid file is the
-    commit point: once it exists, the record describing that supervisor
-    already does.
-
-    Written the other way round -- which is how it was -- a concurrent
-    ``operator ls`` lands between the pid file and the code record and sees a
-    live supervisor that has recorded nothing, which is now a reportable
-    state. It would tell a perfectly healthy supervisor, running the newest
-    code there is, to restart. The window is short and the consequence is
-    only a printed line, but a notice that is sometimes wrong is the kind
-    that stops being read, and this one exists precisely because the previous
-    one said nothing.
-
-    The args record has a different reader: `restart_loop` gates on the live
-    session rather than on the pid file, and refuses when no args are
-    recorded. Writing args first shrinks that window too, so the reordering
-    is an improvement there rather than a trade.
-
-    What this ordering does **not** do is make a starting supervisor visible.
-    The pid file is written near the end of a startup that already takes
-    upwards of 105 ms, and until it exists `_running_loop_pid` reports that
-    nothing is running. That window was backlog item 0010, and it was not
-    fixable by ordering these three writes: it is closed instead by a
-    separate record written before this function is reached and removed
-    after it -- see `Instance.loop_startup_file` and `_supervisor_present`.
-    Anything acting destructively on "is a supervisor running" must ask
-    `_supervisor_present`, not `_running_loop_pid`.
+    Recover refuses when no args were recorded, so that write goes first.
+    The pid file is what ``_running_loop_pid`` treats as published. The
+    startup record is what covers the gap before it exists, and removing
+    that record first opens the gap again. See ``Instance.loop_startup_file``.
     """
     # Recorded so this supervisor can be replaced later without guessing how
     # it was started. Written every time, so it tracks the live invocation.
@@ -149,7 +122,7 @@ def _write_loop_pid_file(instance: Instance, pid: int) -> None:
 
     Falls back to writing in place if the rename cannot be done, because the
     pid file is what makes a supervisor visible at all: an unwritten one costs
-    the session its `stop`, its `restart-loop` and its row in the listing,
+    the session its `stop` and its row in the listing,
     which is worse than the narrow window this avoids.
     """
     text = _loop_pid_stamp(pid)
@@ -225,18 +198,10 @@ def _loop_pid_reused(stamps: dict, live_start: "str | None") -> bool:
     ``True`` only on positive evidence, and the asymmetry is the whole design.
     Answering "yes, reused" for a supervisor that is in fact running is not a
     missing notice, it is a destructive one: `active_instances` drops the
-    instance, every notice `_instance_summary` prints is gated on the loop
-    pid and so goes silent with it, and `restart-loop` would start a second
-    supervisor on top of the first. Answering "no" wrongly leaves the
+    instance, so `operator list` and `operator stop` lose it. Answering "no" wrongly leaves the
     pid-reuse blindness that was there before this stamp existed. So anything
     short of evidence -- an unstamped file from an older supervisor, a token
     the OS will not give up, a stamp damaged past reading -- is "no".
-
-    That is deliberately *not* how `_record_describes` treats damage in the
-    loop code record, and the two must not be unified without noticing why.
-    There, a malformed field costs a staleness verdict and gains a printed
-    caveat, so refusing on damage is cheap and safe. Here it costs the
-    session's supervisor.
 
     Both sides must be well-formed tokens of the *same* kind before a
     difference between them counts, which is what
@@ -250,9 +215,8 @@ def _loop_pid_reused(stamps: dict, live_start: "str | None") -> bool:
 
     The live token is passed in rather than probed here, because the caller
     that already has one must not pay for a second: on macOS every probe
-    forks ``ps`` with a ten-second timeout, and `instance_snapshot` asks this
-    question and then asks `loop_record_facts` a related one about the same
-    pid. It is deliberately *not* cached between calls either -- a token
+    forks ``ps`` with a ten-second timeout. It is deliberately *not* cached
+    between calls either -- a token
     cached for a pid before a supervisor was spawned onto it compares unequal
     to that supervisor's own stamp, so a stale cache can only ever be wrong in
     the direction that deletes a running supervisor's pid file.
@@ -262,7 +226,7 @@ def _loop_pid_reused(stamps: dict, live_start: "str | None") -> bool:
     `process_identity.start_token_is_boot_relative` is what knows which
     shapes are which. Skipping it is a real saving rather than a micro one --
     `boot_identity` forks ``sysctl`` on macOS, and this is on `operator
-    list`'s per-instance path and `restart-loop`'s twice-a-second poll.
+    list`'s per-instance path and on `launch_status`'s poll.
     """
     recorded_start = stamps.get(LOOP_PID_START_KEY)
     same = process_identity.same_start_token(recorded_start, live_start)
@@ -307,11 +271,8 @@ def _prune_loop_pid_file(instance: Instance, seen: tuple) -> None:
 def _running_loop_identity(instance: Instance) -> "tuple[int | None, object]":
     """``(pid, live_start)`` for the running supervisor, from one probe.
 
-    The token half is what `instance_snapshot` hands to `loop_record_facts`,
-    so the listing asks the OS who holds a pid once per instance rather than
-    once per question about it. It is :data:`_UNPROBED` when this never
-    needed to ask -- an unstamped pid file has nothing to compare against --
-    and the record reader then probes for itself.
+    ``live_start`` is :data:`_UNPROBED` when this never needed to ask.
+    An unstamped pid file has nothing to compare against.
     """
     parsed = _read_loop_pid_stamp(instance)
     if parsed is None:
@@ -341,17 +302,14 @@ def _running_loop_pid(instance: Instance) -> int | None:
 
     Two questions, not one. ``_pid_alive`` asks whether *some* process holds
     the pid, and on Windows -- where pids are recycled aggressively -- an
-    unrelated process handed a dead supervisor's pid answers yes. That row
-    then prints as ``looping``, with a session number and an age, and is
-    byte-identical to a healthy one, which is the silent all-clear this
-    instrument exists to stop. `_loop_pid_reused` asks the second question,
+    unrelated process handed a dead supervisor's pid answers yes.
+    `_loop_pid_reused` asks the second question,
     against the start token the supervisor stamped beside its own pid.
 
     A pid file predating the stamp, or one whose token cannot be checked,
     still answers exactly as it did before: alive means running. Turning
-    those into "stopped" would take out `active_instances`, every supervisor
-    notice in `_instance_summary`, and `restart-loop`'s refusal to start a
-    second supervisor, all at once.
+    those into "stopped" would take the instance out of `active_instances`,
+    so `operator list` and `operator stop` lose a live supervisor.
 
     The half of `_running_loop_identity` that every caller but the listing
     needs; they ask nothing else about the pid, so the token would be a value
@@ -391,7 +349,7 @@ def _starting_loop_pid(instance: Instance) -> int | None:
     covers the pid being dead while the supervisor is not — the Windows
     launcher shim exits the moment it has re-execed the real interpreter.
     Requiring both would reopen the window this file exists to close; the
-    cost of either is that stop and restart-loop wait, which is bounded and
+    cost of either is that stop waits, which is bounded and
     reversible, where the cost of concluding absence is a session destroyed
     or a second supervisor started.
 
@@ -451,8 +409,7 @@ def _supervisor_status(instance: Instance) -> tuple[int | None, bool]:
     answer needs this one instead. The two were the same function until a
     supervisor's first ~105 ms turned out to be invisible to it, which let
     ``operator stop`` kill a session that a starting supervisor then
-    relaunched underneath the user, and ``operator restart-loop`` start a
-    second supervisor over the first.
+    relaunched underneath the user.
 
     Both halves come from one pass because they are read from the same two
     files and every caller uses them together. Asking separately means a

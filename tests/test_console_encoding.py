@@ -1,11 +1,5 @@
 """Console output must be ASCII, because no other character is portable.
 
-Found by pointing `e2e_restart_loop.py` at this repository for the first time.
-`restart_loop` did its whole job -- old supervisor retired, new one adopted the
-session -- and then died printing its success message, because that message
-carried a U+2705 and this machine's console is cp1252. The work was done and
-the command reported a traceback.
-
 The tempting fix is "avoid emoji". The measurement says otherwise, and it is
 the reason this is a rule rather than a style note:
 
@@ -32,8 +26,7 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-PACKAGES = ("operator_kernel", "operator_fleet", "operator_cli",
-            "operator_extensions")
+PACKAGES = ("operator_kernel", "operator_cli")
 
 #: Console encodings a Windows user plausibly has. A string must survive all of
 #: them, which in practice means ASCII -- but it is asserted by encoding rather

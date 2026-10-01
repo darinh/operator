@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """In-pane supervisor for a single Copilot session.
 
-The multiplexer launches this module, not Copilot directly. It exists to solve
-two defects that cannot be fixed from the operator process:
+The multiplexer launches this module, not Copilot directly. It spawns Copilot
+so the pid and the exit code are known from inside the pane.
 
-1. **Process identity.** On POSIX the generated run script ends in
+On POSIX the generated run script ends in
    `exec copilot`, so the multiplexer's pane PID *is* Copilot's PID. Windows has
    no `exec`: the measured process tree is
    `pane_pid -> pwsh -> run script -> copilot`, so the pane PID identifies the
@@ -20,18 +20,12 @@ two defects that cannot be fixed from the operator process:
    against the whole process tree it created, and pins the file while that tree
    is still alive.
 
-2. **Supervision across detach.** The operator prints "metrics will be captured
-   when copilot exits" and then exits, so on detach nothing remained to capture
-   them. The runner lives inside the pane and outlives detach, so it performs
-   the capture itself.
-
 State written to the instance state directory:
 
 ``{id}.pid``      Copilot's real process id, removed on exit
 ``{id}.session``  Copilot CLI session UUID, once discovered
-``{id}.exit``     Exit code, written as soon as Copilot terminates and before
-                  metrics capture -- see :func:`run` for why the ordering is
-                  load-bearing rather than incidental
+``{id}.exit``     Exit code, written as soon as Copilot terminates.
+                  See :func:`run` for why that ordering is load-bearing.
 
 A malformed launch spec exits ``EXIT_BAD_SPEC`` and is still reported through
 those files: see :func:`_load_spec`.

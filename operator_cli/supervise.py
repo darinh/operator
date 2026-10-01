@@ -2,20 +2,11 @@
 
 `supervisor._spawn_background_loop` starts a supervisor by launching this, and
 this does one thing: turn the arguments it was given into a `run_loop_mode`
-call. Every decision is a layer down, which is what this package is for.
+call.
 
 It is not a command a human runs. `--_supervise` is required precisely so that
 somebody who mistakes it for one gets told, rather than starting an unattended
 loop they did not ask for.
-
-**This module exists because the kernel had no way to start a supervisor.**
-When the supervision loop was ported into `operator_kernel/supervisor.py`, the
-spawn was pointed at that file and the argument handling was left behind in the
-9,120-line module it came from. Nothing there read `--_supervise`, so every
-spawned supervisor ran a file with no entry point, exited 0, and was reported
-by nothing. `restart_loop` asks the old supervisor to detach *before* spawning
-the replacement, so the visible result was a live session whose supervisor had
-silently vanished.
 """
 from __future__ import annotations
 
@@ -28,7 +19,7 @@ from .home import _bootstrap
 #: Flags addressed to the supervisor. Everything else belongs to Copilot and is
 #: passed through untouched -- argparse would reject those instead, and they are
 #: not ours to rename.
-_IGNORED = ("--_supervise", "--loop", "--headless", "--detached")
+_IGNORED = ("--_supervise", "--loop")
 
 
 def parse(args: "list[str]") -> "tuple[str, list[str], bool]":

@@ -63,8 +63,8 @@ def menu_items() -> tuple[Item, ...]:
 def build_argv(item: Item, values: dict[str, str]) -> list[str]:
     """The command the menu will run, and print before running it.
 
-    `instance` goes in front of the verb's own tokens because `operator-seat`
-    declares it on the top-level parser; the rest follow the verb.
+    ``instance`` is inserted after the verb as ``--instance``. Other flagged
+    keys follow. ``name`` is appended as a positional.
     """
     argv = list(item.argv)
     if "instance" in values:

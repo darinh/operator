@@ -93,12 +93,8 @@ def test_directory_gone_between_exists_and_samefile_is_undecided(
 
 def test_a_seat_name_that_is_not_one_path_component_addresses_nothing(
         tmp_path, monkeypatch):
-    """The gate `project_journal_file` has always had, arriving here late.
-
-    Its only caller was the supervisor, which passes `instance.id` and cannot
-    produce a bad one. `operator handoff` takes the name from a command line,
-    where `--instance ../elsewhere` resolved to a file outside `handoff/`.
-    """
+    """`operator handoff` takes the name from a command line, where
+    `--instance ../elsewhere` would resolve outside `handoff/`."""
     _home, stored, _alias, _guid, _catalog = _alias_catalog(tmp_path, monkeypatch)
     for bad in ("../escape", "a/b", "a\\b", "x.", "CON"):
         assert paths.project_handoff_file(stored, bad) is None, bad

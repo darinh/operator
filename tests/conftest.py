@@ -432,9 +432,8 @@ def _no_real_operator_home():
     op.OPERATOR_HOME = sandbox
     op.RESTART_DIR = sandbox / "restart"
     op.LOG_FILE = sandbox / "operator.log"
-    # Exported as well as bound: `operator_extensions.activation` and both CLIs
-    # re-resolve the home from the environment rather than importing the
-    # kernel's constant, and a spawned worker inherits only this.
+    # The kernel reads this at import. A spawned supervisor inherits the
+    # environment, not the patched constant.
     os.environ["COPILOT_OPERATOR_HOME"] = str(sandbox)
     try:
         yield sandbox

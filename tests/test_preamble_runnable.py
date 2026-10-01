@@ -160,11 +160,8 @@ def test_every_advertised_operator_verb_is_one_the_cli_dispatches(
 
     The test above asks only whether `shlex.split(template)[0]` is one of our
     console scripts, so `operator listt` passes it: the typo is in the verb,
-    and nothing reads the verb. That gap is not hypothetical here, because the
-    two commands the preamble advertises only in its stale and mismatch
-    branches, `operator list` and `operator restart-loop`, are the two no test
-    ever runs. Running them is not the fix: `restart-loop` would replace a
-    supervisor. Dispatchability is what can be checked without side effects.
+    and nothing reads the verb. Dispatchability is what can be checked
+    without side effects.
     """
     seen = 0
     for template in _every_advertised_command(monkeypatch, tmp_path):

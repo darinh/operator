@@ -117,9 +117,8 @@ class Instance:
     def loop_args_file(self) -> Path:
         """The arguments loop mode was started with.
 
-        Recorded so a supervisor can be replaced (``operator restart-loop``)
-        without having to reconstruct them from the launch spec, where they
-        are already mixed with the preamble and the flags loop mode adds.
+        ``operator recover`` reads this rather than reconstructing the
+        invocation from the launch spec.
         """
         return RESTART_DIR / f"{self.id}.loopargs.json"
 

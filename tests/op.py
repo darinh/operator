@@ -7,10 +7,8 @@ artifacts that encode *why* the behaviour is what it is -- so the boundaries are
 presented rather than rewritten. The tests move unmodified, which is precisely
 what makes them evidence that the behaviour survived the move.
 
-That module held the kernel and the board alike, so as pieces leave the kernel
-for `operator_fleet/` they stay in here. What must never enter is a module from
-*outside* this repository; see `SOURCE_ROOTS` below for why the distinction is
-drawn there and not at the kernel's edge.
+What must never enter is a module from outside this repository. See
+`SOURCE_ROOTS`.
 
 **This forwards writes, and that is the whole design.** A namespace that merely
 copied names in would let `monkeypatch.setattr(op, "RESTART_DIR", tmp)` succeed
@@ -27,14 +25,6 @@ import sys
 import types
 from pathlib import Path
 
-#: Both source packages, in the order `pyproject.toml`'s `pythonpath` lists
-#: them. `insert(0, ...)` reverses what it is given, so the fleet goes down
-#: first and the kernel ends up ahead of it -- matching the precedence pytest
-#: sets natively. A stem in both packages is refused by
-#: `test_fleet_boundary.py`, so nothing should turn on this order; a shim that
-#: resolved imports differently from the suite that loads it would make that
-#: refusal the only thing standing between two answers, and it is cheaper to
-#: agree than to rely on it.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "operator_kernel"))
 
 _MODULE_NAMES = (
@@ -65,24 +55,9 @@ _ALIASES = {
 
 KERNEL = Path(__file__).resolve().parent.parent / "operator_kernel"
 
-#: Every source package in this repository. `snapshot` left the kernel for
-#: `operator_fleet/` -- describing a fleet is not supervising one -- and it has
-#: to stay in this namespace, which is a safety property and not a convenience.
-#: `conftest`'s autouse multiplexer guard substitutes its fake by writing
-#: `op.MUX`, and that write only reaches a module this shim binds. Drop
-#: `snapshot` and its `from config import MUX` keeps the REAL multiplexer,
-#: so `instance_snapshot` starts asking the developer's live tmux server
-#: whether a session exists -- which is the precise shape of the inert
-#: substitution recorded at the top of this file, reintroduced by an
-#: extraction rather than by a typo.
-#:
-#: Widening the root check to the repository is therefore deliberate, and it
-#: does not weaken what the check was for: the failure it caught was the
-#: standard library's `trace` being bound under a kernel spelling, and a
-#: module from outside this repository is refused exactly as before. The
-#: boundary that keeps the kernel a kernel is `test_kernel_boundary.py`'s
-#: import scan, which got *stronger* with this move -- `snapshot` is no longer
-#: a name any kernel module is allowed to import.
+#: Kernel modules only. A module from outside this repository is refused.
+#: `conftest` substitutes its fake multiplexer by writing `op.MUX`, and that
+#: write only reaches a module this shim binds.
 SOURCE_ROOTS = (KERNEL,)
 
 

@@ -210,21 +210,12 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool) -> i
                         raise KeyboardInterrupt
 
                 restart_requested = False
-                # How the session that is about to end finished, carried to the
-                # converged progress check below rather than re-probed there:
-                # by then `remove_file` has cleared the restart marker, so the
-                # question is no longer answerable from disk. "Accounted for"
-                # means a handoff asked for the restart, or the runner survived
-                # to write an exit code — either way something explains the
-                # ending. A session that simply vanished explains nothing, and
-                # a fingerprint that did not move says nothing about idleness.
                 while True:
                     if shutdown["requested"]:
                         raise KeyboardInterrupt
-                    # Checked before sleeping, not after: `operator stop` and
-                    # `operator restart-loop` both block waiting for this
-                    # supervisor to act, so a whole poll interval of latency
-                    # is paid by a human (or an agent) every time.
+                    # Checked before sleeping, not after: `operator stop` blocks
+                    # waiting for this supervisor to act, so a whole poll
+                    # interval of latency is paid by whoever asked.
                     if marker_set(instance.stop_marker):
                         # `operator stop NAME` asked us to shut down and take the
                         # session with us — same as Ctrl+C, just triggered
@@ -305,20 +296,6 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool) -> i
                         # The handoff path arrives here, not above: `handoff`
                         # touches the marker while copilot is still up, so the
                         # supervisor sees the request before it sees the exit.
-                        # Recording only the branch above is why every
-                        # `session_exit` in the evidence carried `restart=False`
-                        # -- not because no session ever ended by handoff, but
-                        # because the ones that did were never written down.
-                        #
-                        # Recorded here rather than after the session is
-                        # actually torn down, deliberately. If
-                        # `stop_session_gracefully` and the kill behind it both
-                        # fail, the supervisor dies -- and a record written
-                        # after that point is the one that would never exist.
-                        # A evidence saying "a restart was requested" when the
-                        # teardown then failed is recoverable by whoever reads
-                        # it next; silence about the last thing that happened
-                        # before the supervisor died is not.
                         restart_requested = True
                         break
 
@@ -380,9 +357,8 @@ def _spawn_background_loop(instance: Instance, copilot_args: list[str],
     when this loop was ported here out of the 9,120-line module the argument
     handling stayed behind in it. Nothing in this file reads `--_supervise`,
     so every supervisor spawned ran a module with no entry point and exited 0
-    in silence -- and `restart_loop`, which retires the old supervisor before
-    spawning its replacement, left live sessions unsupervised. A module path
-    also survives this file being moved, which a `__file__` path does not.
+    in silence, leaving the session unsupervised. A module path also survives
+    this file being moved, which a `__file__` path does not.
 
     Windows note: use CREATE_NO_WINDOW, *not* DETACHED_PROCESS. Both detach
     the child from the parent terminal's console, but DETACHED_PROCESS leaves
@@ -413,7 +389,7 @@ def _spawn_background_loop(instance: Instance, copilot_args: list[str],
     # The earliest anyone can know this supervisor exists. The child cannot
     # say so for itself until the interpreter has started and this module has
     # imported -- a measured 105 ms floor -- and until something says so,
-    # `operator stop` and `operator restart-loop` both act as if no
-    # supervisor were running. See `Instance.loop_startup_file`.
+    # `operator stop` acts as if no supervisor were running. See
+    # `Instance.loop_startup_file`.
     _record_supervisor_starting(instance, proc.pid)
     return proc.pid

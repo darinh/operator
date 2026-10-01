@@ -96,18 +96,6 @@ def test_a_directory_outside_a_checkout_is_refused(tmp_path):
         control.repo_root(tmp_path)
 
 
-# ── activation ───────────────────────────────────────────────────────────
-
-
-
-
-
-
-
-
-
-
-# ── evidence ─────────────────────────────────────────────────────────────
 
 
 def test_evidence_captures_the_state_the_skill_promises(run):
@@ -265,15 +253,5 @@ def test_flags_after_the_separator_reach_the_console_script(monkeypatch):
 def test_addressing_a_run_that_was_never_created_is_refused(tmp_path):
     with pytest.raises(SystemExit):
         control._meta(tmp_path / "nope")
-
-
-# ── the launch gate ──────────────────────────────────────────────
-
-
-
-
-
-
-
 
 

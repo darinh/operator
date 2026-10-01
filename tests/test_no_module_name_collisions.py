@@ -31,13 +31,6 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 KERNEL = REPO / "operator_kernel"
 
-#: Every directory this repository puts on `pythonpath`. `operator_fleet/`
-#: joined the day `snapshot.py` was cut out of the kernel, and it had to join
-#: *this* list rather than only the budget's: the question here is whether a
-#: name of ours is also importable from somewhere else, and moving a file from
-#: a scanned directory to an unscanned one answers it by not asking. `snapshot`
-#: is a far more ordinary word than `supervisor_records`, so the package that
-#: gained it is exactly the one that needed the check.
 PACKAGES = (KERNEL,)
 
 

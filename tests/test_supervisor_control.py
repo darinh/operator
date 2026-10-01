@@ -1,23 +1,8 @@
 """Recovering the seats a crash or a reboot took down.
 
-A seat is not a process. It is an identity with a journal, a handoff and a
-session number that accumulate over a project's life, and that is the whole
-point of the thing: the longer a seat works somewhere, the more it knows about
-it. Losing the machine should cost it the process, not the continuity.
-
-Before this there was no way to get it back. `active_instances` asks who is
-here *now*, and after a reboot the answer is nobody -- the multiplexer server
-is gone and every supervisor pid belongs to a previous boot -- so
-`restart_all_loops`, the sweep meant for exactly this shape of problem, found
-nothing to restart. Everything needed was already on disk and nothing read it.
-
 The discriminator is what a clean stop leaves behind, which is nothing:
 `cleanup_files` removes the ownership claim and the recorded loop arguments. A
-crash removes neither. That is why "was it stopped on purpose?" needs no flag
-anybody has to remember to set, and the tests below are mostly about keeping
-those two cases apart -- because the cost of confusing them is either a seat
-that never comes back, or one that resurrects after a human deliberately
-retired it.
+crash removes neither.
 """
 from __future__ import annotations
 
@@ -137,17 +122,15 @@ def spawned(monkeypatch):
 
 def test_recovering_continues_the_run_rather_than_starting_a_new_one(
         home, spawned):
-    """`--fresh` would restart the session numbering, discard the resume id and
-    re-arm the breakers. The seat's continuity is the entire feature, so this
-    is the assertion the command exists to satisfy."""
+    """`--fresh` would restart the session numbering and discard the resume id."""
     inst = _crashed("continues", home / "work")
     assert recover_loop(inst) == 0
     assert spawned[0]["fresh"] is False
 
 
 def test_the_seat_is_recovered_where_it_was_working(home, spawned):
-    """Its journal and handoff are keyed to that project. Starting it in the
-    caller's directory would point the seat at a different one."""
+    """Starting it in the caller's directory would point the seat at a
+    different project than the one it recorded."""
     inst = _crashed("in-place", home / "work")
     recover_loop(inst)
     assert spawned[0]["cwd"] == str(home / "work")
