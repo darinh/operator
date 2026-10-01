@@ -40,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "operator_kernel
 _MODULE_NAMES = (
     "config", "paths", "probes", "presence", "instance", "launch",
     "session_state", "supervisor_records", "exits", "preamble", "supervisor",
-    "supervisor_control", "process_identity", "mux", "console",
+    "supervisor_control", "process_identity", "runner", "mux", "console",
     "version", "argtail",
 )
 
