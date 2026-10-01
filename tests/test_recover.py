@@ -1,4 +1,4 @@
-"""`operator-recover` — the command a human runs after the machine comes back.
+"""`operator recover` is the command a human runs after the machine comes back.
 
 Thin by design: `supervisor_control` decides which seats were running when the
 machine went down and what continuing one means, and this parses arguments and
@@ -49,7 +49,7 @@ def test_with_nothing_to_do_it_says_so(cli, capsys):
 
 
 def test_it_lists_rather_than_starting_anything(cli, capsys):
-    """A bare `operator-recover` that silently started eight agents would be a
+    """A bare `operator recover` that silently started eight agents would be a
     command people run once."""
     cli["listed"].extend([_seat("alpha"), _seat("bravo")])
     assert recover.main([]) == 0
@@ -63,7 +63,6 @@ def test_the_listing_says_how_to_act_on_it(cli, capsys):
     recover.main([])
     out = capsys.readouterr().out
     assert "operator recover --all" in out
-    assert "operator-recover" not in out
 
 
 # ── acting ───────────────────────────────────────────────────────

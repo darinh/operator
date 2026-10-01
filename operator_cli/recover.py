@@ -1,4 +1,4 @@
-"""`operator-recover` — bring back the seats a crash or a reboot took down.
+"""`operator recover` brings back the seats a crash or a reboot took down.
 
 A seat is not a process. It is an identity with a journal, a handoff and a
 session number that accumulate over a project's life, and that is the whole
@@ -56,7 +56,7 @@ def _recover(args) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="operator-recover",
+        prog="operator recover",
         description="Restart the seats that were supervised when this machine "
                     "stopped, continuing each where it left off.")
     parser.add_argument("name", nargs="?", help="one seat (default: list them)")

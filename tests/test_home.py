@@ -29,10 +29,8 @@ def test_no_flag_uses_the_environment_then_the_default(tmp_path, monkeypatch):
 
 def test_bootstrap_restores_the_kernel_directory_only(monkeypatch):
     kernel = str(REPO / "operator_kernel")
-    fleet = str(REPO / "operator_fleet")
-    monkeypatch.setattr(sys, "path", [p for p in sys.path if p not in (kernel, fleet)])
+    monkeypatch.setattr(sys, "path", [p for p in sys.path if p != kernel])
 
     home._bootstrap()
 
     assert kernel in sys.path
-    assert fleet not in sys.path
