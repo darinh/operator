@@ -118,3 +118,8 @@ def test_a_usable_seat_name_still_resolves_under_handoff(tmp_path, monkeypatch):
     found = paths.project_handoff_file(stored, "a-b-69f664")
     assert found.name == "a-b-69f664.md"
     assert found.parent.name == "handoff"
+
+
+def test_a_journal_is_not_addressed_from_the_kernel():
+    assert not hasattr(paths, "project_journal_file")
+    assert not hasattr(paths, "seat_has_journal")
