@@ -212,7 +212,7 @@ def test_a_handoff_on_disk_is_waiting_not_merely_not_a_crash(
         tmp_path, monkeypatch):
     """The state the old boolean could not express.
 
-    `crash_recovery_verdict` answered False here, and False also meant "the
+    The old boolean answered False here, and False also meant "the
     catalog would not open", "the probe was denied" and "this project is not
     registered". Four situations, one answer, and only this one has an
     address worth giving the agent.
@@ -258,37 +258,6 @@ def test_an_unregistered_project_is_not_a_crash(monkeypatch):
     state = _classify(monkeypatch, None)
     assert state.verdict == op.HANDOFF_UNEXPECTED
     assert state.verdict != op.HANDOFF_MISSING
-
-
-# --- the two answers may not drift apart ------------------------------------
-
-def _handoff_verdicts():
-    """Every HANDOFF_* constant, by introspection.
-
-    Derived rather than listed. A hand-written sweep keeps passing over a set
-    that no longer describes the code -- exactly how `CODE_MISMATCH` was added
-    to its module without any parametrised test noticing -- so adding a fifth
-    verdict without deciding whether it is a crash makes this fail.
-    """
-    return {name: value for name, value in vars(op.exits).items()
-            if name.startswith("HANDOFF_") and isinstance(value, str)}
-
-
-def test_every_verdict_is_covered_by_the_crash_predicate(monkeypatch):
-    """`crash_recovery_verdict` must agree with `handoff_state` on all of them.
-
-    The predicate is what tells an agent its predecessor died, and it now
-    delegates. This pins the delegation for every verdict there is, so a new
-    one cannot quietly default to "crash".
-    """
-    verdicts = _handoff_verdicts()
-    assert len(verdicts) >= 4, "introspection found nothing; the sweep is inert"
-    for name, verdict in verdicts.items():
-        monkeypatch.setattr(op, "handoff_state",
-                            lambda w, i="", v=verdict: op.HandoffState(v))
-        expected = verdict == op.HANDOFF_MISSING
-        assert op.crash_recovery_verdict(Path("/repo"), "seat") is expected, (
-            f"{name} disagrees with the crash predicate")
 
 
 # --- the record -------------------------------------------------------------

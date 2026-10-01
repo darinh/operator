@@ -124,22 +124,6 @@ class Instance:
         return RESTART_DIR / f"{self.id}.loopargs.json"
 
     @property
-    def restart_lock_file(self) -> Path:
-        """Held while a supervisor handoff is in progress.
-
-        Two concurrent ``operator restart-loop`` runs would both retire the
-        old supervisor and both spawn a replacement, leaving two supervisors
-        fighting over one session — each relaunching what the other killed.
-        """
-        return RESTART_DIR / f"{self.id}.restartlock"
-
-    @property
-    def detach_marker(self) -> Path:
-        """Touched to ask a running loop supervisor to exit but leave the
-        Copilot session running (``operator stop-loop``)."""
-        return RESTART_DIR / f"{self.id}.detach"
-
-    @property
     def stop_marker(self) -> Path:
         """Touched to ask a running loop supervisor to shut down *and* stop
         the Copilot session, without racing a relaunch (``operator stop``)."""
@@ -249,9 +233,8 @@ class Instance:
         for path in (self.restart_marker, self.managed_file, self.spec_file,
                      self.pid_file, self.exit_file, self.session_file,
                      self.loop_pid_file, self.loop_startup_file,
-                     self.detach_marker, self.stop_marker,
-                     self.loop_args_file,
-                     self.restart_lock_file):
+                     self.stop_marker,
+                     self.loop_args_file):
             remove_file(path)
 
 

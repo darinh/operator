@@ -61,7 +61,7 @@ def test_a_new_kernel_module_absent_from_the_op_shim_fails():
 
 def test_a_kernel_module_already_in_the_shim_passes():
     ok, _detail = preflight.kernel_modules_are_bound(
-        ["operator_kernel/process_tree.py"])
+        ["operator_kernel/process_identity.py"])
     assert ok is True
 
 
@@ -342,7 +342,7 @@ def test_an_unreadable_op_shim_is_not_a_bound_module(monkeypatch):
     monkeypatch.setattr(preflight.Path, "read_text",
                         lambda self, **kw: (_ for _ in ()).throw(OSError("nope")))
     ok, detail = preflight.kernel_modules_are_bound(
-        ["operator_kernel/process_tree.py"])
+        ["operator_kernel/process_identity.py"])
     assert ok is False
     assert "nothing is established" in detail
 
@@ -436,7 +436,7 @@ def test_an_unparseable_shim_establishes_nothing(monkeypatch):
     monkeypatch.setattr(preflight.Path, "read_text",
                         lambda self, **kw: "def broken(:\n")
     ok, detail = preflight.kernel_modules_are_bound(
-        ["operator_kernel/process_tree.py"])
+        ["operator_kernel/process_identity.py"])
     assert ok is False
     assert "nothing is established" in detail
 

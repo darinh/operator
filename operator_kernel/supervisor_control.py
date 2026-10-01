@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -13,13 +12,11 @@ import hashlib
 import sqlite3
 import signal
 import contextlib
-import ntpath
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from presence import path_present
 import instance
-from process_tree import ancestry
 
 from config import (LOG_FILE, METRICS_GRACE_SECONDS, MUX, POLL_INTERVAL, SESSION_ID_WAIT, SUPERVISOR_STARTUP_ALLOWANCE)
 from presence import dir_present, entry, path_present
@@ -84,50 +81,6 @@ def _request_supervisor_stop(instance: Instance,
         remove_file(instance.stop_marker)
 
 
-def _own_instance_id() -> "str | None":
-    """The instance whose Copilot session this process is running inside.
-
-    ``None`` when that cannot be established, which is the answer for a human
-    at a terminal and for any process table that could not be read.
-
-    Established by walking our own ancestry and matching it against the Copilot
-    pid each instance recorded. The match requires the *ancestor's own name* to
-    look like Copilot as well, and that is not belt and braces: pids are
-    recycled, and every ancestry contains long-lived shells and multiplexers
-    whose pids a dead session's record could collide with. A pid-only test made
-    that collision decide which row is called "this session's own".
-
-    Both directions of a wrong answer are bounded, and they are not equally
-    bounded, which is why the name check is here. A wrong ``None`` costs only
-    the ordering -- the sweep still restarts everything. A wrong *positive*
-    costs more: the instance falsely identified is deferred, and the real one
-    is left near the front where a catastrophic restart can take this process
-    down before it has reported on the rest. It also prints "this session's own
-    supervisor" against somebody else's name.
-    """
-    chain = ancestry()
-    if not chain:
-        return None
-    mine = {}
-    for entry in chain:
-        pid = entry.get("pid")
-        if pid:
-            mine[pid] = ntpath.basename(entry.get("name") or "").lower()
-    own = ntpath.basename(sys.executable or "").lower()
-    mine.setdefault(os.getpid(), own)
-    for ident, meta in managed_instances().items():
-        inst = Instance(meta.get("display_name", ident))
-        pid = inst.copilot_pid()
-        if pid is None or pid not in mine:
-            continue
-        if not mine[pid].startswith("copilot"):
-            # The pid matches an ancestor that is not Copilot, so the record
-            # names a process that has died and had its number reissued.
-            continue
-        return inst.id
-    return None
-
-
 def recoverable_instances() -> list[Instance]:
     """Seats that were being supervised when something stopped them un-cleanly.
 
@@ -161,12 +114,10 @@ def recoverable_instances() -> list[Instance]:
 def recover_loop(instance: Instance) -> int:
     """Start a supervisor for a seat whose machine went down under it.
 
-    Not `--adopt`: adoption joins a session that is still running, and there is
-    none. Not `--fresh` either, and that is the point of the command -- fresh
-    means forget the previous run, which would restart the session numbering,
-    discard the resume id and re-arm the breakers that were counting. The seat
-    continues: same run, next session, its journal and handoff exactly where it
-    left them.
+    Not ``--fresh``. Fresh means forget the previous run, which would restart
+    the session numbering, discard the resume id and re-arm the breakers that
+    were counting. The seat continues: same run, next session, its journal and
+    handoff exactly where it left them.
     """
     target = instance.display_name
     user_args, recorded_cwd = _load_loop_args(instance)
@@ -187,7 +138,7 @@ def recover_loop(instance: Instance) -> int:
         return 1
     try:
         _spawn_background_loop(instance, user_args, is_fresh=False,
-                               adopt=False, cwd=recorded_cwd)
+                               cwd=recorded_cwd)
     except OSError as exc:
         print(f"Could not start a supervisor for '{target}': {exc}",
               file=sys.stderr)

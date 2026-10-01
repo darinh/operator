@@ -491,36 +491,6 @@ def test_a_session_that_ran_for_minutes_does_not_count_toward_the_give_up_limit(
     assert attempts["n"] == keep_going + 1
 
 
-def test_detach_marker_leaves_session_running(monkeypatch):
-    """`operator stop-loop NAME` (a touched detach marker) must stop the
-    supervisor without touching the session or calling stop_session_gracefully."""
-    calls = {"start": 0, "stop_gracefully": 0}
-    session_live = {"v": False}
-
-    def start(instance, args, session_num, remain_on_exit=False, preamble=""):
-        calls["start"] += 1
-        instance.session_file.write_text(
-            "11111111-2222-3333-4444-555555555555", encoding="utf-8")
-        instance.detach_marker.touch()
-        session_live["v"] = True
-
-    def fake_stop_gracefully(instance):
-        calls["stop_gracefully"] += 1
-
-    monkeypatch.setattr(op, "start_session", start)
-    monkeypatch.setattr(op, "stop_session_gracefully", fake_stop_gracefully)
-    monkeypatch.setattr(op.MUX, "has_session", lambda session: session_live["v"])
-    monkeypatch.setattr(op.MUX, "pane_dead", lambda session: False)
-
-    inst = op.Instance("detach-me")
-    rc = op.run_loop_mode(inst, ["--agent", "test:agent"], is_fresh=True)
-
-    assert rc == 0
-    assert calls["stop_gracefully"] == 0, "detach must not stop the session"
-    assert not inst.detach_marker.exists()
-    assert not inst.loop_pid_file.exists()
-
-
 def test_stop_marker_stops_session_and_supervisor(monkeypatch):
     """`operator stop NAME` (a touched stop marker) must stop both the
     supervisor and the session."""
@@ -551,70 +521,3 @@ def test_stop_marker_stops_session_and_supervisor(monkeypatch):
     assert calls["kill_session"] == 1
     assert not inst.stop_marker.exists()
     assert not inst.loop_pid_file.exists()
-
-
-
-
-# -- the handoff is keyed by instance ---------------------------
-#
-# `crash_recovery_verdict` is exercised above through `run_loop_mode` with
-# `project_handoff_file` stubbed out, which is the right shape for testing the
-# loop and the wrong one for testing where the handoff is looked for. These
-# call it directly against a real catalog so the path it builds is part of what
-# is asserted.
-def _catalog(monkeypatch, tmp_path, guid="guid-cr"):
-    projects = tmp_path / "projects"
-    (projects / guid).mkdir(parents=True)
-    project = tmp_path / "checkout"
-    project.mkdir()
-    (projects / "catalog.csv").write_text(
-        f'"{project.resolve()}",{guid}\n', encoding="utf-8")
-    monkeypatch.setattr(op, "projects_root", lambda: projects)
-    monkeypatch.setattr(op, "project_dir", lambda g: projects / g)
-    return project, projects / guid
-
-
-def test_a_peers_handoff_does_not_answer_for_this_instance(monkeypatch, tmp_path):
-    """The bug the re-key removes, asserted on the reader's side.
-
-    Under project keying a peer's handoff sat at the one path this consulted,
-    so this instance was told its predecessor had ended cleanly on the strength
-    of a document written by somebody else. Keyed by instance, a peer's file is
-    not an answer about this instance at all.
-    """
-    project, proj_dir = _catalog(monkeypatch, tmp_path)
-    (proj_dir / "handoff").mkdir()
-    (proj_dir / "handoff" / "peer-y.md").write_text("# handoff", encoding="utf-8")
-
-    assert op.crash_recovery_verdict(project, "peer-x") is True
-
-
-def test_this_instances_own_handoff_answers_for_it(monkeypatch, tmp_path):
-    """The other half. Without it the assertion above would also pass against
-    a verdict that reported a crash unconditionally."""
-    project, proj_dir = _catalog(monkeypatch, tmp_path)
-    (proj_dir / "handoff").mkdir()
-    (proj_dir / "handoff" / "peer-x.md").write_text("# handoff", encoding="utf-8")
-
-    assert op.crash_recovery_verdict(project, "peer-x") is False
-
-
-def test_an_unmigrated_handoff_is_not_reported_as_a_crash(monkeypatch, tmp_path):
-    """Migration happens on the next write, so there is a real window in which
-    the instance file does not exist and a genuine handoff sits beside it.
-
-    Reporting that as a crash would tell the agent its predecessor died in the
-    one situation where the predecessor demonstrably did not -- and it would do
-    so for every project on the machine, once, on the first session after this
-    change ships.
-    """
-    project, proj_dir = _catalog(monkeypatch, tmp_path)
-    (proj_dir / "next-session.md").write_text("# handoff", encoding="utf-8")
-
-    assert op.crash_recovery_verdict(project, "peer-x") is False
-
-
-def test_nothing_anywhere_is_still_a_crash(monkeypatch, tmp_path):
-    """The fallback must not swallow the verdict it was added beside."""
-    project, _ = _catalog(monkeypatch, tmp_path)
-    assert op.crash_recovery_verdict(project, "peer-x") is True

@@ -129,9 +129,9 @@ def spawned(monkeypatch):
     calls = []
     monkeypatch.setattr(
         op.supervisor_control, "_spawn_background_loop",
-        lambda inst, args, is_fresh, adopt=False, cwd=None: calls.append(
+        lambda inst, args, is_fresh, cwd=None: calls.append(
             {"name": inst.display_name, "args": args, "fresh": is_fresh,
-             "adopt": adopt, "cwd": cwd}) or 4242)
+             "cwd": cwd}) or 4242)
     return calls
 
 
@@ -143,15 +143,6 @@ def test_recovering_continues_the_run_rather_than_starting_a_new_one(
     inst = _crashed("continues", home / "work")
     assert recover_loop(inst) == 0
     assert spawned[0]["fresh"] is False
-
-
-def test_recovering_does_not_adopt(home, spawned):
-    """Adoption joins a session that is still running, and after a crash there
-    is none. Adopting nothing refuses, so a supervisor spawned with it would
-    die on startup."""
-    inst = _crashed("no-adopt", home / "work")
-    recover_loop(inst)
-    assert spawned[0]["adopt"] is False
 
 
 def test_the_seat_is_recovered_where_it_was_working(home, spawned):
@@ -253,7 +244,3 @@ def test_launch_status_ignores_the_parents_startup_record(monkeypatch):
     assert launch_status(op.Instance("alpha"), 99, timeout=0) == ("dead", 99)
 
 
-def test_own_instance_is_unknown_when_ancestry_cannot_be_read(monkeypatch):
-    import supervisor_control as sc
-    monkeypatch.setattr(sc, "ancestry", lambda: None)
-    assert sc._own_instance_id() is None

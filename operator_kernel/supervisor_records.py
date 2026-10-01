@@ -54,9 +54,7 @@ def _load_loop_args(instance: Instance) -> tuple[list[str], str | None]:
     return args, cwd if isinstance(cwd, str) else None
 
 
-def _publish_supervisor_records(instance: Instance, user_args: list[str],
-                                adopted: bool = False,
-                                began_run: bool = True) -> None:
+def _publish_supervisor_records(instance: Instance, user_args: list[str]) -> None:
     """Write this supervisor's startup records, pid file last.
 
     The order is the point, which is why these three writes live in one named
