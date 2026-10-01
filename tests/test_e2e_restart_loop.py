@@ -76,7 +76,7 @@ def test_the_home_is_set_before_the_kernel_is_imported():
     """The positive half: `main` does set it, and sets it first."""
     source = HARNESS.read_text(encoding="utf-8")
     set_at = source.index('os.environ["COPILOT_OPERATOR_HOME"]')
-    import_at = source.index("from operator_cli.fleet import _bootstrap")
+    import_at = source.index("from operator_cli.home import _bootstrap")
     assert set_at < import_at, (
         "the kernel is imported before the operator home is exported")
 

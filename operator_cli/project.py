@@ -15,7 +15,7 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from .fleet import _bootstrap
+from .home import _bootstrap
 
 
 def _rows(catalog: Path) -> "list[tuple[str, str]] | None":

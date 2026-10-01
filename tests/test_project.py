@@ -232,3 +232,8 @@ def test_project_without_a_subcommand_is_usage(capsys):
     err = capsys.readouterr().err.lower()
     assert "usage:" in err
     assert "register" in err
+
+
+def test_project_bootstraps_from_the_shared_home_helper():
+    from operator_cli import home, project
+    assert project._bootstrap is home._bootstrap

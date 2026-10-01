@@ -239,3 +239,8 @@ def test_the_instance_name_is_not_passed_on_to_copilot():
     _, args, _, _ = supervise.parse(
         ["--_supervise", "--loop", "--name", "seat", "--agent", "a"])
     assert "seat" not in args and "--name" not in args
+
+
+def test_supervise_bootstraps_from_the_shared_home_helper():
+    from operator_cli import home
+    assert supervise._bootstrap is home._bootstrap

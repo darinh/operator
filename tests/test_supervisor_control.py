@@ -259,3 +259,9 @@ def test_launch_status_ignores_the_parents_startup_record(monkeypatch):
     monkeypatch.setattr(sc, "_running_loop_pid", lambda inst: None)
     monkeypatch.setattr(sc, "_supervisor_present", lambda inst: True)
     assert launch_status(op.Instance("alpha"), 99, timeout=0) == ("dead", 99)
+
+
+def test_own_instance_is_unknown_when_ancestry_cannot_be_read(monkeypatch):
+    import supervisor_control as sc
+    monkeypatch.setattr(sc, "ancestry", lambda: None)
+    assert sc._own_instance_id() is None

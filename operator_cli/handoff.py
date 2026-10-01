@@ -12,7 +12,7 @@ from pathlib import Path
 
 from operator_kernel.argtail import at_dashdash
 
-from .fleet import _bootstrap
+from .home import _bootstrap
 
 #: Takes a value. A switch listed here would swallow the token after it.
 VALUE_FLAGS = ("--instance", "--status", "--next", "--context")

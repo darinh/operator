@@ -19,7 +19,7 @@ from operator_kernel.argtail import at_dashdash
 
 from . import argv as _argv
 from . import ext, fleet, handoff, project, recover, seat, verbs
-from .fleet import _bootstrap, _home, _settle_home
+from .home import _bootstrap, _home, _settle_home
 
 
 from .verbs import VERBS, menu_items  # noqa: F401

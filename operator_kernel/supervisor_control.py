@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from presence import path_present
 import instance
-import evidence
+from process_tree import ancestry
 
 from config import (LOG_FILE, METRICS_GRACE_SECONDS, MUX, POLL_INTERVAL, SESSION_ID_WAIT, SUPERVISOR_STARTUP_ALLOWANCE)
 from presence import dir_present, entry, path_present
@@ -166,7 +166,7 @@ def _own_instance_id() -> "str | None":
     down before it has reported on the rest. It also prints "this session's own
     supervisor" against somebody else's name.
     """
-    chain = evidence.ancestry()
+    chain = ancestry()
     if not chain:
         return None
     mine = {}

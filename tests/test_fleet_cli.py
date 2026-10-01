@@ -321,3 +321,9 @@ def test_a_real_extension_reaches_the_queue_through_a_real_worker(
     assert queued(home) == []
     archived = (home / "proposals.handled.jsonl").read_text(encoding="utf-8")
     assert "landed" in archived
+
+
+def test_fleet_reexports_the_shared_home_helpers():
+    from operator_cli import home
+    assert cli._home is home._home
+    assert cli._settle_home is home._settle_home

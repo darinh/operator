@@ -167,3 +167,9 @@ def test_the_home_is_settled_before_the_kernel_resolves_it(tmp_path):
              and not ln.strip().startswith(("Bring", "Or one"))]
     assert lines == ["planted"], (
         f"the command listed seats from another home entirely: {lines}")
+
+
+def test_recover_bootstraps_from_the_shared_home_helper():
+    from operator_cli import home, recover
+    assert recover._bootstrap is home._bootstrap
+    assert recover._settle_home is home._settle_home
