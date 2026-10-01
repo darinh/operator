@@ -113,3 +113,13 @@ def test_resume_is_threaded_through_before_terminator():
     assert 'launch_args.append(f"--resume' not in source
 
 
+def test_the_loop_takes_a_fresh_flag_and_nothing_beside_it():
+    """A fourth mode flag used to mean take over a live session. The spawn
+    list is the contract the child parser still has to accept."""
+    import inspect
+    assert tuple(inspect.signature(op.run_loop_mode).parameters) == (
+        "instance", "user_args", "is_fresh")
+    assert tuple(inspect.signature(op._spawn_background_loop).parameters) == (
+        "instance", "copilot_args", "is_fresh", "cwd")
+
+

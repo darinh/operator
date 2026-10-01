@@ -31,10 +31,10 @@ from .home import _bootstrap
 _IGNORED = ("--_supervise", "--loop", "--headless", "--detached")
 
 
-def parse(args: "list[str]") -> "tuple[str, list[str], bool, bool]":
-    """Returns (name, copilot_args, is_fresh, adopt)."""
+def parse(args: "list[str]") -> "tuple[str, list[str], bool]":
+    """Returns (name, copilot_args, is_fresh)."""
     options, literal = at_dashdash(args)
-    name, rest, fresh, adopt = "", [], False, False
+    name, rest, fresh = "", [], False
     i = 0
     while i < len(options):
         arg = options[i]
@@ -42,8 +42,6 @@ def parse(args: "list[str]") -> "tuple[str, list[str], bool, bool]":
             pass
         elif arg == "--fresh":
             fresh = True
-        elif arg == "--adopt":
-            adopt = True
         elif arg == "--name":
             if i + 1 >= len(options) or not options[i + 1].strip():
                 raise SystemExit("--name requires a value")
@@ -57,7 +55,7 @@ def parse(args: "list[str]") -> "tuple[str, list[str], bool, bool]":
             rest.append(arg)
         i += 1
     rest.extend(literal)
-    return name, rest, fresh, adopt
+    return name, rest, fresh
 
 
 def main(argv: "list[str] | None" = None) -> int:
@@ -67,13 +65,13 @@ def main(argv: "list[str] | None" = None) -> int:
               "not a command.", file=sys.stderr)
         print("  It is spawned for you by `operator start`.", file=sys.stderr)
         return 2
-    name, copilot_args, is_fresh, adopt = parse(args)
+    name, copilot_args, is_fresh = parse(args)
     if not name:
         raise SystemExit("--name is required")
     _bootstrap()
     from instance import Instance
     from supervisor import run_loop_mode
-    return run_loop_mode(Instance(name), copilot_args, is_fresh, adopt=adopt)
+    return run_loop_mode(Instance(name), copilot_args, is_fresh)
 
 
 if __name__ == "__main__":  # pragma: no cover - exercised through main()

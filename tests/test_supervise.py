@@ -60,9 +60,9 @@ def test_the_entry_point_reaches_the_supervision_loop(home, monkeypatch):
 
     seen = {}
 
-    def record(instance, user_args, is_fresh, adopt=False):
+    def record(instance, user_args, is_fresh):
         seen.update(name=instance.display_name, args=user_args,
-                    fresh=is_fresh, adopt=adopt)
+                    fresh=is_fresh)
         return 0
 
     monkeypatch.setattr(supervisor, "run_loop_mode", record)
@@ -76,18 +76,17 @@ def test_the_entry_point_reaches_the_supervision_loop(home, monkeypatch):
 
 
 def test_parse_keeps_the_parent_name_when_the_tail_looks_like_flags():
-    name, rest, fresh, adopt = supervise.parse([
+    name, rest, fresh = supervise.parse([
         "--_supervise", "--loop", "--name", "alpha",
         "--", "--name=beta", "some text",
     ])
     assert name == "alpha"
     assert rest == ["--", "--name=beta", "some text"]
     assert fresh is False
-    assert adopt is False
 
 
 def test_parse_does_not_take_fresh_from_the_tail():
-    name, rest, fresh, adopt = supervise.parse([
+    name, rest, fresh = supervise.parse([
         "--_supervise", "--loop", "--name", "alpha", "--", "--fresh",
     ])
     assert name == "alpha"
@@ -100,9 +99,9 @@ def test_main_uses_the_spawner_argv_and_ignores_a_name_in_the_tail(
     import supervisor
     seen = {}
 
-    def record(instance, user_args, is_fresh, adopt=False):
+    def record(instance, user_args, is_fresh):
         seen.update(name=instance.display_name, args=list(user_args),
-                    fresh=is_fresh, adopt=adopt)
+                    fresh=is_fresh)
         return 0
 
     monkeypatch.setattr(supervisor, "run_loop_mode", record)
@@ -126,16 +125,16 @@ def test_the_module_is_runnable_as_a_script():
         "it starts will exit 0 having done nothing")
 
 
-def test_fresh_and_adopt_reach_the_loop(home, monkeypatch):
-    """`restart_loop` sets `--adopt`; a supervisor that dropped it would
-    relaunch over the session it was supposed to take over."""
+def test_fresh_reaches_the_loop(home, monkeypatch):
+    """`--fresh` has to arrive at the loop. A flag the entry point dropped
+    would be handed to Copilot instead."""
     import supervisor
 
     seen = {}
     monkeypatch.setattr(supervisor, "run_loop_mode",
-                        lambda i, a, f, adopt=False: seen.update(fresh=f, adopt=adopt))
-    supervise.main(["--_supervise", "--loop", "--name", "x", "--fresh", "--adopt"])
-    assert seen == {"fresh": True, "adopt": True}
+                        lambda i, a, f: seen.update(fresh=f))
+    supervise.main(["--_supervise", "--loop", "--name", "x", "--fresh"])
+    assert seen == {"fresh": True}
 
 
 def test_the_exit_code_of_the_loop_is_the_exit_code_of_the_process(home,
@@ -162,9 +161,9 @@ def test_the_arguments_the_spawner_sends_are_the_ones_this_accepts():
     source = inspect.getsource(supervisor._spawn_background_loop)
     assert "operator_cli.supervise" in source, (
         "the spawner no longer launches this module; this test is stale")
-    for flag in ("--_supervise", "--loop", "--fresh", "--adopt"):
+    for flag in ("--_supervise", "--loop", "--fresh"):
         assert flag in source, f"{flag} is no longer sent by the spawner"
-        _, passed_on, _, _ = supervise.parse(["--_supervise", "--name", "x", flag])
+        _, passed_on, _ = supervise.parse(["--_supervise", "--name", "x", flag])
         assert flag not in passed_on, (
             f"{flag} was passed through to Copilot instead of being handled")
     assert '"--name", instance.display_name' in source, (
@@ -210,13 +209,13 @@ def test_an_unusable_name_is_refused(argv, home):
 def test_the_name_is_read_from_either_spelling():
     for argv in (["--_supervise", "--name", "seat"],
                  ["--_supervise", "--name=seat"]):
-        name, _, _, _ = supervise.parse(argv)
+        name, _, _ = supervise.parse(argv)
         assert name == "seat", argv
 
 
-def test_they_are_off_unless_asked_for():
-    _, _, fresh, adopt = supervise.parse(["--_supervise", "--name", "x"])
-    assert not fresh and not adopt
+def test_fresh_is_off_unless_asked_for():
+    _, _, fresh = supervise.parse(["--_supervise", "--name", "x"])
+    assert not fresh
 
 
 def test_everything_else_is_passed_through_untouched():
@@ -225,7 +224,7 @@ def test_everything_else_is_passed_through_untouched():
     argparse would refuse them, and the flags it would collide with are not
     ours to rename.
     """
-    _, args, _, _ = supervise.parse(
+    _, args, _ = supervise.parse(
         ["--_supervise", "--loop", "--name", "x",
          "--agent", "test:agent", "--effort", "high", "--weird-future-flag"])
     assert args == ["--agent", "test:agent", "--effort", "high",
@@ -234,7 +233,7 @@ def test_everything_else_is_passed_through_untouched():
 
 def test_the_instance_name_is_not_passed_on_to_copilot():
     """It is addressed to the supervisor, and Copilot would reject it."""
-    _, args, _, _ = supervise.parse(
+    _, args, _ = supervise.parse(
         ["--_supervise", "--loop", "--name", "seat", "--agent", "a"])
     assert "seat" not in args and "--name" not in args
 

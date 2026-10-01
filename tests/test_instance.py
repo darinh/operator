@@ -32,3 +32,19 @@ def test_the_marker_for_a_sanitised_id_is_the_one_the_supervisor_polls():
     assert op.restart_marker_for(seat.id) == seat.restart_marker
     assert op.restart_marker_for(seat.id).name == seat.id
     assert op.Instance(seat.id).restart_marker != seat.restart_marker
+
+
+def test_cleanup_removes_only_the_files_a_live_seat_still_owns(tmp_path, monkeypatch):
+    """The cut left stop as the only shutdown file. A property added back
+    would survive cleanup and keep a dead seat looking owned."""
+    monkeypatch.setattr(op, "RESTART_DIR", tmp_path)
+    seat = op.Instance("alpha")
+    owned = (
+        seat.restart_marker, seat.managed_file, seat.spec_file, seat.pid_file,
+        seat.exit_file, seat.session_file, seat.loop_pid_file,
+        seat.loop_startup_file, seat.stop_marker, seat.loop_args_file,
+    )
+    for path in owned:
+        path.write_text("x", encoding="utf-8")
+    seat.cleanup_files()
+    assert not any(path.exists() for path in owned)

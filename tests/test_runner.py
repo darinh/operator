@@ -127,9 +127,8 @@ def test_the_exit_marker_is_never_observable_empty(tmp_path, monkeypatch):
     """A marker that exists but is empty is read two different ways.
 
     `is_copilot_running` treats presence alone as authoritative and reports
-    the session over; `read_exit_code` parses an empty file as None, which
-    `ending_was_observed` reads as "nobody saw this end" -- the signature of
-    an externally killed pane. A supervisor polling into the window between
+    the session over; an empty file means nobody saw the process end, the
+    signature of an externally killed pane. A supervisor polling into the window between
     `write_text`'s truncate and its write would file a clean exit as an
     unexplained kill, which is the exact misclassification this whole change
     exists to remove.

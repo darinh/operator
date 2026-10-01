@@ -179,7 +179,7 @@ def _process_parents_posix() -> dict[int, int]:
     return parents
 
 
-def _process_tree(root_pid: int) -> set[int]:
+def _descendant_pids(root_pid: int) -> set[int]:
     """The root pid plus every descendant currently alive.
 
     Needed because ``Popen.pid`` is not always the process that ends up writing
@@ -414,9 +414,8 @@ def _publish_exit_code(exit_file: Path, code: int) -> None:
     instant where the marker *exists and is empty*. The two readers disagree
     about what that means and the disagreement is exactly the misclassification
     this file exists to prevent: `copilot_operator.is_copilot_running` treats
-    presence alone as authoritative and reports the session ended, while
-    `read_exit_code` parses an empty file as ``None``, which
-    `ending_was_observed` reads as "nobody saw this end" -- the signature of an
+    presence alone as authoritative and reports the session ended, while an
+    empty file means nobody saw the process end, the signature of an
     externally killed pane. A supervisor polling into that window would file a
     clean exit as an unexplained kill.
 
@@ -500,7 +499,7 @@ def run(spec_path: Path) -> int:
     # Snapshot the process tree immediately: if the launcher is a shim it
     # re-execs the real binary as a child, and a short-lived process would
     # otherwise vanish before we could learn its pid.
-    candidate_pids: set[int] = _process_tree(proc.pid)
+    candidate_pids: set[int] = _descendant_pids(proc.pid)
 
     # Pin the log file while the tree is still alive, and pick up the CLI
     # session id so the operator can resume it later.
@@ -517,7 +516,7 @@ def run(spec_path: Path) -> int:
         now = time.time()
         alive = proc.poll() is None
         if alive or now < settle_until:
-            candidate_pids |= _process_tree(proc.pid)
+            candidate_pids |= _descendant_pids(proc.pid)
 
         if pinned is None:
             pinned = _find_log(log_dir, candidate_pids, started_ms)

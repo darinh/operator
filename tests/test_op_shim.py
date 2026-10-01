@@ -133,9 +133,9 @@ def test_the_stray_module_detector_accepts_a_module_from_each_root():
     the second package's modules unbindable.
     """
     assert op.is_repo_module(op.config) is True
-    assert op.is_repo_module(op.process_tree) is True
+    assert op.is_repo_module(op.exits) is True
     assert Path(op.config.__file__).resolve().parent == KERNEL
-    assert Path(op.process_tree.__file__).resolve().parent == KERNEL
+    assert Path(op.exits.__file__).resolve().parent == KERNEL
 
 
 def test_the_stray_module_detector_refuses_a_module_with_no_file():
@@ -187,7 +187,7 @@ def test_the_renamed_trace_module_has_what_its_callers_ask_for():
     but an alias pointing at some other real kernel module would pass it while
     still being wrong, and the tests using it would fail somewhere far away.
     """
-    assert hasattr(op.process_tree, "ancestry")
+    assert hasattr(op.exits, "handoff_state")
 
 
 def _source_modules_binding(name: str) -> set[str]:

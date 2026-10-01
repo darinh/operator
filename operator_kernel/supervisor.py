@@ -21,34 +21,25 @@ from launch import (args_have_explicit_session, extract_agent_from_args,
                     with_experimental)
 from mux import MuxError
 from preamble import build_preamble
-from probes import die, log, marker_set, marker_state, remove_file, utcnow
+from probes import log, marker_set, marker_state, remove_file, utcnow
 from session_state import is_copilot_running, stop_session_gracefully
 from supervisor_records import (_publish_supervisor_records,
-                                _record_supervisor_starting, _running_loop_pid)
+                                _record_supervisor_starting)
 
 
-def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
-                  adopt: bool = False) -> int:
-    """Supervise an instance, restarting Copilot until asked to stop.
-
-    ``adopt`` takes over a session that is already running instead of
-    launching one. That is what lets a supervisor be replaced — to pick up new
-    operator code, say — without disturbing the Copilot session it was
-    watching. Everything after the initial launch is identical either way.
-    """
+def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool) -> int:
+    """Supervise an instance, restarting Copilot until asked to stop."""
     # First act, before any work: the pid the spawning parent recorded may be
     # a launcher shim that has already exited, and only this process knows
     # the pid that will still be alive in a second's time. Overwriting also
     # refreshes the record's mtime, so a supervisor that crashes later in
     # startup stops being believed promptly rather than for the full grace.
     _record_supervisor_starting(instance, os.getpid())
-    # Registered rather than left to the `finally` below, because the two
-    # startup checks that can end this process -- adoption refusing a session
-    # it does not own, and refusing to be a second supervisor -- both call
-    # `die()` before that `try` is entered. Without this, a supervisor that
-    # correctly refused to start would leave a record making every caller
-    # wait out `SUPERVISOR_STARTUP_GRACE` for a process that is already gone,
-    # so the obvious retry of `operator restart-loop` would refuse for 30s.
+    # Registered rather than left to the `finally` below, because refusing a
+    # session this operator does not own calls `die()` before that `try` is
+    # entered. Without this, a supervisor that correctly refused to start
+    # would leave a record making every caller wait out
+    # `SUPERVISOR_STARTUP_GRACE` for a process that is already gone.
     atexit.register(remove_file, instance.loop_startup_file)
     copilot_args = with_experimental(
         ["--yolo", "--autopilot", "--no-ask-user", "--effort", "high"])
@@ -61,35 +52,21 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
 
     start_session_num = 1
     run_started = utcnow()
-    # Whether *this* supervisor is the one that began the run, recorded rather
-    # than later inferred from how far apart two timestamps are. It is only
-    # knowable here, and knowing it exactly is what lets `supervisor_took_over`
-    # stop guessing -- see `SUPERVISOR_RESTART_MARGIN`, which is the fallback
-    # for supervisors that predate this stamp.
-    began_run = True
     resume_id = ""
     if not is_fresh:
         state = instance.load_state()
         if state:
-            # Adoption joins the session that is already running, so it keeps
-            # that session's number. Only a launch moves to the next one.
-            start_session_num = int(state.get("SESSION_NUM", 0) or 0) + (0 if adopt else 1)
-            if "RUN_STARTED" in state:
-                began_run = False
+            start_session_num = int(state.get("SESSION_NUM", 0) or 0) + 1
             run_started = state.get("RUN_STARTED", run_started)
             candidate = state.get("COPILOT_SESSION_ID", "")
             if UUID_RE.match(candidate or ""):
                 resume_id = candidate
                 log(f"  Will resume Copilot CLI session: {resume_id}")
             log(f"Continuing from session #{start_session_num} (run started {run_started})")
-    if adopt:
-        start_session_num = max(1, start_session_num)
-        # Nothing is being launched, so there is nothing to resume into.
-        resume_id = ""
 
     # Whether the *previous* session left a handoff behind is a question about
     # a moment, so it is re-asked before every launch rather than answered once
-    # here. See `crash_recovery_verdict`. What is fixed for the whole run is
+    # here. What is fixed for the whole run is
     # only whether there *was* a predecessor to ask about: at loop start that
     # is exactly "we are continuing an earlier run", and every session this
     # supervisor watches end adds one thereafter.
@@ -102,38 +79,7 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
     # resume into it.
     had_predecessor = bool(resume_id) or start_session_num > 1
 
-    if adopt:
-        # Refuse to "adopt" anything we do not own or that is not there: the
-        # supervisor would otherwise sit polling a session it cannot manage,
-        # or immediately relaunch over somebody else's.
-        if not MUX.has_session(instance.session):
-            die(f"No running session '{instance.display_name}' to adopt.")
-        if not instance.owns_live_session():
-            die(f"A session named '{instance.session}' is running but was not "
-                f"started by this operator. Refusing to adopt it.\n"
-                f"Refusing to adopt it.")
-        # Last line of defence against two supervisors watching one session:
-        # they would relaunch over each other's sessions indefinitely. The
-        # handoff lock makes this unlikely; this makes it survivable.
-        #
-        # `_running_loop_pid` and not `_supervisor_present`, but not because
-        # the wider reader would be wrong here -- because by this point it
-        # would answer the same thing. This process overwrote the startup
-        # record with its own pid as its first act, so the record can only
-        # name *us*, and a check against it can never fire. What catches a
-        # peer that is merely starting is the spawning caller
-        # (`restart_loop`, `start_and_attach_loop`, `start_loop_headless`),
-        # which consults `_supervisor_present` before deciding to spawn at
-        # all. If that claim ever moved to after this guard, the wider reader
-        # here would start seeing the record the *parent* wrote for this very
-        # child -- a launcher shim's pid on Windows -- and every supervisor
-        # would refuse to start itself, on one platform only.
-        other = _running_loop_pid(instance)
-        if other is not None and other != os.getpid():
-            die(f"Another loop supervisor (pid {other}) is already running for "
-                f"'{instance.display_name}'. Refusing to start a second one.")
-    else:
-        handle_existing_session(instance)
+    handle_existing_session(instance)
 
     shutdown = {"requested": False}
 
@@ -149,15 +95,13 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
         """Sleep in slices so a stop request is noticed promptly.
 
         The handler sets a flag rather than raising, so a single long sleep
-        would delay Ctrl+C by up to a full poll interval. Both markers end the
-        sleep too: every caller re-reads them straight after, so a sleep that
-        ignored them was a human waiting for nothing -- up to `HELD_PAUSE_CAP`
-        of it once an extension could hold a launch.
+        would delay Ctrl+C by up to a full poll interval. The stop marker ends
+        the sleep too: every caller re-reads it straight after, so a sleep that
+        ignored it was a human waiting for nothing.
         """
         end = time.time() + total
         while time.time() < end:
-            if (shutdown["requested"] or marker_set(instance.stop_marker)
-                    or marker_set(instance.detach_marker)):
+            if shutdown["requested"] or marker_set(instance.stop_marker):
                 return
             time.sleep(min(0.25, max(0.0, end - time.time())))
 
@@ -175,102 +119,77 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
     last_launched = 0
     launch_failures = 0
     crash_failures = 0
-    # When the session now being watched went up. None until one is launched
-    # or adopted; used to tell a session that died young from one that ran.
+    # When the session now being watched went up. None until one is launched;
+    # used to tell a session that died young from one that ran.
     session_started_at: float | None = None
     unknown_markers = 0
     resume_id_used = ""
-    adopting = adopt
-    _publish_supervisor_records(instance, user_args, adopted=adopt,
-                                began_run=began_run)
+    _publish_supervisor_records(instance, user_args)
     workdir = Path.cwd()
     try:
         try:
             while session_num <= MAX_SESSIONS:
-                if adopting:
-                    # Take over the session already running: no launch, no
-                    # preamble, no resume. Only the first pass adopts; every
-                    # session after this one is launched normally.
-                    adopting = False
-                    log(f"Session #{session_num}: adopting the running session")
-                    last_launched = session_num
-                    # An adopted session was already up for an unknown time,
-                    # which is strictly longer than nothing. Treating it as
-                    # started now is the conservative reading: it can only
-                    # delay the healthy-uptime reset, never trigger it early.
-                    session_started_at = time.time()
-                else:
-                    if marker_set(instance.stop_marker):
-                        # A stop request that landed while this supervisor was
-                        # still starting. Honoured *before* the launch, not on
-                        # the first poll after it: the harm `operator stop`
-                        # was reported for is not that the supervisor survives
-                        # but that a brand-new agent session gets launched
-                        # under someone who asked for everything to stop, and
-                        # an agent that runs for two seconds can still commit.
-                        remove_file(instance.stop_marker)
-                        log(f"Session #{session_num}: stop requested before "
-                            f"launch — shutting down without starting one")
-                        if MUX.has_session(instance.session):
-                            MUX.kill_session(instance.session)
-                        instance.cleanup_files()
-                        return 0
-                    if marker_set(instance.detach_marker):
-                        # Same for `operator stop-loop` / the retiring half of
-                        # `operator restart-loop`: leave the session alone —
-                        # here there is not even one to leave — and exit, so
-                        # the caller waiting on this supervisor to go is not
-                        # made to wait out a session launch first.
-                        remove_file(instance.detach_marker)
-                        log(f"Session #{session_num}: detach requested before "
-                            f"launch — supervisor exiting")
-                        return 0
+                if marker_set(instance.stop_marker):
+                    # A stop request that landed while this supervisor was
+                    # still starting. Honoured *before* the launch, not on
+                    # the first poll after it: the harm `operator stop`
+                    # was reported for is not that the supervisor survives
+                    # but that a brand-new agent session gets launched
+                    # under someone who asked for everything to stop, and
+                    # an agent that runs for two seconds can still commit.
+                    remove_file(instance.stop_marker)
+                    log(f"Session #{session_num}: stop requested before "
+                        f"launch — shutting down without starting one")
+                    if MUX.has_session(instance.session):
+                        MUX.kill_session(instance.session)
+                    instance.cleanup_files()
+                    return 0
+                if shutdown["requested"]:
+                    raise KeyboardInterrupt
+                launch_args = list(copilot_args)
+                if resume_id:
+                    if args_have_explicit_session(launch_args):
+                        log("  Skipping automatic --resume; user args already choose a session")
+                    else:
+                        launch_args = before_terminator(
+                            launch_args, [f"--resume={resume_id}"])
+                        resume_id_used = resume_id
+                    resume_id = ""
+
+                handoff = handoff_state(workdir, instance.id)
+                launch_preamble = build_preamble(
+                    instance,
+                    crash_recovery=(had_predecessor
+                                    and handoff.verdict == HANDOFF_MISSING),
+                    handoff_waiting=(str(handoff.path)
+                                     if handoff.verdict == HANDOFF_WAITING
+                                     else ""),
+                    handoff_unknown=(handoff.verdict == HANDOFF_UNKNOWN),
+                    handoff_written=handoff.written)
+                instance.save_state(session_num, run_started, resume_id_used)
+                try:
+                    start_session(instance, launch_args, session_num,
+                                  remain_on_exit=True, preamble=launch_preamble)
+                except MuxError as exc:
+                    # A launch failure must not kill an unattended loop. Back off
+                    # and retry the same session number rather than exiting.
+                    launch_failures += 1
+                    log(f"  Launch failed ({exc}) — attempt {launch_failures}")
+                    if launch_failures >= MAX_LAUNCH_FAILURES:
+                        log(f"  Giving up after {launch_failures} consecutive launch failures")
+                        raise
+                    if resume_id_used:
+                        # Put the resume id back so a failed launch does not lose it.
+                        resume_id = resume_id_used
+                    backoff = min(60, LAUNCH_BACKOFF_BASE * launch_failures)
+                    log(f"  Retrying in {backoff}s...")
+                    _sleep(backoff)
                     if shutdown["requested"]:
                         raise KeyboardInterrupt
-                    launch_args = list(copilot_args)
-                    if resume_id:
-                        if args_have_explicit_session(launch_args):
-                            log("  Skipping automatic --resume; user args already choose a session")
-                        else:
-                            launch_args = before_terminator(
-                                launch_args, [f"--resume={resume_id}"])
-                            resume_id_used = resume_id
-                        resume_id = ""
-
-                    handoff = handoff_state(workdir, instance.id)
-                    launch_preamble = build_preamble(
-                        instance,
-                        crash_recovery=(had_predecessor
-                                        and handoff.verdict == HANDOFF_MISSING),
-                        handoff_waiting=(str(handoff.path)
-                                         if handoff.verdict == HANDOFF_WAITING
-                                         else ""),
-                        handoff_unknown=(handoff.verdict == HANDOFF_UNKNOWN),
-                        handoff_written=handoff.written)
-                    instance.save_state(session_num, run_started, resume_id_used)
-                    try:
-                        start_session(instance, launch_args, session_num,
-                                      remain_on_exit=True, preamble=launch_preamble)
-                    except MuxError as exc:
-                        # A launch failure must not kill an unattended loop. Back off
-                        # and retry the same session number rather than exiting.
-                        launch_failures += 1
-                        log(f"  Launch failed ({exc}) — attempt {launch_failures}")
-                        if launch_failures >= MAX_LAUNCH_FAILURES:
-                            log(f"  Giving up after {launch_failures} consecutive launch failures")
-                            raise
-                        if resume_id_used:
-                            # Put the resume id back so a failed launch does not lose it.
-                            resume_id = resume_id_used
-                        backoff = min(60, LAUNCH_BACKOFF_BASE * launch_failures)
-                        log(f"  Retrying in {backoff}s...")
-                        _sleep(backoff)
-                        if shutdown["requested"]:
-                            raise KeyboardInterrupt
-                        continue
-                    resume_id_used = ""
-                    last_launched = session_num
-                    session_started_at = time.time()
+                    continue
+                resume_id_used = ""
+                last_launched = session_num
+                session_started_at = time.time()
 
                 # Record the CLI session id once the runner discovers it.
                 for _ in range(SESSION_ID_WAIT):
@@ -280,12 +199,11 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                         break
                     if not is_copilot_running(instance):
                         break
-                    if marker_set(instance.detach_marker) or marker_set(instance.stop_marker):
-                        # A stop/detach request must not wait out session-id
-                        # discovery: `operator restart-loop` blocks on this
-                        # supervisor exiting, and a session that never reports
-                        # an id would hold it for the full SESSION_ID_WAIT on
-                        # top of the poll interval.
+                    if marker_set(instance.stop_marker):
+                        # A stop request must not wait out session-id
+                        # discovery. A session that never reports an id would
+                        # hold the stop for the full SESSION_ID_WAIT on top of
+                        # the poll interval.
                         break
                     _sleep(1)
                     if shutdown["requested"]:
@@ -318,23 +236,12 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                             MUX.kill_session(instance.session)
                         instance.cleanup_files()
                         return 0
-                    if marker_set(instance.detach_marker):
-                        # `operator stop-loop NAME` asked us to stop supervising
-                        # but leave the session running untouched. Also how
-                        # `operator restart-loop` retires the old supervisor.
-                        remove_file(instance.detach_marker)
-                        sid = instance.read_session_id()
-                        instance.save_state(session_num, run_started, sid)
-                        log(f"Session #{session_num}: detach requested — leaving "
-                            f"session running, supervisor exiting")
-                        return 0
                     _sleep(POLL_INTERVAL)
                     if shutdown["requested"]:
                         raise KeyboardInterrupt
                     if not is_copilot_running(instance):
                         stop_state = marker_state(instance.stop_marker)
-                        detach_state = marker_state(instance.detach_marker)
-                        if stop_state is None or detach_state is None:
+                        if stop_state is None:
                             # The session is gone and we cannot tell whether a
                             # human asked for that. Relaunching would resurrect
                             # a session someone stopped; assuming a stop would
@@ -342,7 +249,7 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
                             # a readable marker settle it.
                             unknown_markers += 1
                             log(f"Session #{session_num}: copilot is not running but "
-                                f"the stop/detach markers cannot be examined "
+                                f"the stop marker cannot be examined "
                                 f"({unknown_markers}/{MAX_LAUNCH_FAILURES}) — "
                                 f"waiting rather than relaunching")
                             if unknown_markers >= MAX_LAUNCH_FAILURES:
@@ -462,8 +369,7 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool,
 
 
 def _spawn_background_loop(instance: Instance, copilot_args: list[str],
-                           is_fresh: bool, adopt: bool = False,
-                           cwd: str | None = None) -> int:
+                           is_fresh: bool, cwd: str | None = None) -> int:
     """Launch the loop supervisor as a detached background OS process.
 
     Re-execs the supervise entry point so the child runs run_loop_mode
@@ -492,8 +398,6 @@ def _spawn_background_loop(instance: Instance, copilot_args: list[str],
            "--_supervise", "--loop", "--name", instance.display_name]
     if is_fresh:
         cmd.append("--fresh")
-    if adopt:
-        cmd.append("--adopt")
     cmd += copilot_args
     kwargs: dict = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL, close_fds=True,
