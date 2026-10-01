@@ -195,6 +195,83 @@ def test_changed_files_distinguishes_no_changes_from_no_answer(monkeypatch):
     assert preflight.changed_files("main") == []
 
 
+def test_removal_only_files_are_the_ones_adding_no_line(monkeypatch):
+    numstat = "0\t120\toperator_kernel/claims.py\n3\t1\toperator_kernel/supervisor.py\n-\t-\tlogo.png\n"
+    monkeypatch.setattr(preflight, "run", lambda *a, **k: (0, numstat))
+    assert preflight.removal_only_files("main") == {"operator_kernel/claims.py"}
+
+
+def test_removal_only_files_is_none_when_git_fails(monkeypatch):
+    monkeypatch.setattr(preflight, "run", lambda *a, **k: (128, "fatal"))
+    assert preflight.removal_only_files("main") is None
+
+
+def test_a_source_that_only_lost_lines_needs_no_test_change():
+    """Deleting a module, or code from one, adds nothing for a test to cover.
+    A source that gained even one line is still held to the rule."""
+    removed = {"operator_kernel/claims.py", "operator_kernel/paths.py"}
+    ok, _detail = preflight.sources_have_tests(
+        ["operator_kernel/claims.py", "operator_kernel/paths.py"], removed)
+    assert ok is True
+    ok, detail = preflight.sources_have_tests(
+        ["operator_kernel/claims.py", "operator_kernel/supervisor.py"], removed)
+    assert ok is False
+    assert detail == "operator_kernel/supervisor.py (wanted tests/test_supervisor.py in this diff)"
+
+
+def test_a_deleted_kernel_module_need_not_be_in_the_shim():
+    ok, detail = preflight.kernel_modules_are_bound(
+        ["operator_kernel/definitely_not_a_real_module.py"],
+        {"operator_kernel/definitely_not_a_real_module.py"})
+    assert ok is True
+    assert detail == "no kernel modules touched"
+
+
+def _guard_diffs(monkeypatch, by_path):
+    monkeypatch.setattr(preflight, "run",
+                        lambda *argv, cwd=None: (0, by_path.get(argv[-1], "")))
+
+
+def test_a_lowered_ceiling_passes_without_a_reason(monkeypatch):
+    _guard_diffs(monkeypatch, {"tests/test_kernel_boundary.py":
+                               "-MAX_MODULE_LINES = 800\n+MAX_MODULE_LINES = 634\n"})
+    ok, detail = preflight.budgets_not_raised(["tests/test_kernel_boundary.py"])
+    assert (ok, detail) == (True, "no ceiling moved")
+
+
+def test_a_ceiling_moved_to_a_new_file_is_compared_with_its_old_value(monkeypatch):
+    files = ["tests/test_extension_packaging.py", "tests/test_cli_boundary.py"]
+    old = "-MAX_CLI_CODE_LINES = 1400\n"
+    _guard_diffs(monkeypatch, {files[0]: old, files[1]: "+MAX_CLI_CODE_LINES = 782\n"})
+    assert preflight.budgets_not_raised(files) == (True, "no ceiling moved")
+    _guard_diffs(monkeypatch, {files[0]: old, files[1]: "+MAX_CLI_CODE_LINES = 1500\n"})
+    ok, detail = preflight.budgets_not_raised(files)
+    assert ok is False
+    assert "MAX_CLI_CODE_LINES = 1500" in detail
+
+
+def test_a_comparison_against_a_ceiling_is_not_a_ceiling(monkeypatch):
+    _guard_diffs(monkeypatch, {"tests/test_cli_boundary.py":
+                               "+    assert code <= MAX_CLI_CODE_LINES, (\n"})
+    assert preflight.budgets_not_raised(["tests/test_cli_boundary.py"]) == (
+        True, "no ceiling moved")
+
+
+def test_an_unreadable_ceiling_value_counts_as_raised(monkeypatch):
+    _guard_diffs(monkeypatch, {"tests/test_kernel_boundary.py":
+                               "-MAX_MODULE_LINES = 800\n+MAX_MODULE_LINES = 800 * 2\n"})
+    ok, _detail = preflight.budgets_not_raised(["tests/test_kernel_boundary.py"])
+    assert ok is False
+
+
+def test_a_ceiling_with_separators_and_a_comment_is_read_as_its_number(monkeypatch):
+    _guard_diffs(monkeypatch, {"tests/test_kernel_boundary.py":
+                               "-MAX_KERNEL_CODE_LINES = 9_618\n"
+                               "+MAX_KERNEL_CODE_LINES = 2_654  # after the cut\n"})
+    assert preflight.budgets_not_raised(["tests/test_kernel_boundary.py"]) == (
+        True, "no ceiling moved")
+
+
 def test_a_drifted_pr_head_is_refused_even_when_local_ci_is_green(monkeypatch):
     """The earlier version of this test left the run list empty, so ok was
     False whether or not the PR-head check existed. Local HEAD now has a green

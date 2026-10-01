@@ -4,12 +4,17 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent.parent.parent
 SOURCE_DIRS = ("operator_kernel", "operator_cli")
+
+#: One side of a `MAX_*` ceiling assignment in a `-U0` diff. Anchored at the
+#: name so `assert x <= MAX_Y` in the same file is not read as a ceiling.
+_CEILING = re.compile(r"^([+-])\s*(MAX_[A-Z0-9_]+)\s*(?::[^=]*)?=\s*([^#]*?)\s*(?:#.*)?$")
 
 #: The workflow that actually runs the tests, from .github/workflows/tests.yml.
 #: Matching on any workflow would let an unrelated green run certify the tests.
@@ -38,6 +43,24 @@ def changed_files(base: str) -> list[str] | None:
     return [line.strip() for line in out.splitlines() if line.strip()]
 
 
+def removal_only_files(base: str) -> set[str] | None:
+    """Paths whose diff adds no line at all, deleted files included.
+
+    Removing code adds no behaviour for a test to cover and cannot create a
+    module the shim has to bind, so the checks that ask those questions exempt
+    these. None when git could not answer, and the caller then exempts nothing.
+    """
+    code, out = run("git", "diff", "--numstat", f"{base}...HEAD")
+    if code != 0:
+        return None
+    found = set()
+    for line in out.splitlines():
+        parts = line.split("\t", 2)
+        if len(parts) == 3 and parts[0] == "0":
+            found.add(parts[2].strip())
+    return found
+
+
 def tree_is_clean() -> tuple[bool, str]:
     code, out = run("git", "status", "--porcelain")
     if code != 0:
@@ -46,13 +69,15 @@ def tree_is_clean() -> tuple[bool, str]:
     return (not dirty), ("clean" if not dirty else f"{len(dirty)} uncommitted path(s)")
 
 
-def sources_have_tests(files: list[str] | None) -> tuple[bool, str]:
+def sources_have_tests(files: list[str] | None,
+                       removal_only: "set[str] | frozenset[str]" = frozenset()
+                       ) -> tuple[bool, str]:
     """Every changed source must have its test file changed in the same diff.
 
     Existence is too weak. Adding two hundred lines to a module whose test file
     was written a year ago satisfies "a test file exists" without a single new
     assertion, which is the `test-enforcer` hook's rule at commit time and has
-    to be the rule here too.
+    to be the rule here too. A source in `removal_only` added nothing to cover.
     """
     if files is None:
         return False, "could not read the diff, so nothing is established"
@@ -63,7 +88,7 @@ def sources_have_tests(files: list[str] | None) -> tuple[bool, str]:
         if not parts or parts[0] not in SOURCE_DIRS or not path.endswith(".py"):
             continue
         stem = Path(path).stem
-        if stem == "__init__":
+        if stem == "__init__" or path in removal_only:
             continue
         test = f"tests/test_{stem}.py"
         if test not in changed:
@@ -87,14 +112,28 @@ def budgets_not_raised(files: list[str] | None, base: str = "main",
               and ("boundary" in p or p.endswith("test_extension_packaging.py"))]
     if not guards:
         return True, "no budget guard touched"
-    raised = []
+    # Compared by name across every guard, deleted ones included, because a
+    # budget moved to a new file is still the same budget. Lowering is not
+    # raising. A new name, or a value this cannot read, counts as raised.
+    old: dict[str, int] = {}
+    added: list[tuple[str, str, str, str]] = []
     for path in guards:
         code, out = run("git", "diff", "-U0", f"{base}...HEAD", "--", path)
         if code != 0:
             return False, f"could not diff {path}, so nothing is established"
         for line in out.splitlines():
-            if line.startswith("+") and "MAX_" in line and "=" in line:
-                raised.append(f"{path}: {line[1:].strip()}")
+            match = _CEILING.match(line)
+            if not match or line.startswith(("+++", "---")):
+                continue
+            sign, name, value = match.groups()
+            value = value.replace("_", "")
+            if sign == "-":
+                if value.isdigit():
+                    old[name] = max(old.get(name, 0), int(value))
+            else:
+                added.append((path, name, value, line[1:].strip()))
+    raised = [f"{path}: {text}" for path, name, value, text in added
+              if not value.isdigit() or name not in old or int(value) > old[name]]
     if not raised:
         return True, "no ceiling moved"
     if reason:
@@ -131,12 +170,14 @@ def _module_names() -> tuple[set[str], str | None]:
     return set(), "no _MODULE_NAMES assignment found in tests/op.py"
 
 
-def kernel_modules_are_bound(files: list[str] | None) -> tuple[bool, str]:
+def kernel_modules_are_bound(files: list[str] | None,
+                             removal_only: "set[str] | frozenset[str]" = frozenset()
+                             ) -> tuple[bool, str]:
     if files is None:
         return False, "could not read the diff, so nothing is established"
     new = [Path(p).stem for p in files
            if p.startswith("operator_kernel/") and p.endswith(".py")
-           and Path(p).stem != "__init__"]
+           and Path(p).stem != "__init__" and p not in removal_only]
     if not new:
         return True, "no kernel modules touched"
     bound, problem = _module_names()
@@ -279,10 +320,13 @@ def main(argv: list[str] | None = None) -> int:
                      f"unverified and the gate is incomplete")
 
     files = changed_files(args.base)
+    removal_only = removal_only_files(args.base) or set()
     checks = [
         ("working tree clean", tree_is_clean()),
-        ("changed sources changed their tests", sources_have_tests(files)),
-        ("kernel modules bound in op shim", kernel_modules_are_bound(files)),
+        ("changed sources changed their tests",
+         sources_have_tests(files, removal_only)),
+        ("kernel modules bound in op shim",
+         kernel_modules_are_bound(files, removal_only)),
         ("no budget ceiling moved silently",
          budgets_not_raised(files, args.base, args.budget_raised)),
         ("test workflow green on the merging SHA", (ci_ok, ci_detail)),
