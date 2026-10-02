@@ -2,9 +2,15 @@
 
 Handoff matches the caller to the copilot process the runner recorded.
 ``None`` means the table could not be read. An empty list means it was read
-and this pid has no parent. A prefix is not returned: once it leaves this
-function it is indistinguishable from a complete chain, and a chain that
-stopped early can name the wrong operator.
+and this pid has no parent we can vouch for.
+
+On Windows the chain ends at the first parent that is gone, unreadable, or
+born after its child, because ToolHelp keeps a dead parent's pid and Windows
+reuses pids. What is returned is the part of the chain that was verified, so
+a stop there can only make handoff refuse. The order test trusts process
+creation times: two processes created in the same clock tick, or a clock set
+backwards between a parent's death and its pid's reuse, defeat it. That is
+acceptable for an identity check against confusion, which is all this is.
 """
 from __future__ import annotations
 
@@ -150,7 +156,7 @@ def ancestry(pid: int) -> "list[int] | None":
     use_proc = not IS_WINDOWS and _procfs()
 
     chain: list[int] = []
-    seen: set[int] = set()
+    seen: set[int] = {pid}
     current = pid
     while len(chain) < _ANCESTRY_CAP:
         if IS_WINDOWS:
