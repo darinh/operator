@@ -1,31 +1,32 @@
 """`operator` -- the front door.
 
-No arguments and a TTY on stdin and stdout opens a numbered menu. No TTY
+No arguments and a TTY on stdin and stdout opens a keyboard menu. No TTY
 prints help and exits non-zero, so CI cannot hang on a prompt. A verb on the
-command line skips the menu. The menu prints the equivalent command before
-it runs, so the flags are learnable by use.
+command line skips the menu.
 
-One console script. Recover and handoff are verbs of it.
+One console script. Recover and handoff are verbs of it. Handoff stays a
+verb: the menu is for a person at the keyboard.
 """
 from __future__ import annotations
 
 import shutil
 import sys
+from pathlib import Path
 
 from operator_kernel.argtail import at_dashdash
 
 from . import argv as _argv
-from . import handoff, recover, verbs
+from . import handoff, recover
 from .home import _bootstrap, _home, _settle_home
 from .lifecycle import attach as _attach, delete as _delete, rename as _rename, start as _start, stop as _stop
 
 
-from .verbs import VERBS, menu_items  # noqa: F401
+from .verbs import VERBS  # noqa: F401
 
 
 def _print_help(stream) -> None:
     print("Usage: operator [command]", file=stream)
-    print("No command opens a menu when stdin and stdout are a TTY.", file=stream)
+    print("No command opens a keyboard menu when stdin and stdout are a TTY.", file=stream)
     print(file=stream)
     for verb in VERBS:
         print(f"  {' '.join(verb.tokens):<22}{verb.help}", file=stream)
@@ -62,83 +63,87 @@ def _ask(prompt: str) -> "str | None":
         return None
 
 
-def _ask_needed(prompt: str, what: str) -> "str | None":
-    article = "An" if what[:1].lower() in "aeiou" else "A"
-    while True:
-        value = _ask(prompt)
-        if value is None:
-            return None
-        if value:
-            return value
-        print(f"{article} {what} is needed.")
+class _Actions:
+    """The verbs the menu calls. Screens stay free of this wiring."""
 
+    def recoverable_count(self) -> int:
+        return len(self.recoverable_names())
 
-def _prompt_start() -> "list[str] | None":
-    name = _ask_needed("Operator name: ", "operator name")
-    if name is None:
-        return None
-    work = _ask("What should it work on: ")
-    if work is None:
-        return None
-    agent = _ask("Agent (Enter for Copilot CLI default): ")
-    if agent is None:
-        return None
-    attach = _ask("Attach now? [y/N]: ")
-    if attach is None:
-        return None
-    argv = ["start", "--name", name]
-    if agent:
-        argv += ["--agent", agent]
-    if attach.lower() in ("y", "yes"):
-        argv.append("--attach")
-    if work:
-        argv.append(work)
-    return argv
+    def recoverable_names(self) -> list:
+        from supervisor_control import recoverable_instances
+        return [inst.display_name for inst in recoverable_instances()]
 
+    def onboarded(self) -> bool:
+        import paths
+        return bool(paths.catalog_guid(Path.cwd()).guid)
 
-def _menu() -> int:
-    items = menu_items()
-    print("What do you want to do?")
-    print()
-    for index, item in enumerate(items, 1):
-        print(f"  {index}. {item.label}")
-    print("  0. Quit")
-    print()
-    while True:
-        choice = _ask("Choice: ")
-        if choice is None:
-            return 2
-        if choice in ("0", "q", "Q"):
-            return 0
-        if choice == "":
-            print("A choice is needed.")
-            continue
+    def cwd(self) -> str:
+        return str(Path.cwd())
+
+    def default_name(self) -> str:
+        import operators
+        import paths
+        cwd = Path.cwd()
         try:
-            number = int(choice)
-        except ValueError:
-            print("Not a number.")
-            continue
-        if number < 1 or number > len(items):
-            print("No such choice.")
-            continue
-        break
-    item = items[number - 1]
-    if item.argv == ("start",):
-        argv = _prompt_start()
-        if argv is None:
-            return 2
-        print("Running: operator " + _argv.quote_argv(argv))
-        return dispatch(argv)
-    values = {}
-    for key in item.prompts:
-        prompt, what = verbs.PROMPT_LABEL[key]
-        value = _ask_needed(prompt, what)
-        if value is None:
-            return 2
-        values[key] = value
-    argv = verbs.build_argv(item, values)
-    print("Running: operator " + _argv.quote_argv(argv))
-    return dispatch(argv)
+            resolved = cwd.resolve()
+        except OSError:
+            return cwd.name
+        for record in operators.all_operators() or []:
+            if paths.catalog_paths_match(resolved, record.cwd) is True:
+                return record.name
+        return cwd.name
+
+    def sections(self):
+        import operators
+        import supervisor_control
+        from supervisor_records import _running_loop_pid
+        from .menu import Op
+        records = operators.all_operators() or []
+        live = {inst.id for inst in supervisor_control.active_instances()}
+        running, offline = [], []
+        for record in records:
+            label = f"{record.name}  ({record.cwd})"
+            if record.id in live:
+                pid = _running_loop_pid(record.instance())
+                if pid:
+                    label = f"{label}  pid {pid}"
+                running.append(Op(record.name, record.cwd, label, True))
+            else:
+                offline.append(Op(record.name, record.cwd, label, False))
+        return running, offline
+
+    def start(self, argv):
+        return _start(argv)
+
+    def attach(self, argv):
+        return _attach(argv)
+
+    def stop(self, argv):
+        return _stop(argv)
+
+    def rename(self, argv):
+        return _rename(argv)
+
+    def delete(self, argv):
+        return _delete(argv)
+
+    def recover(self, names):
+        return recover.main(list(names))
+
+
+def _interactive() -> int:
+    from .keys import raw_keys
+    from .menu import Leave, render, run
+    _settle_home(None)
+    _bootstrap()
+    try:
+        with raw_keys() as keys:
+            outcome = run(keys, render, _Actions())
+    except KeyboardInterrupt:
+        return 130
+    if isinstance(outcome, Leave):
+        return outcome.call()
+    return outcome
 
 
 def _list(_rest: list[str]) -> int:
@@ -233,7 +238,7 @@ def main(argv: "list[str] | None" = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
     if not raw:
         if _argv.isatty(sys.stdin) and _argv.isatty(sys.stdout):
-            return _menu()
+            return _interactive()
         _print_help(sys.stderr)
         return 2
     if raw[0] in ("-h", "--help", "help"):

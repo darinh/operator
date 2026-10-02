@@ -13,8 +13,12 @@ CLI = REPO / "operator_cli"
 # Raised from 927/1179 when handoff resolves a name, delete keeps the project
 # if a sibling record cannot be read, and start checks the name and the cwd
 # before it spawns. 967 and 1222 are the measured sizes.
-MAX_CLI_CODE_LINES = 967
-MAX_CLI_TOTAL_LINES = 1222
+# Raised from 967/1222 when the numbered menu was replaced by a keyboard menu.
+# The old prompts lived in entry.py and verbs.py and were deleted. The decoder
+# (keys.py) and the screens (menu.py) are new modules, and no module crosses
+# the per-module ceiling. 1266 and 1610 are the measured sizes.
+MAX_CLI_CODE_LINES = 1266
+MAX_CLI_TOTAL_LINES = 1610
 
 
 def cli_modules() -> list[Path]:
