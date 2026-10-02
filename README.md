@@ -33,8 +33,9 @@ operator attach NAME          attach this terminal to a running operator
 operator stop NAME            ask an operator's supervisor to stop
 operator rename NAME NEW      rename an operator
 operator delete NAME [--yes]  delete an operator and its settings
-operator recover [NAME ...]   list operators that need recovering after a crash
-operator recover --all        bring those supervisors back
+operator recover              list operators that need recovering after a crash
+operator recover NAME ...     bring the named operators back
+operator recover --all        bring every one of them back
 operator handoff --instance NAME --status "what you did"
 ```
 
