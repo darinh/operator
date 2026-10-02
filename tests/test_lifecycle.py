@@ -92,6 +92,19 @@ def test_delete_keeps_the_record_when_a_file_cannot_be_removed(
     assert state.read_text(encoding="utf-8") == "stay"
 
 
+def test_delete_keeps_the_record_when_the_catalog_cannot_be_read(
+        tmp_path, monkeypatch, capsys):
+    import paths
+    from config import CATALOG_UNREADABLE
+    record = operators.create("alpha", tmp_path)
+    monkeypatch.setattr(paths, "project_handoff_file",
+                        lambda cwd, op_id: CATALOG_UNREADABLE)
+    assert lifecycle.delete(["alpha", "--yes"]) == 1
+    assert capsys.readouterr().err == (
+        "could not remove the handoff (project catalog unreadable)\n")
+    assert operators.find("alpha") == record
+
+
 def test_delete_refuses_while_a_supervisor_is_starting(tmp_path, capsys):
     record = operators.create("alpha", tmp_path)
     startup = record.instance().loop_startup_file

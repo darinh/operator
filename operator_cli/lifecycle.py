@@ -251,15 +251,13 @@ def _delete_operator(record) -> int:
     import operators
     import paths
     from config import CATALOG_UNREADABLE
+    from probes import remove_file
     failed = list(record.instance().delete_files())
     located = paths.project_handoff_file(Path(record.cwd), record.id)
-    if isinstance(located, Path) and located is not CATALOG_UNREADABLE:
-        try:
-            located.unlink()
-        except FileNotFoundError:
-            pass
-        except OSError:
-            failed.append(located)
+    if located is CATALOG_UNREADABLE:
+        failed.append("the handoff (project catalog unreadable)")
+    elif isinstance(located, Path) and not remove_file(located):
+        failed.append(located)
     if failed:
         for path in failed:
             print(f"could not remove {path}", file=sys.stderr)
