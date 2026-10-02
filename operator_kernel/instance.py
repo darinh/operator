@@ -19,34 +19,27 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from config import MUX, RESTART_DIR, UUID_RE
-from presence import dir_present, path_present
-from mux import safe_instance_id
+from presence import path_present
 from probes import log, remove_file, utcnow
 
 # ── instance ────────────────────────────────────────────────────
-def restart_marker_for(seat_id: str) -> Path:
-    """The marker `supervisor.py` polls, addressed by seat id.
+def restart_marker_for(op_id: str) -> Path:
+    """The marker `supervisor.py` polls, addressed by operator id.
 
-    A function as well as a property because two callers need it and only one
-    of them holds an `Instance`. `operator handoff` is handed a seat id on a
-    command line, and `Instance(seat_id).restart_marker` is wrong for it:
-    `safe_instance_id` is not idempotent, so re-sanitising an id that has
-    already been sanitised invents a third name. Measured: `a.b` becomes
-    `a-b-69f664`, and that becomes `a-b-69f664-5d16fe`.
-
-    Spelled once so the writer and the poller cannot drift, which is the rule
-    `paths.py` applies to every other shared location.
+    A function as well as a property because `operator handoff` is handed an
+    id and does not hold an `Instance`. Spelled once so the writer and the
+    poller cannot drift.
     """
-    return RESTART_DIR / seat_id
+    return RESTART_DIR / op_id
 
 
 class Instance:
-    """One named unit of work: a session plus its state files."""
+    """One operator's session plus its state files. The id is the record's."""
 
-    def __init__(self, display_name: str):
-        self.display_name = display_name
-        self.id = safe_instance_id(display_name)
-        self.session = self.id
+    def __init__(self, op_id: str, name: str = ""):
+        self.id = op_id
+        self.session = op_id
+        self.display_name = name or op_id
         # Whether the last launch managed to clear the previous session's
         # exit code. Only `start_session` can know, and only the loop asks;
         # anything that never launches a session has nothing stale to read,
@@ -229,6 +222,7 @@ class Instance:
             return None
 
     def cleanup_files(self) -> None:
+        """Drop the live state a clean stop removes. Never the record."""
         for path in (self.restart_marker, self.managed_file, self.spec_file,
                      self.pid_file, self.exit_file, self.session_file,
                      self.loop_pid_file, self.loop_startup_file,
@@ -236,47 +230,7 @@ class Instance:
                      self.loop_args_file):
             remove_file(path)
 
-
-def read_managed_instances() -> dict[str, dict] | None:
-    """Managed instances, or None when the state directory could not be read.
-
-    The distinction matters to anything deciding *who is present*. An empty
-    map and a failed listing look identical to a caller and mean opposite
-    things, and one of them is a licence to act as though nobody else is
-    here.
-    """
-    found: dict[str, dict] = {}
-    present = dir_present(RESTART_DIR)
-    if present is None:
-        return None
-    if not present:
-        return found
-    try:
-        entries = list(RESTART_DIR.iterdir())
-    except OSError:
-        return None
-    for path in entries:
-        if path.suffix == ".managed":
-            ident = path.name[: -len(".managed")]
-        elif path.suffix == ".state":
-            ident = path.name[: -len(".state")]
-        else:
-            continue
-        meta = found.setdefault(ident, {})
-        if path.suffix == ".managed":
-            try:
-                meta.update(json.loads(path.read_text(encoding="utf-8")))
-            except (OSError, ValueError):
-                pass
-    return found
-
-
-def managed_instances() -> dict[str, dict]:
-    """Managed instances as far as they can be listed; unreadable reads empty.
-
-    Only for callers that display or look up a known id. Anything deciding
-    whether somebody *else* is here must use :func:`read_managed_instances`
-    and refuse on None.
-    """
-    found = read_managed_instances()
-    return {} if found is None else found
+    def delete_files(self) -> None:
+        """Drop live state and the continuity file. Still not the record."""
+        self.cleanup_files()
+        remove_file(self.state_file)

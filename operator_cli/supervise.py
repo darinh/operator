@@ -23,9 +23,9 @@ _IGNORED = ("--_supervise", "--loop")
 
 
 def parse(args: "list[str]") -> "tuple[str, list[str], bool]":
-    """Returns (name, copilot_args, is_fresh)."""
+    """Returns (operator id, copilot_args, is_fresh)."""
     options, literal = at_dashdash(args)
-    name, rest, fresh = "", [], False
+    op_id, rest, fresh = "", [], False
     i = 0
     while i < len(options):
         arg = options[i]
@@ -33,20 +33,20 @@ def parse(args: "list[str]") -> "tuple[str, list[str], bool]":
             pass
         elif arg == "--fresh":
             fresh = True
-        elif arg == "--name":
+        elif arg == "--id":
             if i + 1 >= len(options) or not options[i + 1].strip():
-                raise SystemExit("--name requires a value")
-            name = options[i + 1]
+                raise SystemExit("--id requires a value")
+            op_id = options[i + 1]
             i += 1
-        elif arg.startswith("--name="):
-            name = arg.split("=", 1)[1]
-            if not name.strip():
-                raise SystemExit("--name requires a value")
+        elif arg.startswith("--id="):
+            op_id = arg.split("=", 1)[1]
+            if not op_id.strip():
+                raise SystemExit("--id requires a value")
         else:
             rest.append(arg)
         i += 1
     rest.extend(literal)
-    return name, rest, fresh
+    return op_id, rest, fresh
 
 
 def main(argv: "list[str] | None" = None) -> int:
@@ -56,13 +56,17 @@ def main(argv: "list[str] | None" = None) -> int:
               "not a command.", file=sys.stderr)
         print("  It is spawned for you by `operator start`.", file=sys.stderr)
         return 2
-    name, copilot_args, is_fresh = parse(args)
-    if not name:
-        raise SystemExit("--name is required")
+    op_id, copilot_args, is_fresh = parse(args)
+    if not op_id.strip():
+        raise SystemExit("--id is required")
     _bootstrap()
-    from instance import Instance
+    import operators
     from supervisor import run_loop_mode
-    return run_loop_mode(Instance(name), copilot_args, is_fresh)
+    record = operators.find(op_id)
+    if record is None or record.id != op_id:
+        print(f"no operator with id {op_id!r}", file=sys.stderr)
+        return 2
+    return run_loop_mode(record.instance(), copilot_args, is_fresh)
 
 
 if __name__ == "__main__":  # pragma: no cover - exercised through main()

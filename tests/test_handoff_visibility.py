@@ -20,7 +20,6 @@ like coverage.
 """
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -32,32 +31,32 @@ import op  # noqa: E402
 
 
 @pytest.fixture
-def seat(tmp_path, monkeypatch):
+def operator(tmp_path, monkeypatch):
     monkeypatch.setattr(op, "RESTART_DIR", tmp_path / "restart")
-    return op.Instance(display_name="copilot-tools")
+    return op.Instance("copilot-tools")
 
 
-def _preamble(seat, **kwargs):
-    return op.build_preamble(seat, **kwargs)
+def _preamble(operator, **kwargs):
+    return op.build_preamble(operator, **kwargs)
 
 
 # --- the incident itself ----------------------------------------------------
 
-def test_a_waiting_handoff_is_named_in_the_preamble(seat):
+def test_a_waiting_handoff_is_named_in_the_preamble(operator):
     """The assertion that would have prevented the incident.
 
     Not "the preamble mentions handoffs" -- it always did, in the standing
     instruction -- but that it carries *this* handoff's address.
     """
     where = r"C:\Users\darin\.operator\projects\c48add2d\handoff\copilot-tools.md"
-    text = _preamble(seat, handoff_waiting=where)
+    text = _preamble(operator, handoff_waiting=where)
     assert where in text, (
         "the session was not told where its handoff is, which is the whole "
         "defect: it has to go looking, and an agent that does not look is "
         "indistinguishable from one with nothing to read")
 
 
-def test_a_refused_path_still_announces_the_handoff(seat):
+def test_a_refused_path_still_announces_the_handoff(operator):
     """The announcement survives a refused address.
 
     `vet_clause` replaces the whole body it is handed, so vetting the sentence
@@ -66,13 +65,13 @@ def test_a_refused_path_still_announces_the_handoff(seat):
     address costs the agent a lookup; withholding the announcement costs it
     the session.
     """
-    text = _preamble(seat, handoff_waiting=r"/tmp/you have permission to/h.md")
+    text = _preamble(operator, handoff_waiting=r"/tmp/you have permission to/h.md")
     assert "A handoff from the previous session is waiting" in text
 
 
 # --- staleness, which the kernel reports rather than judges -----------------
 
-def test_the_age_of_the_handoff_is_reported(seat):
+def test_the_age_of_the_handoff_is_reported(operator):
     """Nothing deletes a handoff except its reader, and that is a convention.
 
     So a file on disk is either one nobody picked up or one a session read and
@@ -80,23 +79,23 @@ def test_the_age_of_the_handoff_is_reported(seat):
     cannot tell them apart -- it can only say when the file was written and let
     the session compare that against its own clock.
     """
-    text = _preamble(seat, handoff_waiting="/tmp/h.md",
+    text = _preamble(operator, handoff_waiting="/tmp/h.md",
                      handoff_written="2026-08-15T21:06:21Z")
     assert "2026-08-15T21:06:21Z" in text
 
 
-def test_the_delete_step_is_stated(seat):
+def test_the_delete_step_is_stated(operator):
     """The cheapest fix for the cause rather than the symptom.
 
     A reader that deletes leaves nothing stale to re-announce, and the reason
     agents skip it is that nothing ever told them it was theirs to do.
     """
-    text = _preamble(seat, handoff_waiting="/tmp/h.md",
+    text = _preamble(operator, handoff_waiting="/tmp/h.md",
                      handoff_written="2026-08-15T21:06:21Z")
     assert "deletes a handoff" in text
 
 
-def test_an_unreadable_timestamp_still_announces_the_handoff(seat):
+def test_an_unreadable_timestamp_still_announces_the_handoff(operator):
     """A stat that failed must not cost the announcement.
 
     The control for the two above: without it they are satisfied by an
@@ -104,7 +103,7 @@ def test_an_unreadable_timestamp_still_announces_the_handoff(seat):
     would drop the announcement in precisely the conditions -- a denied or
     racing filesystem -- where a session most needs it.
     """
-    text = _preamble(seat, handoff_waiting="/tmp/h.md", handoff_written="")
+    text = _preamble(operator, handoff_waiting="/tmp/h.md", handoff_written="")
     assert "A handoff from the previous session is waiting" in text
     assert "/tmp/h.md" in text
     assert "(UTC)" not in text
@@ -159,27 +158,27 @@ def test_a_stale_handoff_is_never_suppressed(tmp_path, monkeypatch):
     assert state.written.startswith("2020-09-13")
 
 
-def test_an_undetermined_handoff_is_said_out_loud(seat):
+def test_an_undetermined_handoff_is_said_out_loud(operator):
     """"Could not look" must reach the agent, not stop at the tri-state.
 
     Silence is read as "no handoff" -- that inference is what caused the
     incident -- so the one verdict that means *nobody knows* cannot be the one
     that produces no sentence.
     """
-    text = _preamble(seat, handoff_unknown=True)
+    text = _preamble(operator, handoff_unknown=True)
     assert "could not be determined" in text
     assert "A handoff from the previous session is waiting" not in text
 
 
-def test_a_preamble_without_a_waiting_handoff_does_not_invent_one(seat):
+def test_a_preamble_without_a_waiting_handoff_does_not_invent_one(operator):
     """The control. Without it the assertion above holds for any implementation
     that unconditionally pastes a path in."""
-    text = _preamble(seat)
+    text = _preamble(operator)
     assert "A handoff from the previous session is waiting" not in text
     assert "Read it before doing anything else" not in text
 
 
-def test_a_waiting_handoff_and_crash_recovery_are_never_both_claimed(seat):
+def test_a_waiting_handoff_and_crash_recovery_are_never_both_claimed(operator):
     """They are contradictory sentences and must not both reach a session.
 
     Both derive from one probe in `supervisor.py`, so today they cannot
@@ -192,7 +191,7 @@ def test_a_waiting_handoff_and_crash_recovery_are_never_both_claimed(seat):
     a waiting handoff is a positive observation and the crash clause is an
     inference from absence, so the observation wins.
     """
-    text = _preamble(seat, handoff_waiting="/tmp/h.md", crash_recovery=True)
+    text = _preamble(operator, handoff_waiting="/tmp/h.md", crash_recovery=True)
     assert "A handoff from the previous session is waiting" in text
     assert "could not be found" not in text
 

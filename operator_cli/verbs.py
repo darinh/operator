@@ -31,19 +31,22 @@ class Item:
 
 VERBS: tuple[Verb, ...] = (
     Verb(("doctor",), "check that this machine can run operator", "Check this machine"),
-    Verb(("start",), "start a supervised seat (start --name NAME)", "Start a supervised seat"),
-    Verb(("list",), "list running seats", "List running seats"),
-    Verb(("join",), "attach this terminal to a running seat", "Join a running seat", ("name",)),
-    Verb(("stop",), "ask a seat's supervisor to stop", "Stop a supervised seat", ("name",)),
-    Verb(("recover",), "list seats that need recovering after a crash", "List seats that need recovering", extra_menu=(("Recover every seat that needs it", ("recover", "--all")),)),
-    Verb(("handoff",), "write this seat's handoff and start the next session",
+    Verb(("start",), "start a supervised operator (start [NAME])", "Start a supervised operator"),
+    Verb(("list",), "list operators", "List operators"),
+    Verb(("attach",), "attach this terminal to a running operator", "Attach to a running operator", ("name",)),
+    Verb(("stop",), "ask an operator's supervisor to stop", "Stop a supervised operator", ("name",)),
+    Verb(("rename",), "rename an operator", "Rename an operator", ("name", "new_name")),
+    Verb(("delete",), "delete an operator and its settings", "Delete an operator", ("name",)),
+    Verb(("recover",), "list operators that need recovering after a crash", "List operators that need recovering", extra_menu=(("Recover every operator that needs it", ("recover", "--all")),)),
+    Verb(("handoff",), "write this operator's handoff and start the next session",
          "Hand off to the next session", ("instance", "status")),
 )
 
 
 PROMPT_LABEL = {
-    "name": ("Seat name: ", "seat name"),
-    "instance": ("Seat name: ", "seat name"),
+    "name": ("Operator name: ", "operator name"),
+    "new_name": ("New name: ", "new name"),
+    "instance": ("Operator id: ", "operator id"),
     "status": ("What you completed: ", "status"),
 }
 
@@ -72,7 +75,7 @@ def build_argv(item: Item, values: dict[str, str]) -> list[str]:
     for key in FLAGGED[1:]:
         if key in values:
             argv += [f"--{key}", values[key]]
-    for key in ("name",):
+    for key in ("name", "new_name"):
         if key in values:
             argv += [values[key]]
     return argv

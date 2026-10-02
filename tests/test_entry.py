@@ -6,7 +6,6 @@ real terminal. They feed a scripted stdin, or they prove stdin is not read.
 from __future__ import annotations
 
 import io
-import json
 import os
 import sys
 from pathlib import Path
@@ -137,7 +136,8 @@ def test_the_verb_table_is_not_empty():
     """Otherwise the two loops below pass over nothing."""
     names = {verb.tokens[0] for verb in cli.VERBS}
     assert len(cli.VERBS) >= 7
-    assert names >= {"doctor", "start", "list", "join", "stop", "recover", "handoff"}
+    assert names >= {"doctor", "start", "list", "attach", "stop", "rename",
+                     "delete", "recover", "handoff"}
 
 
 def test_every_menu_entry_maps_to_a_verb():
@@ -152,9 +152,11 @@ def test_every_verb_has_a_handler():
 
 
 def test_menu_dispatches_to_list(monkeypatch, capsys):
+    import operators
     import supervisor_control
+    record = operators.create("alpha", Path.cwd())
     monkeypatch.setattr(supervisor_control, "active_instances",
-                        lambda: [op.Instance("alpha")])
+                        lambda: [record.instance()])
     _tty(monkeypatch, f"{_choice_for(('list',))}\n")
     assert cli.main([]) == 0
     out = capsys.readouterr().out
@@ -167,10 +169,12 @@ def test_menu_prompts_then_joins(monkeypatch, capsys):
     seen = []
     monkeypatch.setattr(op.MUX, "has_session", lambda session: True)
     monkeypatch.setattr(op.MUX, "attach", lambda session: seen.append(session) or 0)
-    _tty(monkeypatch, f"{_choice_for(('join',))}\nalpha\n")
+    import operators
+    record = operators.create("alpha", Path.cwd())
+    _tty(monkeypatch, f"{_choice_for(('attach',))}\nalpha\n")
     assert cli.main([]) == 0
-    assert seen == ["alpha"]
-    assert "Running: operator join alpha" in capsys.readouterr().out
+    assert seen == [record.id]
+    assert "Running: operator attach alpha" in capsys.readouterr().out
 
 
 def _split_printed(command: str) -> list[str]:
@@ -209,13 +213,15 @@ def test_menu_quotes_a_name_with_spaces(monkeypatch, capsys):
     seen = []
     monkeypatch.setattr(op.MUX, "has_session", lambda session: True)
     monkeypatch.setattr(op.MUX, "attach", lambda session: seen.append(session) or 0)
-    _tty(monkeypatch, f"{_choice_for(('join',))}\nalpha beta\n")
+    import operators
+    record = operators.create("alpha beta", Path.cwd())
+    _tty(monkeypatch, f"{_choice_for(('attach',))}\nalpha beta\n")
     assert cli.main([]) == 0
-    assert seen == ["alpha beta"]
+    assert seen == [record.id]
     out = capsys.readouterr().out
     line = [row for row in out.splitlines() if "Running:" in row]
     assert line, out
-    assert _split_printed(line[0].split("operator ", 1)[1]) == ["join", "alpha beta"]
+    assert _split_printed(line[0].split("operator ", 1)[1]) == ["attach", "alpha beta"]
 
 
 def test_printed_command_round_trips_a_quote_and_a_dollar():
@@ -270,17 +276,19 @@ def test_menu_start_passes_an_agent_and_can_attach(monkeypatch):
     _tty(monkeypatch, f"{_choice_for(('start',))}\ndemo\n\nmy-agent\ny\n")
     assert cli.main([]) == 0
     assert spawned["args"] == ["--agent", "my-agent"]
-    assert attached == ["demo"]
+    assert attached and attached[0].startswith("op-")
 
 
-def test_menu_reprompts_for_a_missing_seat_name(monkeypatch, capsys):
+def test_menu_reprompts_for_a_missing_operator_name(monkeypatch, capsys):
+    import operators
+    record = operators.create("alpha", Path.cwd())
     seen = []
     monkeypatch.setattr(op.MUX, "has_session", lambda session: True)
     monkeypatch.setattr(op.MUX, "attach", lambda session: seen.append(session) or 0)
-    _tty(monkeypatch, f"{_choice_for(('join',))}\n\nalpha\n")
+    _tty(monkeypatch, f"{_choice_for(('attach',))}\n\nalpha\n")
     assert cli.main([]) == 0
-    assert seen == ["alpha"]
-    assert "A seat name is needed." in capsys.readouterr().out
+    assert seen == [record.id]
+    assert "An operator name is needed." in capsys.readouterr().out
 
 
 def test_menu_quit_does_not_dispatch(monkeypatch, capsys):
@@ -291,8 +299,8 @@ def test_menu_quit_does_not_dispatch(monkeypatch, capsys):
     assert "Quit" in out
 
 
-def test_a_menu_started_seat_exports_the_home_its_child_reads(monkeypatch):
-    """A seat chosen from the menu must be as defended as a typed one.
+def test_a_menu_started_operator_exports_the_home_its_child_reads(monkeypatch):
+    """An operator chosen from the menu must be as defended as a typed one.
 
     `_settle_home` exports unconditionally so that parent and child read the
     same string instead of independently agreeing on a default. Reaching a verb
@@ -426,25 +434,40 @@ def test_start_keeps_the_parent_name_past_the_terminator(monkeypatch):
     assert seen["args"] == ["--", "--name=beta", "some text"]
 
 
-def test_start_without_a_name_refuses(capsys):
-    assert cli.main(["start"]) == 2
-    assert "Usage: operator start" in capsys.readouterr().err
+def test_start_without_a_name_uses_the_folder_name(monkeypatch, tmp_path, capsys):
+    import supervisor
+    seen = {}
+
+    def fake(instance, copilot_args, is_fresh, cwd=None):
+        seen.update(name=instance.display_name, cwd=cwd, op_id=instance.id)
+        return 1
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(supervisor, "_spawn_background_loop", fake)
+    assert cli.main(["start"]) == 0
+    assert seen["name"] == tmp_path.name
+    assert seen["cwd"] == str(tmp_path.resolve())
+    assert seen["op_id"].startswith("op-")
 
 
-def test_list_prints_running_seats(monkeypatch, capsys):
+def test_list_prints_running_operators(tmp_path, monkeypatch, capsys):
+    import operators
     import supervisor_control
+    work = tmp_path / "repo"
+    work.mkdir()
+    record = operators.create("alpha", work)
     monkeypatch.setattr(supervisor_control, "active_instances",
-                        lambda: [op.Instance("alpha"), op.Instance("bravo")])
+                        lambda: [record.instance()])
     assert cli.main(["list"]) == 0
     out = capsys.readouterr().out
-    assert "alpha" in out and "bravo" in out
+    assert "Running:" in out and "alpha" in out
+    assert "Offline:" in out
 
 
-def test_list_says_so_when_nothing_is_running(monkeypatch, capsys):
-    import supervisor_control
-    monkeypatch.setattr(supervisor_control, "active_instances", lambda: [])
+def test_list_says_so_when_nothing_is_recorded(capsys):
     assert cli.main(["list"]) == 0
-    assert "No running seats." in capsys.readouterr().out
+    assert capsys.readouterr().out == (
+        "No operators yet. Start one with: operator start\n")
 
 
 def test_list_delegates_to_the_board_rather_than_rendering_its_own(monkeypatch,
@@ -471,12 +494,14 @@ def test_list_delegates_to_the_board_rather_than_rendering_its_own(monkeypatch,
     assert capsys.readouterr().out == "the board owns this line\n"
 
 
-def test_join_attaches(monkeypatch):
+def test_attach_attaches(monkeypatch, tmp_path):
+    import operators
+    record = operators.create("alpha", tmp_path)
     seen = []
     monkeypatch.setattr(op.MUX, "has_session", lambda session: True)
     monkeypatch.setattr(op.MUX, "attach", lambda session: seen.append(session) or 7)
-    assert cli.main(["join", "alpha"]) == 7
-    assert seen == ["alpha"]
+    assert cli.main(["attach", "alpha"]) == 7
+    assert seen == [record.id]
 
 
 def test_join_without_a_multiplexer_explains(monkeypatch, capsys):
@@ -487,25 +512,26 @@ def test_join_without_a_multiplexer_explains(monkeypatch, capsys):
             "No terminal multiplexer found. Install psmux:\n"
             "    winget install --id marlocarlo.psmux")
 
+    import operators
+    operators.create("alpha", Path.cwd())
     monkeypatch.setattr(op.MUX, "has_session", boom)
-    assert cli.main(["join", "alpha"]) == 1
+    assert cli.main(["attach", "alpha"]) == 1
     err = capsys.readouterr().err
     assert "Traceback" not in err
     assert "multiplexer" in err.lower()
     assert "Install" in err
 
 
-def test_join_without_a_name_refuses(capsys):
-    assert cli.main(["join"]) == 2
-    assert "Usage: operator join NAME" in capsys.readouterr().err
+def test_attach_without_a_name_refuses(capsys):
+    assert cli.main(["attach"]) == 2
+    assert "Usage: operator attach NAME" in capsys.readouterr().err
 
 
 def test_stop_requests_the_supervisor_stop(monkeypatch, capsys):
     import supervisor_control
+    import operators
     seen = []
-    inst = op.Instance("alpha")
-    inst.managed_file.parent.mkdir(parents=True, exist_ok=True)
-    inst.managed_file.write_text("{}", encoding="utf-8")
+    operators.create("alpha", Path.cwd())
     monkeypatch.setattr(supervisor_control, "_request_supervisor_stop",
                         lambda inst: seen.append(inst.display_name))
     assert cli.main(["stop", "alpha"]) == 0
@@ -521,7 +547,7 @@ def test_stop_unknown_refuses(monkeypatch, capsys):
     assert cli.main(["stop", "nonexistent"]) == 1
     assert called == []
     err = capsys.readouterr().err
-    assert "No seat 'nonexistent'" in err
+    assert "No operator 'nonexistent'" in err
 
 
 def test_doctor_reports_a_missing_copilot(monkeypatch, capsys):
@@ -576,3 +602,111 @@ def test_the_front_door_bootstraps_from_the_shared_home_helper():
     from operator_cli import home
     assert cli._bootstrap is home._bootstrap
     assert cli._settle_home is home._settle_home
+
+
+def test_a_clean_stop_stays_listed_offline(tmp_path, capsys):
+    import operators
+    record = operators.create("alpha", tmp_path)
+    record.instance().cleanup_files()
+    assert cli.main(["list"]) == 0
+    out = capsys.readouterr().out
+    assert "Offline:" in out
+    assert f"1. alpha  ({record.cwd})" in out
+    assert "Running:\n  (none)" in out
+
+
+def test_start_of_an_offline_operator_reuses_its_id_and_cwd(tmp_path, monkeypatch, capsys):
+    import operators
+    import supervisor
+    import supervisor_control
+    record = operators.create("alpha", tmp_path)
+    seen = {}
+
+    def fake(instance, copilot_args, is_fresh, cwd=None):
+        seen.update(op_id=instance.id, cwd=cwd)
+        return 4
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(supervisor, "_spawn_background_loop", fake)
+    monkeypatch.setattr(supervisor_control, "launch_status", lambda *a, **k: ("ready", 4))
+    assert cli.main(["start", "alpha"]) == 0
+    assert seen == {"op_id": record.id, "cwd": record.cwd}
+    assert "started alpha (pid 4)" in capsys.readouterr().out
+
+
+def test_an_omitted_name_refuses_a_different_cwd(tmp_path, monkeypatch, capsys):
+    import operators
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    operators.create(tmp_path.name, elsewhere)
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["start"]) == 2
+    err = capsys.readouterr().err
+    assert "already works in" in err
+    assert "pass a name" in err
+
+
+def test_rename_keeps_the_operator(tmp_path, capsys):
+    import operators
+    record = operators.create("alpha", tmp_path)
+    assert cli.main(["rename", "alpha", "bravo"]) == 0
+    found = operators.find("bravo")
+    assert found is not None and found.id == record.id
+    assert capsys.readouterr().out.strip() == "renamed alpha to bravo"
+
+
+def test_delete_refuses_while_running(tmp_path, monkeypatch, capsys):
+    import operators
+    import supervisor_control
+    record = operators.create("alpha", tmp_path)
+    monkeypatch.setattr(supervisor_control, "active_instances",
+                        lambda: [record.instance()])
+    assert cli.main(["delete", "alpha", "--yes"]) == 1
+    assert "stop it first: operator stop alpha" in capsys.readouterr().err
+    assert operators.find("alpha") is not None
+
+
+def test_delete_without_yes_and_no_tty_refuses(tmp_path, capsys):
+    import operators
+    operators.create("alpha", tmp_path)
+    assert cli.main(["delete", "alpha"]) == 2
+    assert "pass --yes to delete without a terminal" in capsys.readouterr().err
+    assert operators.find("alpha") is not None
+
+
+def test_delete_yes_removes_record_state_and_handoff(tmp_path, monkeypatch, capsys):
+    import operators
+    from operator_cli import project
+    monkeypatch.chdir(tmp_path)
+    assert project.ensure_registered()[0] == 0
+    record = operators.create("alpha", tmp_path)
+    inst = record.instance()
+    inst.state_file.parent.mkdir(parents=True, exist_ok=True)
+    inst.state_file.write_text("kept", encoding="utf-8")
+    handoff = paths.project_handoff_file(tmp_path, record.id)
+    assert isinstance(handoff, Path)
+    handoff.parent.mkdir(parents=True, exist_ok=True)
+    handoff.write_text("bye", encoding="utf-8")
+    assert cli.main(["delete", "alpha", "--yes"]) == 0
+    assert operators.find("alpha") is None
+    assert not inst.state_file.exists()
+    assert not handoff.exists()
+    assert not paths.catalog_guid(tmp_path).guid
+
+
+def test_delete_keeps_the_catalog_while_another_operator_shares_the_cwd(
+        tmp_path, monkeypatch):
+    import operators
+    from operator_cli import project
+    monkeypatch.chdir(tmp_path)
+    assert project.ensure_registered()[0] == 0
+    guid = paths.catalog_guid(tmp_path).guid
+    operators.create("alpha", tmp_path)
+    operators.create("bravo", tmp_path)
+    assert cli.main(["delete", "alpha", "--yes"]) == 0
+    assert operators.find("bravo") is not None
+    assert paths.catalog_guid(tmp_path).guid == guid
+    assert paths.project_dir(guid).is_dir()
+    assert cli.main(["delete", "bravo", "--yes"]) == 0
+    assert not paths.catalog_guid(tmp_path).guid
+    assert not paths.project_dir(guid).exists()

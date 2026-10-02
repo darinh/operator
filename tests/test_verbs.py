@@ -33,12 +33,15 @@ def test_the_menu_offers_every_verb_and_every_extra():
 
 def test_a_flagged_prompt_becomes_a_flag_and_a_positional_stays_bare():
     """`--status` is the case that forced this distinction. Appending it
-    positionally would have handed the handoff verb a seat name."""
+    positionally would have handed the handoff verb an operator name."""
     item = verbs.Item("x", ("handoff",), ("instance", "status"))
     assert verbs.build_argv(item, {"instance": "alpha", "status": "done"}) == [
         "handoff", "--instance", "alpha", "--status", "done"]
-    item = verbs.Item("x", ("join",), ("name",))
-    assert verbs.build_argv(item, {"name": "alpha"}) == ["join", "alpha"]
+    item = verbs.Item("x", ("attach",), ("name",))
+    assert verbs.build_argv(item, {"name": "alpha"}) == ["attach", "alpha"]
+    item = verbs.Item("x", ("rename",), ("name", "new_name"))
+    assert verbs.build_argv(item, {"name": "alpha", "new_name": "bravo"}) == [
+        "rename", "alpha", "bravo"]
 
 
 def test_every_verb_says_something_on_both_surfaces():

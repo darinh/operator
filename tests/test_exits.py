@@ -32,24 +32,22 @@ def test_the_restart_marker_is_the_one_the_supervisor_polls(tmp_path):
     assert marker.exists()
 
 
-# ── what two reviewers found: the seat key, and the guard on it ──
+# ── what two reviewers found: the operator key, and the guard on it ──
 
 
-def test_a_seat_name_that_is_not_one_path_component_is_refused(tmp_path,
+def test_a_operator_name_that_is_not_one_path_component_is_refused(tmp_path,
                                                                monkeypatch):
-    """A seat name that is not one path component writes nothing."""
+    """An operator name that is not one path component writes nothing."""
     work = _registered(tmp_path, monkeypatch)
     for bad in ("../escape", ".", "", "a/b", "CON"):
         assert exits.write_handoff(work, bad, "nope") is None, bad
         assert not exits.request_restart(bad), bad
 
 
-def test_the_restart_marker_is_not_re_sanitised(tmp_path):
-    """`safe_instance_id` is not idempotent, so building an `Instance` from an
-    id that is already sanitised invents a third name."""
-    seat_id = op.safe_instance_id("a.b")
-    assert op.safe_instance_id(seat_id) != seat_id, "the hazard is real"
-    assert exits.request_restart(seat_id)
-    assert (op.RESTART_DIR / seat_id).exists()
+def test_the_restart_marker_is_addressed_by_the_operator_id(tmp_path):
+    op_id = "op-abcdef01"
+    assert exits.request_restart(op_id)
+    assert (op.RESTART_DIR / op_id).exists()
+    assert op.Instance(op_id).restart_marker == op.RESTART_DIR / op_id
 
 

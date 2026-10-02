@@ -276,9 +276,7 @@ def _is_safe_component(name: object) -> bool:
     spec carrying `..\\escaped` would otherwise write outside the state
     directory the parent is watching. Legitimate ids are already single path
     components -- the operator writes the spec itself as `{id}.launch.json` --
-    so requiring that here rejects nothing real. `safe_instance_id` is not
-    usable for this: it *rewrites* a name and appends a digest, which would
-    silently address different files than the operator does.
+    so requiring that here rejects nothing real.
     """
     if not isinstance(name, str) or not name.strip():
         return False

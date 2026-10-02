@@ -193,7 +193,7 @@ def project_handoff_file(cwd: Path,
     if found.guid is None:
         return None
     if instance_id and not guid_is_usable(instance_id):
-        # A seat name is one path component. `operator handoff` takes it
+        # An operator name is one path component. `operator handoff` takes it
         # from the command line, where `--instance ../elsewhere` would
         # address a file outside `handoff/`.
         return None

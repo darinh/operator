@@ -13,6 +13,7 @@ instance is touched.
 """
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 
@@ -36,6 +37,15 @@ def home(tmp_path, monkeypatch):
     return tmp_path
 
 
+def _plant(op_id: str) -> None:
+    directory = op.OPERATOR_HOME / "operators"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{op_id}.json").write_text(json.dumps({
+        "id": op_id, "name": op_id, "cwd": str(op.OPERATOR_HOME),
+        "created": "2026-01-01T00:00:00Z",
+    }), encoding="utf-8")
+
+
 # ── the entry point exists and arrives ───────────────────────────
 
 
@@ -56,7 +66,8 @@ def test_the_entry_point_reaches_the_supervision_loop(home, monkeypatch):
         return 0
 
     monkeypatch.setattr(supervisor, "run_loop_mode", record)
-    rc = supervise.main(["--_supervise", "--loop", "--name", "probe",
+    _plant("probe")
+    rc = supervise.main(["--_supervise", "--loop", "--id", "probe",
                          "--agent", "test:agent"])
 
     assert rc == 0
@@ -67,7 +78,7 @@ def test_the_entry_point_reaches_the_supervision_loop(home, monkeypatch):
 
 def test_parse_keeps_the_parent_name_when_the_tail_looks_like_flags():
     name, rest, fresh = supervise.parse([
-        "--_supervise", "--loop", "--name", "alpha",
+        "--_supervise", "--loop", "--id", "alpha",
         "--", "--name=beta", "some text",
     ])
     assert name == "alpha"
@@ -77,7 +88,7 @@ def test_parse_keeps_the_parent_name_when_the_tail_looks_like_flags():
 
 def test_parse_does_not_take_fresh_from_the_tail():
     name, rest, fresh = supervise.parse([
-        "--_supervise", "--loop", "--name", "alpha", "--", "--fresh",
+        "--_supervise", "--loop", "--id", "alpha", "--", "--fresh",
     ])
     assert name == "alpha"
     assert rest == ["--", "--fresh"]
@@ -95,7 +106,8 @@ def test_main_uses_the_spawner_argv_and_ignores_a_name_in_the_tail(
         return 0
 
     monkeypatch.setattr(supervisor, "run_loop_mode", record)
-    argv = ["--_supervise", "--loop", "--name", "alpha",
+    _plant("alpha")
+    argv = ["--_supervise", "--loop", "--id", "alpha",
             "--", "--name=beta", "some text"]
     assert supervise.main(argv) == 0
     assert seen["name"] == "alpha"
@@ -123,7 +135,8 @@ def test_fresh_reaches_the_loop(home, monkeypatch):
     seen = {}
     monkeypatch.setattr(supervisor, "run_loop_mode",
                         lambda i, a, f: seen.update(fresh=f))
-    supervise.main(["--_supervise", "--loop", "--name", "x", "--fresh"])
+    _plant("x")
+    supervise.main(["--_supervise", "--loop", "--id", "x", "--fresh"])
     assert seen == {"fresh": True}
 
 
@@ -134,7 +147,8 @@ def test_the_exit_code_of_the_loop_is_the_exit_code_of_the_process(home,
     import supervisor
 
     monkeypatch.setattr(supervisor, "run_loop_mode", lambda *a, **k: 7)
-    assert supervise.main(["--_supervise", "--name", "x"]) == 7
+    _plant("x")
+    assert supervise.main(["--_supervise", "--id", "x"]) == 7
 
 
 def test_the_arguments_the_spawner_sends_are_the_ones_this_accepts():
@@ -153,11 +167,11 @@ def test_the_arguments_the_spawner_sends_are_the_ones_this_accepts():
         "the spawner no longer launches this module; this test is stale")
     for flag in ("--_supervise", "--loop", "--fresh"):
         assert flag in source, f"{flag} is no longer sent by the spawner"
-        _, passed_on, _ = supervise.parse(["--_supervise", "--name", "x", flag])
+        _, passed_on, _ = supervise.parse(["--_supervise", "--id", "x", flag])
         assert flag not in passed_on, (
             f"{flag} was passed through to Copilot instead of being handled")
-    assert '"--name", instance.display_name' in source, (
-        "the spawner no longer sends --name the way this target reads it")
+    assert '"--id", instance.id' in source, (
+        "the spawner no longer sends --id the way this target reads it")
 
 
 # ── refusals ─────────────────────────────────────────────────────
@@ -170,7 +184,7 @@ def test_running_it_as_a_command_is_refused():
     multiplexer, home or instance is touched.
     """
     result = subprocess.run(
-        [sys.executable, "-m", "operator_cli.supervise", "--loop", "--name", "x"],
+        [sys.executable, "-m", "operator_cli.supervise", "--loop", "--id", "x"],
         capture_output=True, encoding="utf-8", errors="replace", timeout=120)
     assert result.returncode == 2
     assert "not a command" in result.stderr
@@ -183,10 +197,10 @@ def test_a_supervisor_without_a_name_is_refused(home):
 
 
 @pytest.mark.parametrize("argv", [
-    pytest.param(["--_supervise", "--name", ""], id="empty value"),
-    pytest.param(["--_supervise", "--name", "   "], id="whitespace only"),
-    pytest.param(["--_supervise", "--name"], id="flag with nothing after it"),
-    pytest.param(["--_supervise", "--name="], id="empty --name="),
+    pytest.param(["--_supervise", "--id", ""], id="empty value"),
+    pytest.param(["--_supervise", "--id", "   "], id="whitespace only"),
+    pytest.param(["--_supervise", "--id"], id="flag with nothing after it"),
+    pytest.param(["--_supervise", "--id="], id="empty --id="),
 ])
 def test_an_unusable_name_is_refused(argv, home):
     with pytest.raises(SystemExit):
@@ -196,15 +210,15 @@ def test_an_unusable_name_is_refused(argv, home):
 # ── the parser ───────────────────────────────────────────────────
 
 
-def test_the_name_is_read_from_either_spelling():
-    for argv in (["--_supervise", "--name", "seat"],
-                 ["--_supervise", "--name=seat"]):
-        name, _, _ = supervise.parse(argv)
-        assert name == "seat", argv
+def test_the_id_is_read_from_either_spelling():
+    for argv in (["--_supervise", "--id", "op-abcdef01"],
+                 ["--_supervise", "--id=op-abcdef01"]):
+        op_id, _, _ = supervise.parse(argv)
+        assert op_id == "op-abcdef01", argv
 
 
 def test_fresh_is_off_unless_asked_for():
-    _, _, fresh = supervise.parse(["--_supervise", "--name", "x"])
+    _, _, fresh = supervise.parse(["--_supervise", "--id", "x"])
     assert not fresh
 
 
@@ -215,7 +229,7 @@ def test_everything_else_is_passed_through_untouched():
     ours to rename.
     """
     _, args, _ = supervise.parse(
-        ["--_supervise", "--loop", "--name", "x",
+        ["--_supervise", "--loop", "--id", "x",
          "--agent", "test:agent", "--effort", "high", "--weird-future-flag"])
     assert args == ["--agent", "test:agent", "--effort", "high",
                     "--weird-future-flag"]
@@ -224,8 +238,8 @@ def test_everything_else_is_passed_through_untouched():
 def test_the_instance_name_is_not_passed_on_to_copilot():
     """It is addressed to the supervisor, and Copilot would reject it."""
     _, args, _ = supervise.parse(
-        ["--_supervise", "--loop", "--name", "seat", "--agent", "a"])
-    assert "seat" not in args and "--name" not in args
+        ["--_supervise", "--loop", "--id", "op-abcdef01", "--agent", "a"])
+    assert "op-abcdef01" not in args and "--id" not in args
 
 
 def test_supervise_bootstraps_from_the_shared_home_helper():

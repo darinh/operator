@@ -20,7 +20,8 @@ import instance
 
 from config import (LOG_FILE, METRICS_GRACE_SECONDS, MUX, POLL_INTERVAL, SESSION_ID_WAIT, SUPERVISOR_STARTUP_ALLOWANCE)
 from presence import dir_present, entry, path_present
-from instance import Instance, managed_instances
+from instance import Instance
+import operators
 from mux import MuxError
 from probes import _pid_alive, log, remove_file
 from supervisor import _spawn_background_loop
@@ -79,27 +80,24 @@ def _request_supervisor_stop(instance: Instance,
         remove_file(instance.stop_marker)
 
 
+def _records() -> list:
+    found = operators.all_operators()
+    return [] if found is None else found
+
+
 def recoverable_instances() -> list[Instance]:
-    """Seats that were being supervised when something stopped them un-cleanly.
+    """Operators that were supervised when something stopped them un-cleanly.
 
     `active_instances` asks who is here *now*, and after a reboot the answer is
     nobody: the multiplexer server is gone and every supervisor pid belongs to
-    a previous boot. That is the whole gap this closes. Losing the machine
-    should cost the seat its process, not the recorded arguments and session
-    number a clean stop removes.
-
-    The discriminator is what a clean stop leaves behind, which is nothing:
-    `cleanup_files` removes the ownership claim and the recorded loop
-    arguments. A crash, a kill or a power cut removes neither. So a managed
-    instance that still has its arguments, with no live session and no live
-    supervisor, is one that was running when the machine went down -- and one
-    that was stopped on purpose is absent from this list by construction,
-    rather than by a flag somebody has to remember to set.
+    a previous boot. Losing the machine should cost the operator its process,
+    not the recorded arguments. A clean stop removes those arguments and leaves
+    the record, so a stopped operator is absent from this list by construction.
     """
     live = set(MUX.list_sessions()) if MUX.available() else set()
     found: list[Instance] = []
-    for ident, meta in sorted(managed_instances().items()):
-        inst = Instance(meta.get("display_name", ident))
+    for op in _records():
+        inst = op.instance()
         if inst.id in live or _running_loop_pid(inst) is not None:
             continue
         _, recorded_cwd = _load_loop_args(inst)
@@ -109,10 +107,10 @@ def recoverable_instances() -> list[Instance]:
 
 
 def recover_loop(instance: Instance) -> int:
-    """Start a supervisor for a seat whose machine went down under it.
+    """Start a supervisor for an operator whose machine went down under it.
 
     Not ``--fresh``. Fresh would restart the session numbering and discard
-    the resume id. The seat continues the same run.
+    the resume id. The operator continues the same run.
     """
     target = instance.display_name
     user_args, recorded_cwd = _load_loop_args(instance)
@@ -121,7 +119,7 @@ def recover_loop(instance: Instance) -> int:
               f"it with.", file=sys.stderr)
         return 1
     if dir_present(Path(recorded_cwd)) is False:
-        # Recovering it somewhere else would point the seat at a different
+        # Recovering it somewhere else would point the operator at a different
         # project than the one it recorded.
         print(f"The directory '{target}' was working in no longer exists:",
               file=sys.stderr)
@@ -181,16 +179,16 @@ def launch_status(instance: Instance, pid: int,
 
 
 def active_instances() -> list[Instance]:
-    """Managed instances with a live session and/or a live loop supervisor.
+    """Recorded operators with a live session and/or a live loop supervisor.
 
     A loop between sessions has no session for a few seconds, and a session
     whose loop was stopped has no supervisor. Both are exactly the states a
-    user needs to act on, so neither one alone may exclude an instance.
+    user needs to act on, so neither one alone may exclude an operator.
     """
     live = set(MUX.list_sessions()) if MUX.available() else set()
     found: list[Instance] = []
-    for ident, meta in sorted(managed_instances().items()):
-        inst = Instance(meta.get("display_name", ident))
+    for op in _records():
+        inst = op.instance()
         if inst.id in live or _running_loop_pid(inst) is not None:
             found.append(inst)
     return found
