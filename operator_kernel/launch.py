@@ -118,7 +118,7 @@ def start_session(instance: Instance, copilot_args: list[str], session_num: int,
 
     pid = instance.copilot_pid()
     log(f"  Session #{session_num} running (copilot pid={pid or 'pending'}) — "
-        f"attach with: operator join {instance.display_name}")
+        f"attach with: operator attach {instance.display_name}")
 
 
 # ── argument helpers ────────────────────────────────────────────
