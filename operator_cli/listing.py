@@ -31,17 +31,21 @@ def list_instances() -> int:
     if not records:
         print("No operators yet. Start one with: operator start")
         return 0
+    running, offline = sections(records)
+    _section("Running:", [label for _, label in running])
+    _section("Offline:", [label for _, label in offline])
+    return 0
+
+
+def sections(records):
+    """(running, offline) as (record, label) pairs, in record order."""
     running_ids = {inst.id for inst in supervisor_control.active_instances()}
     running, offline = [], []
     for op in records:
+        label = f"{op.name}  ({op.cwd})"
         if op.id in running_ids:
             pid = _running_loop_pid(op.instance())
-            row = f"{op.name}  ({op.cwd})"
-            if pid:
-                row += f"  pid {pid}"
-            running.append(row)
+            running.append((op, f"{label}  pid {pid}" if pid else label))
         else:
-            offline.append(f"{op.name}  ({op.cwd})")
-    _section("Running:", running)
-    _section("Offline:", offline)
-    return 0
+            offline.append((op, label))
+    return running, offline

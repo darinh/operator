@@ -143,9 +143,10 @@ def test_start_not_onboarded_confirms_then_starts_the_default_name():
     assert board.frames[1]["title"] == "Create an operator for C:\\work\\demo?"
     assert board.frames[2]["title"] == "Operator name:"
     assert board.frames[2]["rows"] == ["demo"]
-    assert board.frames[3]["title"] == "operator"
-    assert board.frames[3]["status"] == "started demo (pid 9)"
-    assert board.frames[3]["rows"] == [
+    assert board.frames[3]["title"] == "Working..."
+    assert board.frames[4]["title"] == "operator"
+    assert board.frames[4]["status"] == "started demo (pid 9)"
+    assert board.frames[4]["rows"] == [
         "Start an operator",
         "List operators",
         "No operators need recovery.",

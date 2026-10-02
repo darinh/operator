@@ -124,7 +124,8 @@ def ask_text(title, keys, render, prefill="", status="") -> "str | None":
             buf.append(key)
 
 
-def _captured(fn, argv) -> str:
+def _captured(fn, argv, render) -> str:
+    render("Working...", [], highlight=None)
     out, err = io.StringIO(), io.StringIO()
     with redirect_stdout(out), redirect_stderr(err):
         code = fn(argv)
@@ -180,7 +181,7 @@ def start_screen(keys, render, actions) -> str:
         name = ask_text("Operator name:", keys, render,
                         prefill=actions.default_name())
         if name is not None:
-            return _captured(actions.start, [name])
+            return _captured(actions.start, [name], render)
         if not needs or not confirm(question, keys, render):
             return ""
 
@@ -201,21 +202,21 @@ def action_screen(item, keys, render, actions):
         if choice == "Start and attach":
             return Leave(lambda name=item.name: actions.start([name, "--attach"]))
         if choice == "Stop":
-            return _captured(actions.stop, [item.name])
+            return _captured(actions.stop, [item.name], render)
         if choice == "Start":
-            return _captured(actions.start, [item.name])
+            return _captured(actions.start, [item.name], render)
         if choice == "Rename":
             new = ask_text("Operator name:", keys, render, prefill=item.name)
             if new is None:
                 continue
-            return _captured(actions.rename, [item.name, new])
+            return _captured(actions.rename, [item.name, new], render)
         lines = [
             f"Deletes operator {item.name} and all of its settings.",
             f"Repo: {item.cwd}",
             "Delete? [y/N]",
         ]
         if confirm(lines, keys, render, loose=True):
-            return _captured(actions.delete, [item.name, "--yes"])
+            return _captured(actions.delete, [item.name, "--yes"], render)
         return ""
 
 
@@ -237,7 +238,7 @@ def recover_screen(keys, render, actions) -> str:
                           actions.recoverable_names(), keys, render)
     if not chosen:
         return ""
-    return _captured(actions.recover, chosen)
+    return _captured(actions.recover, chosen, render)
 
 
 def run(keys, render, actions):
