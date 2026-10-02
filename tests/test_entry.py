@@ -147,22 +147,58 @@ def test_every_verb_has_a_handler():
         assert verb.tokens[0] in cli.HANDLERS, verb.tokens
 
 
-def test_esc_on_the_menu_quits(monkeypatch, capsys):
-    _tty(monkeypatch)
-    _keys(monkeypatch, ["esc"])
-    assert cli.main([]) == 0
-    assert "Usage: operator" not in capsys.readouterr().err
-
-
-def test_ctrl_c_in_the_menu_exits_130(monkeypatch):
+def _guarded_keys(monkeypatch, keys, restored):
     @contextmanager
     def raw():
-        raise KeyboardInterrupt
-        yield  # pragma: no cover
+        try:
+            yield keys
+        finally:
+            restored.append(True)
 
-    _tty(monkeypatch)
     monkeypatch.setattr("operator_cli.keys.raw_keys", raw)
+
+
+def test_esc_on_the_menu_quits(monkeypatch, capsys):
+    restored = []
+    _tty(monkeypatch)
+    _guarded_keys(monkeypatch, iter(["esc"]), restored)
+    assert cli.main([]) == 0
+    out, err = capsys.readouterr()
+    assert "> Start an operator" in out
+    assert "Usage: operator" not in err
+    assert restored == [True]
+
+
+def test_ctrl_c_in_the_menu_exits_130_after_restoring(monkeypatch, capsys):
+    def keys():
+        yield "down"
+        raise KeyboardInterrupt
+
+    restored = []
+    _tty(monkeypatch)
+    _guarded_keys(monkeypatch, keys(), restored)
     assert cli.main([]) == 130
+    assert "> List operators" in capsys.readouterr().out
+    assert restored == [True]
+
+
+def test_ctrl_c_while_attaching_exits_130(monkeypatch):
+    import operators
+    import supervisor_control
+    record = operators.create("alpha", Path.cwd())
+    monkeypatch.setattr(supervisor_control, "active_instances",
+                        lambda: [record.instance()])
+
+    def attach(session):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(op.MUX, "has_session", lambda session: True)
+    monkeypatch.setattr(op.MUX, "attach", attach)
+    restored = []
+    _tty(monkeypatch)
+    _guarded_keys(monkeypatch, iter(["down", "enter", "enter", "enter"]), restored)
+    assert cli.main([]) == 130
+    assert restored == [True]
 
 
 def test_menu_attach_returns_the_attach_code(monkeypatch, capsys):
