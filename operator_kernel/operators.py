@@ -136,6 +136,7 @@ def _new_id() -> str:
 
 
 _LOCK_WAIT = 0.25
+_LOCK_STALE = 10.0
 
 
 @contextmanager
@@ -149,6 +150,13 @@ def _records_lock():
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_RDWR)
         except FileExistsError:
+            try:
+                # Held far longer than any create or rename takes: its owner died.
+                if time.time() - lock.stat().st_mtime > _LOCK_STALE:
+                    lock.unlink()
+                    continue
+            except OSError:
+                pass
             if time.monotonic() >= deadline:
                 raise BadName("could not lock operator records")
             time.sleep(0.02)

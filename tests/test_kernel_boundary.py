@@ -131,7 +131,7 @@ MAX_MODULE_LINES = 602
 #: Raised from 2281 to 2322 for the records lock, the unreadable-file signal,
 #: and `delete_files` reporting a path it could not remove. 2322 is the
 #: measured size.
-MAX_KERNEL_CODE_LINES = 2322
+MAX_KERNEL_CODE_LINES = 2329
 
 #: Per-module code ceiling, the same split applied one file down.
 #: `runner.py` is the largest at 325.

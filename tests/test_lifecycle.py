@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 import operators
 from operator_cli import lifecycle
@@ -118,6 +119,17 @@ def test_a_second_create_is_refused_while_the_records_lock_is_held(tmp_path):
         os.unlink(lock)
     assert [op.id for op in operators.all_operators()] == [first.id]
     assert operators.find("bravo") is None
+
+
+def test_a_lock_left_by_a_dead_process_does_not_block_create(tmp_path):
+    lock = operators.records_dir() / ".lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("", encoding="utf-8")
+    old = time.time() - 60
+    os.utime(lock, (old, old))
+    made = operators.create("alpha", tmp_path)
+    assert operators.find("alpha") == made
+    assert not lock.exists()
 
 
 def test_delete_refuses_a_running_operator(tmp_path, monkeypatch, capsys):
