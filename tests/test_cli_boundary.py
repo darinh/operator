@@ -7,8 +7,11 @@ from test_kernel_boundary import (MAX_MODULE_CODE_LINES, MAX_MODULE_LINES,
                                   REPO, code_lines)
 
 CLI = REPO / "operator_cli"
-MAX_CLI_CODE_LINES = 737
-MAX_CLI_TOTAL_LINES = 983
+# Raised from 737/983 when start, rename, and delete landed beside attach.
+# The verb bodies live in lifecycle.py so no module crosses the per-module
+# ceiling. 927 and 1179 are the measured sizes.
+MAX_CLI_CODE_LINES = 927
+MAX_CLI_TOTAL_LINES = 1179
 
 
 def cli_modules() -> list[Path]:
