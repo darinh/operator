@@ -9,13 +9,17 @@ from operator_kernel.argtail import at_dashdash
 from . import project
 
 
-def _same_cwd(recorded: str, current) -> bool:
+def _cwd_match(recorded: str, current) -> "bool | None":
     import paths
     try:
         want = current.resolve()
     except OSError:
-        return False
-    return paths.catalog_paths_match(want, recorded) is True
+        return None
+    return paths.catalog_paths_match(want, recorded)
+
+
+def _same_cwd(recorded: str, current) -> bool:
+    return _cwd_match(recorded, current) is True
 
 
 def _named(rest: list[str]) -> str:
@@ -80,6 +84,10 @@ def start(rest: list[str]) -> int:
         print("pass a name: operator start --name NAME", file=sys.stderr)
         return 2
     else:
+        problem = operators.name_problem(name)
+        if problem:
+            print(problem, file=sys.stderr)
+            return 2
         rc, guid, created = project.ensure_registered()
         if rc:
             return rc
@@ -90,6 +98,12 @@ def start(rest: list[str]) -> int:
         except operators.BadName as exc:
             print(str(exc), file=sys.stderr)
             return 2
+    from presence import dir_present
+    if dir_present(Path(record.cwd)) is False:
+        print(f"The directory '{record.name}' was working in no longer exists:",
+              file=sys.stderr)
+        print(f"  {record.cwd}", file=sys.stderr)
+        return 1
     inst = record.instance()
     pid = _spawn_background_loop(inst, copilot, is_fresh=fresh, cwd=record.cwd)
     status, shown = launch_status(inst, pid)
@@ -194,11 +208,14 @@ def delete(rest: list[str]) -> int:
         return 2
     import operators
     from supervisor_control import active_instances
+    from supervisor_records import _supervisor_present
     record = operators.find(name)
     if record is None:
         print(f"No operator '{name}'.", file=sys.stderr)
         return 1
-    if any(item.id == record.id for item in active_instances()):
+    inst = record.instance()
+    if (any(item.id == record.id for item in active_instances())
+            or _supervisor_present(inst) is not None):
         print(f"stop it first: operator stop {record.name}", file=sys.stderr)
         return 1
     if not yes:
@@ -211,26 +228,44 @@ def delete(rest: list[str]) -> int:
         answer = _ask("Delete? [y/N] ")
         if answer is None or answer.lower() not in ("y", "yes"):
             return 1
-    _delete_operator(record)
+    if _delete_operator(record):
+        return 1
     print(f"deleted {record.name}")
     return 0
 
 
-def _delete_operator(record) -> None:
+def _must_keep_project(cwd: str) -> bool:
+    import operators
+    others = operators.all_operators()
+    failed = operators.unreadable()
+    if others is None or failed is None or failed:
+        return True
+    for other in others:
+        same = _cwd_match(other.cwd, Path(cwd))
+        if same is None or same:
+            return True
+    return False
+
+
+def _delete_operator(record) -> int:
     import operators
     import paths
     from config import CATALOG_UNREADABLE
-    inst = record.instance()
-    inst.delete_files()
+    failed = list(record.instance().delete_files())
     located = paths.project_handoff_file(Path(record.cwd), record.id)
     if isinstance(located, Path) and located is not CATALOG_UNREADABLE:
         try:
             located.unlink()
-        except OSError:
+        except FileNotFoundError:
             pass
+        except OSError:
+            failed.append(located)
+    if failed:
+        for path in failed:
+            print(f"could not remove {path}", file=sys.stderr)
+        return 1
     cwd = record.cwd
     operators.remove(record)
-    others = operators.all_operators() or []
-    if any(_same_cwd(other.cwd, Path(cwd)) for other in others):
-        return
-    project.forget(cwd)
+    if not _must_keep_project(cwd):
+        project.forget(cwd)
+    return 0

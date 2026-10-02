@@ -18,7 +18,7 @@ from .home import _bootstrap
 VALUE_FLAGS = ("--instance", "--status", "--next", "--context")
 SWITCHES = ("--no-restart",)
 
-USAGE = ("Usage: operator handoff --instance ID --status TEXT "
+USAGE = ("Usage: operator handoff --instance NAME --status TEXT "
          "[--next TEXT] [--context TEXT] [--no-restart]")
 
 
@@ -75,6 +75,7 @@ def parse(options: list[str]) -> "dict[str, str] | None":
 
 def main(rest: list[str]) -> int:
     _bootstrap()
+    import operators
     from exits import (CATALOG_UNREADABLE, WRITE_FAILED, request_restart,
                        write_handoff)
     from paths import guid_is_usable
@@ -90,12 +91,16 @@ def main(rest: list[str]) -> int:
     if not operator or not status:
         print(USAGE, file=sys.stderr)
         return 2
-    if not guid_is_usable(operator):
-        # An operator id is one component of a filename the next session has to
-        # find, so `../elsewhere` is not an id this can write for.
-        print(f"the operator id {operator!r} is not usable", file=sys.stderr)
+    record = operators.find(operator)
+    if record is None:
+        print(f"No operator '{operator}'.", file=sys.stderr)
         return 2
-    landed = write_handoff(Path.cwd(), operator, status,
+    op_id = record.id
+    if not guid_is_usable(op_id):
+        # The id is one component of a filename the next session has to find.
+        print(f"the operator id {op_id!r} is not usable", file=sys.stderr)
+        return 2
+    landed = write_handoff(Path.cwd(), op_id, status,
                            values.get("--next", ""),
                            values.get("--context", ""))
     if landed is CATALOG_UNREADABLE:
@@ -114,9 +119,9 @@ def main(rest: list[str]) -> int:
         # An operator checkpointing before a long step needs the file on disk and
         # needs to keep running.
         return 0
-    if not request_restart(operator):
+    if not request_restart(op_id):
         print("the handoff was written but the restart could not be requested",
               file=sys.stderr)
         return 1
-    print(f"restart requested for {operator}")
+    print(f"restart requested for {op_id}")
     return 0

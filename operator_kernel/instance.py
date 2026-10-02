@@ -221,17 +221,25 @@ class Instance:
         except (OSError, ValueError):
             return None
 
+    def _state_files(self) -> tuple[Path, ...]:
+        return (self.restart_marker, self.managed_file, self.spec_file,
+                self.pid_file, self.exit_file, self.session_file,
+                self.loop_pid_file, self.loop_startup_file,
+                self.stop_marker, self.loop_args_file)
+
     def cleanup_files(self) -> None:
         """Drop the live state a clean stop removes. Never the record."""
-        for path in (self.restart_marker, self.managed_file, self.spec_file,
-                     self.pid_file, self.exit_file, self.session_file,
-                     self.loop_pid_file, self.loop_startup_file,
-                     self.stop_marker,
-                     self.loop_args_file):
+        for path in self._state_files():
             remove_file(path)
 
-    def delete_files(self) -> None:
-        """Drop live state and the continuity file. Still not the record."""
-        self.cleanup_files()
-        remove_file(self.state_file)
-        remove_file(RESTART_DIR / f"{self.id}.runner.log")
+    def delete_files(self) -> list[Path]:
+        """Drop live state and the continuity file. Still not the record.
+
+        Returns paths that are still there.
+        """
+        failed = []
+        extras = (self.state_file, RESTART_DIR / f"{self.id}.runner.log")
+        for path in (*self._state_files(), *extras):
+            if not remove_file(path):
+                failed.append(path)
+        return failed

@@ -10,8 +10,11 @@ CLI = REPO / "operator_cli"
 # Raised from 737/983 when start, rename, and delete landed beside attach.
 # The verb bodies live in lifecycle.py so no module crosses the per-module
 # ceiling. 927 and 1179 are the measured sizes.
-MAX_CLI_CODE_LINES = 927
-MAX_CLI_TOTAL_LINES = 1179
+# Raised from 927/1179 when handoff resolves a name, delete keeps the project
+# if a sibling record cannot be read, and start checks the name and the cwd
+# before it spawns. 967 and 1222 are the measured sizes.
+MAX_CLI_CODE_LINES = 967
+MAX_CLI_TOTAL_LINES = 1222
 
 
 def cli_modules() -> list[Path]:
