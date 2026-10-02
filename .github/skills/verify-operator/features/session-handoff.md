@@ -1,6 +1,6 @@
 # Session handoff
 
-A seat ends its own session and leaves the next one a record. `operator handoff`
+An operator ends its own session and leaves the next one a record. `operator handoff`
 writes a markdown file the next launch finds and announces, then sets the marker
 the supervisor polls, so the session is torn down and relaunched. The write comes
 first: the supervisor acts on the marker as soon as it sees it, so a marker set
@@ -8,33 +8,33 @@ before the file is a restart racing the thing it exists to announce.
 
 ## Sub-features
 
-- `handoff-write` stores status, next and context at `projects/<guid>/handoff/<seat>.md`.
-- `handoff-restart` sets `restart/<seat>`, the marker `supervisor.py` polls.
+- `handoff-write` stores status, next and context at `projects/<guid>/handoff/<operator>.md`.
+- `handoff-restart` sets `restart/<operator>`, the marker `supervisor.py` polls.
 - `handoff-checkpoint` `--no-restart` writes the file and leaves the session running.
 - `handoff-replace` a second write replaces the first atomically, leaving no `.tmp`.
-- `handoff-seat-id` files under the seat **id**, which is what the reader probes with.
-- `handoff-unusable-seat` refuses a name that is not one path component.
+- `handoff-operator-id` files under the operator **id**, which is what the reader probes with.
+- `handoff-unusable-operator` refuses a name that is not one path component.
 - `handoff-unregistered` refuses from a directory that is not a project.
 - `handoff-usage` refuses a missing or whitespace-only status.
 - `handoff-unknown-option` refuses a mistyped flag instead of ignoring it.
 
 ## How to get to it (user POV)
 
-- Run `operator handoff --instance <seat> --status "<text>"` in a project, with
+- Run `operator handoff --instance <operator> --status "<text>"` in a project, with
   optional `--next`, `--context` and `--no-restart`.
-- Pass the seat name positionally: `operator handoff <seat> --status "<text>"`.
-- Use `--instance=<seat>` and `--status=<text>` if you prefer joined flags.
+- Pass the operator name positionally: `operator handoff <operator> --status "<text>"`.
+- Use `--instance=<operator>` and `--status=<text>` if you prefer joined flags.
 - Choose "Hand off to the next session" from the `operator` menu, which prompts
-  for the seat name and the status and prints the command before running it.
+  for the operator name and the status and prints the command before running it.
 - Every launch preamble advertises this command, already filled in with that
-  seat's id.
+  operator's id.
 
 ## Driving it with control_operator
 
 Preconditions:
 
 - `up` has run and `doctor --run <run>` reports `doctor: healthy`.
-- No handoff exists yet for the seat name used below.
+- No handoff exists yet for the operator name used below.
 
 - **Refuse outside a registered project.** Run
   `python .github/skills/verify-operator/control_operator.py operator --run <run> --label handoff-unregistered --cwd <some-temp-dir> -- handoff --instance verify-handoff --status "should not land"`.
@@ -60,9 +60,9 @@ Preconditions:
 - **Prove the replace, and that no litter is left.** The handoff file holds the
   second status and not the first, and the `handoff/` directory contains no
   `*.tmp`. A partially written file is one the next session reads as complete.
-- **Refuse a seat name that is not one path component.** Run
-  `control_operator.py operator --run <run> --label handoff-bad-seat -- handoff --instance ../escape --status nope`.
-  Exit `2`, stderr is `the seat name '../escape' is not usable`, and nothing
+- **Refuse an operator id that is not one path component.** Run
+  `control_operator.py operator --run <run> --label handoff-bad-operator -- handoff --instance ../escape --status nope`.
+  Exit `2`, stderr is `the operator id '../escape' is not usable`, and nothing
   named `escape.md` exists anywhere under `projects/`.
 - **Refuse a status that is only whitespace.** Run the same command with
   `--status "   "`. Exit `2` and stderr opens `Usage: operator handoff`. It
@@ -78,11 +78,11 @@ Preconditions:
 
 ## Gotchas
 
-- **The seat name is the id, not the display name.** `safe_instance_id` maps
-  `a.b` to `a-b-69f664`, and `supervisor.py` probes `handoff_state(workdir,
-  instance.id)`. Driving with a display name that sanitises files the handoff
-  where the next session will not look, while the restart happens anyway. The
-  preamble advertises the id for this reason; pass what it printed.
+- **The operator id is the record id, not the display name.** The record id
+  never changes when the operator is renamed, and `supervisor.py` probes
+  `handoff_state(workdir, instance.id)`. Driving with the display name files
+  the handoff where the next session will not look, while the restart happens
+  anyway. The preamble advertises the id for this reason; pass what it printed.
 - **The working directory decides the project**, exactly as it does for
   `operator handoff`. The helper runs from the registered checkout unless `--cwd`
   says otherwise.
@@ -98,7 +98,7 @@ Preconditions:
   value carries quotes of its own, and a suggestion that drops them silently is
   worse than none.
 - **Exit `2` and exit `1` mean different things here.** `2` is the command
-  refusing what it was asked (usage, unusable seat, unknown option) and nothing
+  refusing what it was asked (usage, unusable operator, unknown option) and nothing
   was written. `1` is the command trying and failing (unregistered project,
   unreadable catalog, a write that failed), which is a state question.
 - **A restart that could not be requested still leaves the handoff.** The file

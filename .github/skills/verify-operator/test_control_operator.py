@@ -113,10 +113,10 @@ def test_evidence_captures_the_state_the_skill_promises(run):
 def test_a_nested_state_file_keeps_its_path_in_its_name(run):
     handoff = run / "home" / "projects" / "guid-1" / "handoff"
     handoff.mkdir(parents=True)
-    (handoff / "seat-a.md").write_text("# Handoff\n", encoding="utf-8")
+    (handoff / "operator-a.md").write_text("# Handoff\n", encoding="utf-8")
     control.cmd_evidence(SimpleNamespace(run=str(run), label="snap"))
     names = {p.name for p in (run / "artifacts" / "snap").iterdir()}
-    assert "projects__guid-1__handoff__seat-a.md" in names
+    assert "projects__guid-1__handoff__operator-a.md" in names
 
 
 def test_doctor_checks_every_console_script_the_harness_drives(run):
@@ -139,14 +139,14 @@ def test_evidence_captures_both_halves_of_a_handoff(run):
     """
     handoff = run / "home" / "projects" / "guid-1" / "handoff"
     handoff.mkdir(parents=True)
-    (handoff / "seat-a.md").write_text("# Handoff\n", encoding="utf-8")
+    (handoff / "operator-a.md").write_text("# Handoff\n", encoding="utf-8")
     (run / "home" / "restart").mkdir(parents=True, exist_ok=True)
-    (run / "home" / "restart" / "seat-a").touch()
+    (run / "home" / "restart" / "operator-a").touch()
 
     control.cmd_evidence(SimpleNamespace(run=str(run), label="snap"))
     names = {p.name for p in (run / "artifacts" / "snap").iterdir()}
-    assert "projects__guid-1__handoff__seat-a.md" in names
-    assert "restart__seat-a" in names
+    assert "projects__guid-1__handoff__operator-a.md" in names
+    assert "restart__operator-a" in names
 
 
 def test_the_front_door_runs_from_the_registered_checkout(monkeypatch, run):
