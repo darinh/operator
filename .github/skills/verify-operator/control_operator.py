@@ -25,8 +25,10 @@ the home is not the real one, and a run of every verb here leaves the real
 The console script is invoked as a user invokes it. It resolves the home from
 `COPILOT_OPERATOR_HOME`, which this helper sets before the child starts.
 
-`operator handoff` resolves the project from the working directory, so the
-front door runs in the registered checkout unless `--cwd` says otherwise.
+The front door runs in the registered checkout unless `--cwd` says otherwise.
+`operator handoff` does not. It identifies the caller by process ancestry and
+writes into that operator's repo, and a process that is not inside the
+session is refused.
 """
 from __future__ import annotations
 
