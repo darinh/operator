@@ -165,7 +165,7 @@ def test_menu_dispatches_to_list(monkeypatch, capsys):
     assert "Quit" in out
 
 
-def test_menu_prompts_then_joins(monkeypatch, capsys):
+def test_menu_prompts_then_attaches(monkeypatch, capsys):
     seen = []
     monkeypatch.setattr(op.MUX, "has_session", lambda session: True)
     monkeypatch.setattr(op.MUX, "attach", lambda session: seen.append(session) or 0)
@@ -504,7 +504,7 @@ def test_attach_attaches(monkeypatch, tmp_path):
     assert seen == [record.id]
 
 
-def test_join_without_a_multiplexer_explains(monkeypatch, capsys):
+def test_attach_without_a_multiplexer_explains(monkeypatch, capsys):
     from mux import MuxNotFoundError
 
     def boom(*a, **k):

@@ -20,43 +20,67 @@ def _project(tmp_path, monkeypatch):
     return tmp_path
 
 
+def _operator(work, name="alpha"):
+    import operators
+    return operators.create(name, work)
+
+
 def test_it_writes_the_file_and_asks_for_the_next_session(
         tmp_path, monkeypatch, capsys):
     """Key fact (2) of every launch preamble, end to end through the CLI."""
     work = _project(tmp_path, monkeypatch)
-    marker = op.Instance("alpha").restart_marker
+    record = _operator(work)
     assert cli.main(["handoff", "--instance", "alpha",
                      "--status", "landed the parser",
                      "--next", "wire the menu",
                      "--context", "budgets are tight"]) == 0
     out = capsys.readouterr().out
-    assert "handoff written to" in out
-    assert "restart requested for alpha" in out
-    written = paths.project_handoff_file(work, "alpha")
+    written = paths.project_handoff_file(work, record.id)
     body = written.read_text(encoding="utf-8")
     assert "landed the parser" in body
     assert "wire the menu" in body
     assert "budgets are tight" in body
-    assert marker.exists()
+    assert f"handoff written to {written}" in out
+    assert f"restart requested for {record.id}" in out
+    assert op.restart_marker_for(record.id).exists()
+    assert not paths.project_handoff_file(work, "alpha").exists()
+    assert not op.restart_marker_for("alpha").exists()
 
 
-def test_the_operator_name_can_be_positional(tmp_path, monkeypatch):
+def test_the_operator_name_can_be_positional(tmp_path, monkeypatch, capsys):
     """Every other verb here takes a bare operator name, so this one does too."""
     work = _project(tmp_path, monkeypatch)
+    record = _operator(work)
     assert cli.main(["handoff", "alpha", "--status", "done"]) == 0
-    assert paths.project_handoff_file(work, "alpha").exists()
+    out = capsys.readouterr().out
+    assert paths.project_handoff_file(work, record.id).is_file()
+    assert f"restart requested for {record.id}" in out
+    assert op.restart_marker_for(record.id).exists()
+    assert not paths.project_handoff_file(work, "alpha").exists()
+
+
+def test_an_unknown_operator_exits_2_and_writes_nothing(
+        tmp_path, monkeypatch, capsys):
+    _project(tmp_path, monkeypatch)
+    assert cli.main(["handoff", "--instance", "missing", "--status", "x"]) == 2
+    assert capsys.readouterr().err.strip() == "No operator 'missing'."
+    assert list(paths.projects_root().rglob("*.md")) == []
+    assert not op.restart_marker_for("missing").exists()
 
 
 def test_an_unregistered_directory_is_refused_and_the_fix_named(
         tmp_path, monkeypatch, capsys):
     """A handoff has nowhere to go without a catalog entry. Saying so beats
     writing one where nothing will look for it."""
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    record = _operator(elsewhere)
     monkeypatch.chdir(tmp_path)
     assert cli.main(["handoff", "--instance", "alpha", "--status", "x"]) == 1
     err = capsys.readouterr().err
     assert "not a registered project" in err
     assert "start an operator in this directory first" in err
-    assert not op.Instance("alpha").restart_marker.exists()
+    assert not op.restart_marker_for(record.id).exists()
 
 
 def test_no_status_is_a_usage_error(tmp_path, monkeypatch, capsys):
@@ -80,10 +104,11 @@ def test_it_can_checkpoint_without_ending_the_session(tmp_path, monkeypatch):
     """An operator about to start something long wants the file on disk and wants
     to keep running."""
     work = _project(tmp_path, monkeypatch)
+    record = _operator(work)
     assert cli.main(["handoff", "--instance", "alpha", "--status", "midway",
                      "--no-restart"]) == 0
-    assert paths.project_handoff_file(work, "alpha").exists()
-    assert not op.Instance("alpha").restart_marker.exists()
+    assert paths.project_handoff_file(work, record.id).is_file()
+    assert not op.restart_marker_for(record.id).exists()
 
 
 def test_help_names_every_flag_it_accepts(capsys):
@@ -111,9 +136,10 @@ def test_an_unknown_option_is_refused_rather_than_ignored(tmp_path,
 def test_flag_equals_value_is_accepted(tmp_path, monkeypatch):
     """Every other verb on this entry point takes `--name=value`."""
     work = _project(tmp_path, monkeypatch)
+    record = _operator(work)
     assert cli.main(["handoff", "--instance=alpha", "--status=done",
                      "--no-restart"]) == 0
-    assert paths.project_handoff_file(work, "alpha").exists()
+    assert paths.project_handoff_file(work, record.id).is_file()
 
 
 def test_a_whitespace_only_status_is_not_a_status(tmp_path, monkeypatch,
@@ -126,11 +152,14 @@ def test_a_whitespace_only_status_is_not_a_status(tmp_path, monkeypatch,
 
 def test_a_operator_name_that_escapes_the_handoff_directory_is_refused(
         tmp_path, monkeypatch, capsys):
-    """`--instance ../escape` addressed a file outside `handoff/`."""
-    _project(tmp_path, monkeypatch)
+    """`--instance ../escape` is not an operator, so it never becomes a path."""
+    work = _project(tmp_path, monkeypatch)
     assert cli.main(["handoff", "--instance", "../escape",
                      "--status", "done"]) == 2
-    assert "not usable" in capsys.readouterr().err
+    assert capsys.readouterr().err.strip() == "No operator '../escape'."
+    assert list(paths.projects_root().rglob("escape.md")) == []
+    assert not op.restart_marker_for("../escape").exists()
+    assert work.is_dir()
 
 
 def test_a_second_positional_is_refused(tmp_path, monkeypatch, capsys):
@@ -173,11 +202,12 @@ def test_joined_syntax_is_how_you_mean_an_option_literally(tmp_path,
     """Refusing the separated form needs an escape hatch, or text that happens
     to look like a flag becomes unsayable."""
     work = _project(tmp_path, monkeypatch)
+    record = _operator(work)
     assert cli.main(["handoff", "--instance", "alpha", "--status", "done",
                      "--context=--no-restart", "--no-restart"]) == 0
-    body = paths.project_handoff_file(work, "alpha").read_text(encoding="utf-8")
+    body = paths.project_handoff_file(work, record.id).read_text(encoding="utf-8")
     assert "--no-restart" in body
-    assert not op.Instance("alpha").restart_marker.exists()
+    assert not op.restart_marker_for(record.id).exists()
 
 
 def test_an_option_shaped_value_is_refused_however_it_is_spelled(tmp_path,
@@ -195,7 +225,7 @@ def test_an_option_shaped_value_is_refused_however_it_is_spelled(tmp_path,
         assert not op.Instance("alpha").restart_marker.exists(), tail
 
 
-def _expected_body(status: str) -> str:
+def _expected_body(status: str, op_id: str) -> str:
     """The whole document a status-only handoff produces.
 
     The helper this replaces returned just the `## Status` section, split at
@@ -203,11 +233,11 @@ def _expected_body(status: str) -> str:
     blank line plus trailing text past it. Comparing a section cannot see what
     is after the section; comparing the file can.
     """
-    return f"# Handoff: alpha\n\n## Status\n\n{status}\n"
+    return f"# Handoff: {op_id}\n\n## Status\n\n{status}\n"
 
 
-def _body(work) -> str:
-    return paths.project_handoff_file(work, "alpha").read_text(encoding="utf-8")
+def _body(work, op_id: str) -> str:
+    return paths.project_handoff_file(work, op_id).read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("status", [
@@ -228,6 +258,7 @@ def test_the_refusal_says_how_to_pass_a_value_that_looks_like_a_flag(
     test follows it rather than copying a string.
     """
     work = _project(tmp_path, monkeypatch)
+    record = _operator(work)
     assert cli.main(["handoff", "--instance", "alpha", "--status", status]) == 2
     err = capsys.readouterr().err
     assert "looks like an option" in err
@@ -236,7 +267,7 @@ def test_the_refusal_says_how_to_pass_a_value_that_looks_like_a_flag(
 
     assert cli.main(["handoff", "--instance", "alpha", f"--status={status}",
                      "--no-restart"]) == 0
-    assert _body(work) == _expected_body(status)
+    assert _body(work, record.id) == _expected_body(status, record.id)
 
 
 def test_handoff_bootstraps_from_the_shared_home_helper():

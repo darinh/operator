@@ -40,6 +40,18 @@ def test_an_empty_heading_says_none(tmp_path, monkeypatch, capsys):
     assert "Offline:\n  1. only  " in out
 
 
+def test_list_names_each_unreadable_record(tmp_path, capsys):
+    work = tmp_path / "repo"
+    work.mkdir()
+    operators.create("kept", work)
+    broken = operators.records_dir() / "op-broken1.json"
+    broken.write_text("{not json", encoding="utf-8")
+    assert listing.list_instances() == 0
+    captured = capsys.readouterr()
+    assert captured.err == f"could not read {broken}\n"
+    assert "kept" in captured.out
+
+
 def test_list_with_no_records_says_how_to_start(capsys):
     assert listing.list_instances() == 0
     assert capsys.readouterr().out == (

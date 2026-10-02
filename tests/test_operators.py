@@ -61,8 +61,9 @@ def test_remove_deletes_only_the_record(tmp_path):
     assert state.read_text(encoding="utf-8") == "kept\n"
 
 
-def test_all_operators_skips_a_corrupt_file(tmp_path):
+def test_all_operators_skips_a_corrupt_file_and_names_it(tmp_path):
     kept = operators.create("Kept", tmp_path)
     broken = operators.records_dir() / "op-broken1.json"
     broken.write_text("{not json", encoding="utf-8")
     assert operators.all_operators() == [kept]
+    assert operators.unreadable() == [broken]
