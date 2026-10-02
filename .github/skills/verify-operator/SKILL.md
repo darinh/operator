@@ -54,10 +54,9 @@ Every verb takes `--run <run>`. `--label <name>` names the transcript entry.
 
 | Intent | Command |
 | --- | --- |
-| Hand off | `control_operator.py operator --run <run> --label handoff -- handoff --instance <id> --status "what you did"` |
-| Drive from outside the project | `control_operator.py operator --run <run> --cwd <dir> -- handoff --instance <id> --status "x"` |
+| Hand off | Not from this harness. `operator handoff` accepts a caller only when that process is a descendant of the copilot the runner recorded. This helper is a separate process, so the command exits 2 and writes nothing. The unit suite covers the protocol. |
 
-Everything after `--` is passed to `operator` untouched. The helper runs from the registered checkout unless `--cwd` says otherwise, because the handoff resolves the project from `Path.cwd()`.
+Everything after `--` is passed to `operator` untouched. The helper runs from the registered checkout unless `--cwd` says otherwise.
 
 ## Evidence
 

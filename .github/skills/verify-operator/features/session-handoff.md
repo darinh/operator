@@ -13,21 +13,22 @@ before the file is a restart racing the thing it exists to announce.
 - `handoff-checkpoint` `--no-restart` writes the file and leaves the session running.
 - `handoff-replace` a second write replaces the first atomically, leaving no `.tmp`.
 - `handoff-operator-id` files under the operator **id**, which is what the reader probes with. A display name resolves to that id first.
-- `handoff-unknown` an unknown name exits 2 and writes nothing.
-- `handoff-unregistered` refuses from a directory that is not a project.
+- `handoff-unknown` a caller that is not inside exactly one operator session exits 2 and writes nothing. So does `--instance` naming a different operator.
+- `handoff-unregistered` refuses when the derived operator's repo is not a project.
 - `handoff-usage` refuses a missing or whitespace-only status.
 - `handoff-unknown-option` refuses a mistyped flag instead of ignoring it.
 
 ## How to get to it (user POV)
 
-- Run `operator handoff --instance <name-or-id> --status "<text>"` in a project, with
-  optional `--next`, `--context` and `--no-restart`. The argument is a display name or a record id. The file and the marker use the id.
-- Pass the operator name positionally: `operator handoff <name> --status "<text>"`.
-- Use `--instance=<operator>` and `--status=<text>` if you prefer joined flags.
-- Handoff is not on the keyboard menu. The agent runs the verb. A person at the
-  keyboard starts, lists, attaches, stops, renames, deletes, and recovers.
-- Every launch preamble advertises this command, already filled in with that
-  operator's id.
+- From inside the session, run `operator handoff --status "<text>"`, with
+  optional `--next`, `--context` and `--no-restart`. The command identifies the
+  caller by process ancestry. It does not take the operator as an address.
+- `--instance <name-or-id>` is optional. If you pass it and it is not this
+  session, the command exits 2 and writes nothing.
+- Handoff is not on the keyboard menu. The agent runs the verb from inside the
+  session. A person at the keyboard, and this control harness, are not that
+  process. Both are refused.
+- Every launch preamble advertises `operator handoff --status "..." --next "..."`.
 
 ## Driving it with control_operator
 
@@ -37,56 +38,31 @@ Preconditions:
 - An operator record named `verify-handoff` exists in this project. `operator start --name verify-handoff` creates one. `up` alone does not.
 - No handoff exists yet for that operator.
 
-- **Refuse outside a registered project.** The record must already exist. Otherwise the command exits 2 with `No operator 'verify-handoff'.` before it looks at the directory. Run
-  `python .github/skills/verify-operator/control_operator.py operator --run <run> --label handoff-unregistered --cwd <some-temp-dir> -- handoff --instance verify-handoff --status "should not land"`.
-  Exit `1`, and stderr names the unregistered directory and the fix:
-  `this directory is not a registered project` then
-  `start an operator in this directory first`.
-- **Write one without ending the session.** Run
-  `control_operator.py operator --run <run> --label handoff-write -- handoff --instance verify-handoff --status "drove the front door" --next "read it back" --no-restart`.
-  Exit `0`. Stdout is `handoff written to <run>/home/projects/<guid>/handoff/<id>.md`.
-  `<id>` is the record id (`op-` and 8 hex digits), not `verify-handoff`.
-  No `restart requested` line, because nothing was restarted.
-- **Prove it landed, and that nothing was restarted.** Run
+- **This harness cannot complete a handoff.** It is not a descendant of the recorded copilot, so `operator handoff` exits 2 with `this process is not inside an operator session` and writes nothing. That refusal is the check. The writes, the marker claim, and the forged `--instance` are covered by `tests/test_handoff_custody.py` and `tests/test_restart_claim.py`.
+- **A recorded drive still shows the refusal.** Run
+  `control_operator.py operator --run <run> --label handoff-write -- handoff --status "drove the front door" --next "read it back" --no-restart`.
+  Exit `2`. Stderr contains `not inside an operator session`. No handoff file and no restart marker.
+- **Prove nothing was written.** Run
   `control_operator.py evidence --run <run> --label after-handoff`. The manifest
-  lists `projects/<guid>/handoff/<id>.md` with a non-zero size and
-  **no** `restart/<id>`. That pair is the proof of `--no-restart`:
-  printing a path is not evidence that the session was left alone.
-- **End the session.** Run the same command without `--no-restart` and with a
-  different status. Exit `0`, and stdout now carries both lines:
-  `handoff written to ...` and `restart requested for <id>`.
-- **Prove the marker the supervisor polls is set.** Run
-  `control_operator.py evidence --run <run> --label after-restart`. The manifest
-  now lists `restart/<id> (0b)` beside the handoff file. The marker is
-  empty by design; its existence is the signal. `<id>` is the same id as the handoff file, not the display name.
-- **Prove the replace, and that no litter is left.** The handoff file holds the
-  second status and not the first, and the `handoff/` directory contains no
-  `*.tmp`. A partially written file is one the next session reads as complete.
-- **Refuse an unknown operator.** Run
-  `control_operator.py operator --run <run> --label handoff-unknown -- handoff --instance missing --status nope`.
-  Exit `2`, stderr is `No operator 'missing'.`, and no handoff file or restart marker appears.
-- **Refuse a path-shaped argument.** Run
-  `control_operator.py operator --run <run> --label handoff-bad-operator -- handoff --instance ../escape --status nope`.
-  Exit `2`, stderr is `No operator '../escape'.`, and nothing
-  named `escape.md` exists anywhere under `projects/`. The id comes from the record, so the argument never becomes a path.
-- **Refuse a status that is only whitespace.** Run the same command with
-  `--status "   "`. Exit `2` and stderr opens `Usage: operator handoff`. It
-  passes a truthiness check and would otherwise write an empty `## Status`.
-- **Refuse a mistyped switch rather than ignoring it.** Run with `--norestart`,
-  one hyphen short of the real flag. Exit `2`, stderr is
-  `operator handoff: unknown option --norestart`, and **no** restart marker
-  appears. This is the case worth driving: skipping the unknown flag silently
-  would end the session that the flag was typed to preserve.
+  lists neither `projects/<guid>/handoff/<id>.md` nor `restart/<id>`.
+- **Parse still refuses before it asks who you are.** These do not need a
+  session, so the harness can drive them. A status of only whitespace exits 2
+  and stderr opens `Usage: operator handoff`. `--norestart` exits 2 with
+  `operator handoff: unknown option --norestart` and writes nothing. A value
+  that starts with a dash is refused the same way, before any file is written.
+- **Unknown names and path-shaped arguments are not what this harness sees.**
+  Identity is checked before `--instance` is resolved, so both of those
+  commands exit 2 with `not inside an operator session`. The "no such operator"
+  and "this session is X, not Y" lines are covered by
+  `tests/test_handoff_custody.py`.
 - **Proof.** `artifacts/transcript.md` holds each command with its exit code and
-  both streams; `artifacts/after-handoff/` and `artifacts/after-restart/` hold
-  the home on either side of the restart request.
+  both streams. `artifacts/after-handoff/` holds a home with no handoff file
+  and no restart marker.
 
 ## Gotchas
 
-- **The file and the marker use the record id.** A display name resolves to that id, and so does the id itself. The record id never changes when the operator is renamed. `supervisor.py` probes `handoff_state(workdir, instance.id)`. A handoff by name restarts that operator. The preamble still prints the id. An unknown name exits 2 with `No operator '<name>'.` and writes nothing.
-- **The working directory decides the project**, exactly as it does for
-  `operator handoff`. The helper runs from the registered checkout unless `--cwd`
-  says otherwise.
+- **The file and the marker use the record id.** The caller does not choose it. Ancestry does. `supervisor.py` probes `handoff_state(workdir, instance.id)` and accepts the marker only when its `id` and `session` match the session it is watching. A forged `--instance` exits 2 and writes nothing.
+- **The operator's repo decides the project**, not the caller's working directory. A `cd` elsewhere still writes into the repo recorded for that operator.
 - **`--no-restart` is a switch and takes no value.** It is deliberately absent
   from the value-flag list, so writing `--no-restart yes` makes `yes` a stray
   positional and the command exits `2`.
@@ -99,8 +75,9 @@ Preconditions:
   value carries quotes of its own, and a suggestion that drops them silently is
   worse than none.
 - **Exit `2` and exit `1` mean different things here.** `2` is the command
-  refusing what it was asked (usage, unknown operator, unknown option) and nothing
-  was written. `1` is the command trying and failing (unregistered project,
+  refusing what it was asked (usage, not inside a session, a forged
+  `--instance`, an unknown option) and nothing was written. `1` is the command
+  trying and failing (the derived operator's repo is not a project, an
   unreadable catalog, a write that failed), which is a state question.
 - **A restart that could not be requested still leaves the handoff.** The file
   is the durable half, so the command reports the failure and exits `1` rather
