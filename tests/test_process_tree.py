@@ -42,6 +42,14 @@ def test_a_windows_parent_born_after_its_child_ends_the_chain(monkeypatch):
     assert process_tree.ancestry(10) == [20]
 
 
+def test_a_cycle_back_to_the_caller_does_not_list_the_caller(monkeypatch):
+    import process_tree
+    monkeypatch.setattr(process_tree, "IS_WINDOWS", True)
+    monkeypatch.setattr(process_tree, "_win_parents", lambda: {10: 20, 20: 10})
+    monkeypatch.setattr(process_tree, "_win_created", {10: 500, 20: 500}.get)
+    assert process_tree.ancestry(10) == [20]
+
+
 def test_a_windows_parent_that_is_gone_ends_the_chain(monkeypatch):
     import process_tree
     table = {10: 20, 20: 30, 30: 40}
