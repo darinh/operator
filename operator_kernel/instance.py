@@ -234,3 +234,4 @@ class Instance:
         """Drop live state and the continuity file. Still not the record."""
         self.cleanup_files()
         remove_file(self.state_file)
+        remove_file(RESTART_DIR / f"{self.id}.runner.log")

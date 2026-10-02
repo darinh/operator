@@ -683,6 +683,8 @@ def test_delete_yes_removes_record_state_and_handoff(tmp_path, monkeypatch, caps
     inst = record.instance()
     inst.state_file.parent.mkdir(parents=True, exist_ok=True)
     inst.state_file.write_text("kept", encoding="utf-8")
+    runner_log = inst.state_file.with_name(f"{record.id}.runner.log")
+    runner_log.write_text("[runner] copilot exited rc=0", encoding="utf-8")
     handoff = paths.project_handoff_file(tmp_path, record.id)
     assert isinstance(handoff, Path)
     handoff.parent.mkdir(parents=True, exist_ok=True)
@@ -690,6 +692,7 @@ def test_delete_yes_removes_record_state_and_handoff(tmp_path, monkeypatch, caps
     assert cli.main(["delete", "alpha", "--yes"]) == 0
     assert operators.find("alpha") is None
     assert not inst.state_file.exists()
+    assert not runner_log.exists()
     assert not handoff.exists()
     assert not paths.catalog_guid(tmp_path).guid
 
