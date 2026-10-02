@@ -112,7 +112,7 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool) -> i
     log(f"  Starting session: #{start_session_num}")
     log(f"  Poll interval: {POLL_INTERVAL}s")
     log(f"  Restart signal: {instance.restart_marker}")
-    log(f"  Attach: operator join {instance.display_name}")
+    log(f"  Attach: operator attach {instance.display_name}")
     log("═══════════════════════════════════════════")
 
     session_num = start_session_num
@@ -371,7 +371,7 @@ def _spawn_background_loop(instance: Instance, copilot_args: list[str],
     console, so nothing ever pops up.
     """
     cmd = [sys.executable, "-m", "operator_cli.supervise",
-           "--_supervise", "--loop", "--name", instance.display_name]
+           "--_supervise", "--loop", "--id", instance.id]
     if is_fresh:
         cmd.append("--fresh")
     cmd += copilot_args

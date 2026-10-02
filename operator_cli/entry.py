@@ -15,8 +15,9 @@ import sys
 from operator_kernel.argtail import at_dashdash
 
 from . import argv as _argv
-from . import handoff, project, recover, verbs
+from . import handoff, recover, verbs
 from .home import _bootstrap, _home, _settle_home
+from .lifecycle import attach as _attach, delete as _delete, rename as _rename, start as _start, stop as _stop
 
 
 from .verbs import VERBS, menu_items  # noqa: F401
@@ -62,17 +63,18 @@ def _ask(prompt: str) -> "str | None":
 
 
 def _ask_needed(prompt: str, what: str) -> "str | None":
+    article = "An" if what[:1].lower() in "aeiou" else "A"
     while True:
         value = _ask(prompt)
         if value is None:
             return None
         if value:
             return value
-        print(f"A {what} is needed.")
+        print(f"{article} {what} is needed.")
 
 
 def _prompt_start() -> "list[str] | None":
-    name = _ask_needed("Seat name: ", "seat name")
+    name = _ask_needed("Operator name: ", "operator name")
     if name is None:
         return None
     work = _ask("What should it work on: ")
@@ -139,117 +141,10 @@ def _menu() -> int:
     return dispatch(argv)
 
 
-def _start(rest: list[str]) -> int:
-    _bootstrap()
-    name, fresh, attach, copilot = "", False, False, []
-    options, literal = at_dashdash(rest)
-    i = 0
-    while i < len(options):
-        arg = options[i]
-        if arg in ("-h", "--help"):
-            print("Usage: operator start --name NAME [--agent AGENT] "
-                  "[--attach] [--fresh] [prompt...]")
-            return 0
-        if arg == "--fresh":
-            fresh = True
-        elif arg == "--attach":
-            attach = True
-        elif arg == "--name":
-            i += 1
-            if i >= len(options) or not options[i].strip():
-                print("operator start --name needs a value", file=sys.stderr)
-                return 2
-            name = options[i]
-        elif arg.startswith("--name="):
-            name = arg.split("=", 1)[1]
-        elif arg == "--agent":
-            i += 1
-            if i >= len(options) or not options[i].strip():
-                print("operator start --agent needs a value", file=sys.stderr)
-                return 2
-            copilot += ["--agent", options[i]]
-        elif arg.startswith("--agent="):
-            copilot += ["--agent", arg.split("=", 1)[1]]
-        else:
-            copilot.append(arg)
-        i += 1
-    copilot.extend(literal)
-    if not name.strip() and copilot and not copilot[0].startswith("-"):
-        name, copilot = copilot[0], copilot[1:]
-    if not name.strip():
-        print("Usage: operator start --name NAME [--agent AGENT] [--attach] "
-              "[--fresh] [prompt...]", file=sys.stderr)
-        return 2
-    from instance import Instance
-    from supervisor import _spawn_background_loop
-    from supervisor_control import launch_status, wait_for_session
-    rc, guid, created = project.ensure_registered()
-    if rc:
-        return rc
-    if created:
-        print(f"registered this directory as a project ({guid})")
-    inst = Instance(name)
-    pid = _spawn_background_loop(inst, copilot, is_fresh=fresh)
-    status, shown = launch_status(inst, pid)
-    if status != "ready":
-        print({"dead": f"seat {name} (pid {pid}) exited before the supervisor published"}.get(
-            status, f"could not confirm supervisor for {name} (pid {pid})"), file=sys.stderr)
-        return 1
-    print(f"started {name} (pid {shown})")
-    if attach:
-        wait_for_session(inst)
-        return _join([name])
-    return 0
-
-
 def _list(_rest: list[str]) -> int:
     _bootstrap()
     from .listing import list_instances
     return list_instances()
-
-
-def _named(rest: list[str]) -> str:
-    for arg in rest:
-        if not arg.startswith("-"):
-            return arg
-    return ""
-
-
-def _join(rest: list[str]) -> int:
-    _bootstrap()
-    name = _named(rest)
-    if not name:
-        print("Usage: operator join NAME", file=sys.stderr)
-        return 2
-    from config import MUX
-    from instance import Instance
-    from mux import MuxNotFoundError
-    inst = Instance(name)
-    try:
-        if not MUX.has_session(inst.session):
-            print(f"No running seat '{name}'.", file=sys.stderr)
-            return 1
-        return MUX.attach(inst.session)
-    except MuxNotFoundError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-
-
-def _stop(rest: list[str]) -> int:
-    _bootstrap()
-    name = _named(rest)
-    if not name:
-        print("Usage: operator stop NAME", file=sys.stderr)
-        return 2
-    from instance import Instance
-    from supervisor_control import _request_supervisor_stop
-    inst = Instance(name)
-    if not inst.is_managed():
-        print(f"No seat '{name}'.", file=sys.stderr)
-        return 1
-    _request_supervisor_stop(inst)
-    print(f"stop requested for {name}")
-    return 0
 
 
 def _doctor(_rest: list[str]) -> int:
@@ -296,8 +191,10 @@ HANDLERS = {
     "doctor": _doctor,
     "start": _start,
     "list": _list,
-    "join": _join,
+    "attach": _attach,
     "stop": _stop,
+    "rename": _rename,
+    "delete": _delete,
     "recover": _recover,
     "handoff": handoff.main,
 }
@@ -308,7 +205,7 @@ def dispatch(argv: list[str], home: "str | None" = None) -> int:
 
     Every verb reaches its handler through here, from typed argv and from the
     menu alike, so settling here is what makes the export unskippable. It used
-    to sit in `main` only: a seat started from the menu spawned its child
+    to sit in `main` only: an operator started from the menu spawned its child
     without the export, and the two agreed on the home by coincidence rather
     than by construction.
 

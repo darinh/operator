@@ -309,6 +309,17 @@ def test_a_matching_token_is_the_running_supervisor(monkeypatch):
     assert calls["n"] == 1
 
 
+def _record_listed(inst) -> None:
+    directory = op.OPERATOR_HOME / "operators"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{inst.id}.json").write_text(json.dumps({
+        "id": inst.id,
+        "name": inst.display_name,
+        "cwd": str(op.OPERATOR_HOME),
+        "created": "2026-01-01T00:00:00Z",
+    }), encoding="utf-8")
+
+
 def test_a_recycled_pid_stops_being_a_looping_instance(monkeypatch):
     """What the fix is *for*. `active_instances` and every supervisor notice
     in the listing are gated on this predicate, so a refusal has to reach
@@ -317,9 +328,8 @@ def test_a_recycled_pid_stops_being_a_looping_instance(monkeypatch):
     _write(inst, "4242", "pid_start=win:800")
     _alive(monkeypatch, 4242)
     _token_probe(monkeypatch, "win:900")
-    monkeypatch.setattr(op, "managed_instances",
-                        lambda: {inst.id: {"display_name": "listed"}})
     monkeypatch.setattr(op.MUX, "available", lambda: False)
+    _record_listed(inst)
 
     assert op.active_instances() == []
 
@@ -331,9 +341,8 @@ def test_a_live_supervisor_stays_a_looping_instance(monkeypatch):
     _write(inst, "4242", "pid_start=win:800")
     _alive(monkeypatch, 4242)
     _token_probe(monkeypatch, "win:800")
-    monkeypatch.setattr(op, "managed_instances",
-                        lambda: {inst.id: {"display_name": "listed"}})
     monkeypatch.setattr(op.MUX, "available", lambda: False)
+    _record_listed(inst)
 
     assert [i.id for i in op.active_instances()] == [inst.id]
 

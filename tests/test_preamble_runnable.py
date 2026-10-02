@@ -1,8 +1,8 @@
-"""Every command the supervisor advertises to a seat has to run.
+"""Every command the supervisor advertises to an operator has to run.
 
 The preamble is composed in one file and parsed in another, so the two can
 drift while both suites stay green. What is captured here is the text a real
-launch hands a seat, not a reconstruction of it: reconstructing the wiring
+launch hands an operator, not a reconstruction of it: reconstructing the wiring
 would keep passing if the supervisor stopped passing an argument.
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ import op
 
 from operator_cli import entry
 
-SEAT = "alpha"
+OPERATOR = "alpha"
 
 #: A single-token span is a command only if it could name a program. Multi-token
 #: spans are always commands, whatever the first token is, which is what lets
@@ -27,7 +27,7 @@ _EXECUTABLE = (".exe", ".cmd", ".bat", ".ps1", ".sh", ".com")
 
 
 def _launch_preamble(monkeypatch, tmp_path, *, remembered: str = "") -> str:
-    """The text one real `run_loop_mode` session hands its seat."""
+    """The text one real `run_loop_mode` session hands its operator."""
     from conftest import FakeMux
 
     home = tmp_path / "home"
@@ -51,7 +51,7 @@ def _launch_preamble(monkeypatch, tmp_path, *, remembered: str = "") -> str:
         instance.stop_marker.touch()
 
     monkeypatch.setattr(op, "start_session", capture)
-    op.run_loop_mode(op.Instance(SEAT), ["--agent", "test:agent"], is_fresh=True)
+    op.run_loop_mode(op.Instance(OPERATOR), ["--agent", "test:agent"], is_fresh=True)
     assert seen, "the loop never launched a session, so this proves nothing"
     return seen[0]
 
@@ -109,7 +109,7 @@ def _run(template: str) -> int:
 
 
 def _launch_texts(monkeypatch, tmp_path):
-    """Every preamble a seat can be handed, real launches first.
+    """Every preamble an operator can be handed, real launches first.
 
     The two real ones are what `run_loop_mode` actually produced, which is
     what this file exists to check. The rest are composed, because the clauses
@@ -124,7 +124,7 @@ def _launch_texts(monkeypatch, tmp_path):
     for extra in ({"crash_recovery": True}, {"handoff_unknown": True},
                   {"handoff_waiting": str(tmp_path / "h.md"),
                    "handoff_written": "2026-09-24T00:00:00Z"}):
-        yield P.build_preamble(Instance(SEAT), **extra)
+        yield P.build_preamble(Instance(OPERATOR), **extra)
 
 
 def _every_advertised_command(monkeypatch, tmp_path):
@@ -136,7 +136,7 @@ def test_every_advertised_command_is_a_program_this_project_installs(
         monkeypatch, tmp_path):
     """The check the old extractor could not perform.
 
-    `handoff --instance ... --status ...` was advertised to every seat as the
+    `handoff --instance ... --status ...` was advertised to every operator as the
     session-restart protocol while no distribution of this project installed
     a `handoff`. It resolved, on the machine where this was written, to a
     console script belonging to `copilot-tools`. On the fresh devbox this
@@ -201,7 +201,7 @@ def test_no_command_is_advertised_outside_backticks(monkeypatch, tmp_path):
                     f"how the handoff clause hid from every guard here")
 
 
-def test_a_fresh_seat_is_told_how_to_restart_itself(monkeypatch, tmp_path):
+def test_a_fresh_operator_is_told_how_to_restart_itself(monkeypatch, tmp_path):
     """Key fact (2) of every preamble, and the least tested thing in it.
 
     Naming it is not enough, which is the whole lesson of this file: the
@@ -213,29 +213,29 @@ def test_a_fresh_seat_is_told_how_to_restart_itself(monkeypatch, tmp_path):
     found = _commands(_launch_preamble(monkeypatch, tmp_path))
     restart = [c for c in found if "handoff" in c]
     assert len(restart) == 1, found
-    seat_id = Instance(SEAT).id
-    handoff = project_handoff_file(tmp_path / "work", seat_id)
-    marker = restart_marker_for(seat_id)
+    op_id = Instance(OPERATOR).id
+    handoff = project_handoff_file(tmp_path / "work", op_id)
+    marker = restart_marker_for(op_id)
     assert not handoff.exists() and not marker.exists()
     assert _run(restart[0]) == 0, f"the preamble advertises `{restart[0]}`"
     assert handoff.read_text(encoding="utf-8").strip()
     assert marker.exists()
 
 
-def test_the_restart_clause_advertises_the_seat_id_not_the_display_name():
+def test_the_restart_clause_advertises_the_op_id_not_the_display_name():
     """The supervisor probes with `instance.id` and the handoff file is named
     for it, so a clause naming the display name files the handoff where the
     next session does not look."""
     import preamble as P
     from instance import Instance
 
-    seat = Instance("a.b")
-    assert seat.id != seat.display_name, "pick a name that actually sanitises"
-    restart = [c for c in _commands(P.build_preamble(seat)) if "handoff" in c]
+    operator = Instance("op-abcdef01", "a.b")
+    assert operator.id != operator.display_name
+    restart = [c for c in _commands(P.build_preamble(operator)) if "handoff" in c]
     assert restart, "no handoff command was advertised at all"
     for command in restart:
-        assert f"--instance {seat.id}" in command, command
-        assert seat.display_name not in command.replace(seat.id, ""), command
+        assert f"--instance {operator.id}" in command, command
+        assert operator.display_name not in command.replace(operator.id, ""), command
 
 
 def test_an_executable_named_in_a_lone_span_is_still_a_command():

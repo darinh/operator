@@ -1,4 +1,4 @@
-"""Recovering the seats a crash or a reboot took down.
+"""Recovering the operators a crash or a reboot took down.
 
 The discriminator is what a clean stop leaves behind, which is nothing:
 `cleanup_files` removes the ownership claim and the recorded loop arguments. A
@@ -31,17 +31,26 @@ def home(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _crashed(name: str, workdir, *, args=("--agent", "test:agent")):
-    """A seat exactly as an unplanned shutdown leaves it.
+def _record(inst, cwd) -> None:
+    directory = op.OPERATOR_HOME / "operators"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{inst.id}.json").write_text(json.dumps({
+        "id": inst.id,
+        "name": inst.display_name,
+        "cwd": str(cwd),
+        "created": "2026-01-01T00:00:00Z",
+    }), encoding="utf-8")
 
-    Both files matter and for different reasons: the ownership claim is what
-    makes it a *managed* instance at all, and the recorded arguments are what
-    it can be restarted with.
+
+def _crashed(name: str, workdir, *, args=("--agent", "test:agent")):
+    """An operator exactly as an unplanned shutdown leaves it.
+
+    The record is what makes it known. The recorded arguments are what it can
+    be restarted with. A clean stop removes the arguments and leaves the record.
     """
     inst = op.Instance(name)
-    inst.managed_file.parent.mkdir(parents=True, exist_ok=True)
-    inst.managed_file.write_text(json.dumps({"session": inst.session}),
-                                 encoding="utf-8")
+    _record(inst, workdir)
+    inst.loop_args_file.parent.mkdir(parents=True, exist_ok=True)
     inst.loop_args_file.write_text(
         json.dumps({"user_args": list(args), "cwd": str(workdir)}),
         encoding="utf-8")
@@ -51,24 +60,25 @@ def _crashed(name: str, workdir, *, args=("--agent", "test:agent")):
 # ── who needs recovering ─────────────────────────────────────────
 
 
-def test_a_seat_that_was_running_when_the_machine_died_is_recoverable(home):
+def test_a_operator_that_was_running_when_the_machine_died_is_recoverable(home):
     _crashed("crashed", home / "work")
     assert [i.display_name for i in recoverable_instances()] == ["crashed"]
 
 
-def test_a_seat_stopped_on_purpose_is_not_recoverable(home):
+def test_a_operator_stopped_on_purpose_is_not_recoverable(home):
     """`cleanup_files` is the whole mechanism, and this is the test of it.
 
-    A seat somebody retired must not come back when the machine next boots.
+    An operator somebody retired must not come back when the machine next boots.
     There is no flag for this: the absence of the files a clean stop removes
     *is* the record that it was stopped cleanly.
     """
     inst = _crashed("retired", home / "work")
     inst.cleanup_files()
+    assert (op.OPERATOR_HOME / "operators" / f"{inst.id}.json").is_file()
     assert recoverable_instances() == []
 
 
-def test_a_seat_with_a_live_session_is_not_recoverable(home):
+def test_a_operator_with_a_live_session_is_not_recoverable(home):
     """It did not need recovering; starting a second supervisor for it is the
     two-supervisors catastrophe by another route."""
     inst = _crashed("still-up", home / "work")
@@ -77,7 +87,7 @@ def test_a_seat_with_a_live_session_is_not_recoverable(home):
     assert recoverable_instances() == []
 
 
-def test_a_seat_whose_supervisor_is_alive_is_not_recoverable(home, monkeypatch):
+def test_a_operator_whose_supervisor_is_alive_is_not_recoverable(home, monkeypatch):
     """A loop between sessions has no session for a moment, and is fine."""
     _crashed("between-sessions", home / "work")
     monkeypatch.setattr(op.supervisor_control, "_running_loop_pid",
@@ -85,19 +95,18 @@ def test_a_seat_whose_supervisor_is_alive_is_not_recoverable(home, monkeypatch):
     assert recoverable_instances() == []
 
 
-def test_a_seat_with_no_recorded_arguments_is_not_offered(home):
+def test_a_operator_with_no_recorded_arguments_is_not_offered(home):
     """There is nothing to restart it *with*, so offering it would be a lie.
 
     It is reported by `recover_loop` if named directly, which is where a human
-    asking about one specific seat should hear it.
+    asking about one specific operator should hear it.
     """
     inst = op.Instance("argless")
-    inst.managed_file.parent.mkdir(parents=True, exist_ok=True)
-    inst.managed_file.write_text("{}", encoding="utf-8")
+    _record(inst, home / "work")
     assert recoverable_instances() == []
 
 
-def test_several_seats_are_listed_in_a_stable_order(home):
+def test_several_operators_are_listed_in_a_stable_order(home):
     """A reboot takes the whole fleet, so this is the normal case, not the
     exotic one."""
     for name in ("charlie", "alpha", "bravo"):
@@ -128,8 +137,8 @@ def test_recovering_continues_the_run_rather_than_starting_a_new_one(
     assert spawned[0]["fresh"] is False
 
 
-def test_the_seat_is_recovered_where_it_was_working(home, spawned):
-    """Starting it in the caller's directory would point the seat at a
+def test_the_operator_is_recovered_where_it_was_working(home, spawned):
+    """Starting it in the caller's directory would point the operator at a
     different project than the one it recorded."""
     inst = _crashed("in-place", home / "work")
     recover_loop(inst)
@@ -138,15 +147,15 @@ def test_the_seat_is_recovered_where_it_was_working(home, spawned):
 
 def test_the_recorded_arguments_are_the_ones_it_comes_back_with(home, spawned):
     inst = _crashed("same-args", home / "work",
-                    args=("--agent", "kernel:seat", "--effort", "high"))
+                    args=("--agent", "kernel:operator", "--effort", "high"))
     recover_loop(inst)
-    assert spawned[0]["args"] == ["--agent", "kernel:seat", "--effort", "high"]
+    assert spawned[0]["args"] == ["--agent", "kernel:operator", "--effort", "high"]
 
 
 # ── refusals ─────────────────────────────────────────────────────
 
 
-def test_a_seat_with_no_recorded_arguments_is_refused(home, spawned):
+def test_a_operator_with_no_recorded_arguments_is_refused(home, spawned):
     inst = op.Instance("argless")
     inst.managed_file.parent.mkdir(parents=True, exist_ok=True)
     inst.managed_file.write_text("{}", encoding="utf-8")
@@ -154,15 +163,15 @@ def test_a_seat_with_no_recorded_arguments_is_refused(home, spawned):
     assert spawned == []
 
 
-def test_a_seat_whose_project_is_gone_is_refused(home, spawned, tmp_path):
+def test_a_operator_whose_project_is_gone_is_refused(home, spawned, tmp_path):
     """Recovering it elsewhere would silently point it at another project."""
     missing = tmp_path / "deleted-project"
     inst = _crashed("homeless", missing)
     assert recover_loop(inst) == 1
-    assert spawned == [], "a seat was recovered into a directory that is gone"
+    assert spawned == [], "an operator was recovered into a directory that is gone"
 
 
-def test_a_seat_that_is_already_running_is_refused(home, spawned):
+def test_a_operator_that_is_already_running_is_refused(home, spawned):
     """Between listing and acting, something may have started it."""
     inst = _crashed("already-up", home / "work")
     op.MUX.sessions[inst.session] = {"cwd": "", "argv": [],
@@ -172,7 +181,7 @@ def test_a_seat_that_is_already_running_is_refused(home, spawned):
 
 
 def test_a_spawn_that_fails_is_reported_rather_than_raised(home, monkeypatch):
-    """One seat that cannot start must not take the sweep down with it."""
+    """One operator that cannot start must not take the sweep down with it."""
     def explode(*a, **k):
         raise OSError("no processes available")
 

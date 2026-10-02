@@ -91,7 +91,7 @@ def test_directory_gone_between_exists_and_samefile_is_undecided(
     _assert_probe_failure_is_undecided(alias, guid, catalog)
 
 
-def test_a_seat_name_that_is_not_one_path_component_addresses_nothing(
+def test_a_operator_name_that_is_not_one_path_component_addresses_nothing(
         tmp_path, monkeypatch):
     """`operator handoff` takes the name from a command line, where
     `--instance ../elsewhere` would resolve outside `handoff/`."""
@@ -100,16 +100,16 @@ def test_a_seat_name_that_is_not_one_path_component_addresses_nothing(
         assert paths.project_handoff_file(stored, bad) is None, bad
 
 
-def test_an_empty_seat_still_answers_with_the_unmigrated_handoff(
+def test_an_empty_operator_still_answers_with_the_unmigrated_handoff(
         tmp_path, monkeypatch):
-    """An empty id is not a bad seat name, it is the pre-migration question,
+    """An empty id is not a bad operator name, it is the pre-migration question,
     and a project that never migrated still has `next-session.md`."""
     _home, stored, _alias, _guid, _catalog = _alias_catalog(tmp_path, monkeypatch)
     assert paths.project_handoff_file(stored, "").name == "next-session.md"
 
 
-def test_a_usable_seat_name_still_resolves_under_handoff(tmp_path, monkeypatch):
-    """Positive control: the gate must not refuse ordinary seats."""
+def test_a_usable_operator_name_still_resolves_under_handoff(tmp_path, monkeypatch):
+    """Positive control: the gate must not refuse ordinary operators."""
     _home, stored, _alias, _guid, _catalog = _alias_catalog(tmp_path, monkeypatch)
     found = paths.project_handoff_file(stored, "a-b-69f664")
     assert found.name == "a-b-69f664.md"

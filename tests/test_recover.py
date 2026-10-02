@@ -1,10 +1,10 @@
 """`operator recover` is the command a human runs after the machine comes back.
 
-Thin by design: `supervisor_control` decides which seats were running when the
+Thin by design: `supervisor_control` decides which operators were running when the
 machine went down and what continuing one means, and this parses arguments and
 calls in. So these tests are about the shape of the conversation rather than
 the decision -- what it lists, what it refuses to do without being asked, and
-whether one seat that cannot come back stops the others.
+whether one operator that cannot come back stops the others.
 
 The default is deliberately a *list*. A reboot takes the whole fleet, so
 `--all` is the common case, and a command whose bare form silently started
@@ -36,7 +36,7 @@ def cli(monkeypatch, tmp_path):
     return {"listed": listed, "recovered": recovered}
 
 
-def _seat(name):
+def _operator(name):
     return op.Instance(name)
 
 
@@ -45,13 +45,13 @@ def _seat(name):
 
 def test_with_nothing_to_do_it_says_so(cli, capsys):
     assert recover.main([]) == 0
-    assert "No seats need recovering" in capsys.readouterr().out
+    assert "No operators need recovering" in capsys.readouterr().out
 
 
 def test_it_lists_rather_than_starting_anything(cli, capsys):
     """A bare `operator recover` that silently started eight agents would be a
     command people run once."""
-    cli["listed"].extend([_seat("alpha"), _seat("bravo")])
+    cli["listed"].extend([_operator("alpha"), _operator("bravo")])
     assert recover.main([]) == 0
     out = capsys.readouterr().out
     assert "alpha" in out and "bravo" in out
@@ -59,7 +59,7 @@ def test_it_lists_rather_than_starting_anything(cli, capsys):
 
 
 def test_the_listing_says_how_to_act_on_it(cli, capsys):
-    cli["listed"].append(_seat("alpha"))
+    cli["listed"].append(_operator("alpha"))
     recover.main([])
     out = capsys.readouterr().out
     assert "operator recover --all" in out
@@ -68,32 +68,37 @@ def test_the_listing_says_how_to_act_on_it(cli, capsys):
 # ── acting ───────────────────────────────────────────────────────
 
 
-def test_all_recovers_every_seat(cli):
-    cli["listed"].extend([_seat("alpha"), _seat("bravo")])
+def test_all_recovers_every_operator(cli):
+    cli["listed"].extend([_operator("alpha"), _operator("bravo")])
     assert recover.main(["--all"]) == 0
     assert cli["recovered"] == ["alpha", "bravo"]
 
 
-def test_a_named_seat_is_recovered_alone(cli):
-    cli["listed"].extend([_seat("alpha"), _seat("bravo")])
+def test_a_named_operator_is_recovered_alone(cli, tmp_path):
+    import operators
+    operators.create("bravo", tmp_path)
+    cli["listed"].extend([_operator("alpha"), _operator("bravo")])
     assert recover.main(["bravo"]) == 0
     assert cli["recovered"] == ["bravo"]
 
 
-def test_naming_a_seat_does_not_require_it_to_be_in_the_list(cli, monkeypatch):
-    """The list is a convenience, not the authority. A human who knows which
-    seat they mean should not have to argue with the listing about it -- and
-    `recover_loop` refuses for its own reasons anyway."""
+def test_naming_an_operator_does_not_require_it_to_be_in_the_list(cli, tmp_path):
+    """The list is a convenience, not the authority. A recorded operator that
+    the listing omitted is still recoverable by name."""
+    import operators
+    operators.create("somebody-else", tmp_path)
     assert recover.main(["somebody-else"]) == 0
+    assert cli["recovered"] == ["somebody-else"]
+    assert recover.main(["missing"]) == 1
     assert cli["recovered"] == ["somebody-else"]
 
 
 # ── one failure must not decide the rest ─────────────────────────
 
 
-def test_one_seat_that_cannot_come_back_does_not_strand_the_others(
+def test_one_operator_that_cannot_come_back_does_not_strand_the_others(
         cli, monkeypatch, capsys):
-    """A deleted working directory is a property of that seat, not of the
+    """A deleted working directory is a property of that operator, not of the
     machine. After a reboot the whole fleet is in this list, so a sweep that
     stopped at the first refusal would recover almost none of it."""
     import supervisor_control
@@ -105,7 +110,7 @@ def test_one_seat_that_cannot_come_back_does_not_strand_the_others(
         return 0
 
     monkeypatch.setattr(supervisor_control, "recover_loop", refuse_bravo)
-    cli["listed"].extend([_seat("alpha"), _seat("bravo"), _seat("charlie")])
+    cli["listed"].extend([_operator("alpha"), _operator("bravo"), _operator("charlie")])
 
     assert recover.main(["--all"]) == 1, "a partial sweep reported success"
     assert cli["recovered"] == ["alpha", "charlie"]
@@ -113,7 +118,7 @@ def test_one_seat_that_cannot_come_back_does_not_strand_the_others(
 
 
 def test_a_sweep_that_recovers_everything_reports_success(cli, capsys):
-    cli["listed"].extend([_seat("alpha"), _seat("bravo")])
+    cli["listed"].extend([_operator("alpha"), _operator("bravo")])
     assert recover.main(["--all"]) == 0
     assert "2 of 2" in capsys.readouterr().out
 
@@ -130,7 +135,7 @@ def test_the_home_can_be_relocated():
 
 def test_a_name_and_all_are_both_optional():
     args = recover.build_parser().parse_args([])
-    assert args.name is None and args.all is False
+    assert args.name == [] and args.all is False
 
 
 def test_the_home_is_settled_before_the_kernel_resolves_it(tmp_path):
@@ -140,7 +145,7 @@ def test_the_home_is_settled_before_the_kernel_resolves_it(tmp_path):
     from it there, so a `--home` applied *after* the kernel is imported
     reaches nothing. The first version of this command did exactly that, and
     the only way it showed was running it: pointed at a fixture holding two
-    planted seats, it listed the developer's eleven real ones.
+    planted operators, it listed the developer's eleven real ones.
 
     A subprocess on purpose, because in-process the kernel is already
     imported and the ordering under test has already happened. Read-only --
@@ -148,9 +153,13 @@ def test_the_home_is_settled_before_the_kernel_resolves_it(tmp_path):
     """
     restart = tmp_path / "restart"
     restart.mkdir(parents=True)
-    (restart / "planted.managed").write_text('{"session": "planted"}',
-                                             encoding="utf-8")
-    (restart / "planted.loopargs.json").write_text(
+    records = tmp_path / "operators"
+    records.mkdir()
+    (records / "op-planted1.json").write_text(json.dumps({
+        "id": "op-planted1", "name": "planted", "cwd": str(tmp_path),
+        "created": "2026-01-01T00:00:00Z",
+    }), encoding="utf-8")
+    (restart / "op-planted1.loopargs.json").write_text(
         json.dumps({"user_args": ["--agent", "a"], "cwd": str(tmp_path)}),
         encoding="utf-8")
 
@@ -165,7 +174,7 @@ def test_the_home_is_settled_before_the_kernel_resolves_it(tmp_path):
              if ln.startswith("  ") and ln.strip()
              and not ln.strip().startswith(("Bring", "Or one"))]
     assert lines == ["planted"], (
-        f"the command listed seats from another home entirely: {lines}")
+        f"the command listed operators from another home entirely: {lines}")
 
 
 def test_recover_bootstraps_from_the_shared_home_helper():

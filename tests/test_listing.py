@@ -1,30 +1,47 @@
-"""`operator list` names each running operator and its supervisor pid."""
+"""`operator list` names each operator, running and not."""
 from __future__ import annotations
 
+import operators
 from operator_cli import listing
 
 
-class _Inst:
-    def __init__(self, name):
-        self.display_name = name
-        self.id = name
-
-
-def test_list_names_each_running_operator_and_its_pid(monkeypatch, capsys):
+def test_list_numbers_running_and_offline(tmp_path, monkeypatch, capsys):
+    import supervisor_records
+    work = tmp_path / "repo"
+    work.mkdir()
+    running = operators.create("alpha", work)
+    offline = operators.create("bravo", work)
+    monkeypatch.setattr(listing, "_running_loop_pid",
+                        lambda inst: 11 if inst.id == running.id else None)
+    monkeypatch.setattr(supervisor_records, "_running_loop_pid",
+                        lambda inst: 11 if inst.id == running.id else None)
     import supervisor_control
     monkeypatch.setattr(supervisor_control, "active_instances",
-                        lambda: [_Inst("alpha"), _Inst("bravo")])
-    monkeypatch.setattr(listing, "_running_loop_pid",
-                        lambda inst: 11 if inst.display_name == "alpha" else None)
+                        lambda: [running.instance()])
     assert listing.list_instances() == 0
-    out = capsys.readouterr().out
-    assert "alpha  pid 11" in out
-    assert "bravo" in out
-    assert "pid" not in out.split("bravo", 1)[1]
+    assert capsys.readouterr().out == (
+        "Running:\n"
+        f"  1. alpha  ({work.resolve()})  pid 11\n"
+        "Offline:\n"
+        f"  1. bravo  ({work.resolve()})\n"
+    )
+    assert offline.name == "bravo"
 
 
-def test_list_says_so_when_nothing_is_running(monkeypatch, capsys):
+def test_an_empty_heading_says_none(tmp_path, monkeypatch, capsys):
     import supervisor_control
+    work = tmp_path / "repo"
+    work.mkdir()
+    operators.create("only", work)
     monkeypatch.setattr(supervisor_control, "active_instances", lambda: [])
     assert listing.list_instances() == 0
-    assert capsys.readouterr().out.strip() == "No running seats."
+    out = capsys.readouterr().out
+    assert "Running:\n  (none)\n" in out
+    assert "Offline:\n  1. only  " in out
+
+
+def test_list_with_no_records_says_how_to_start(capsys):
+    assert listing.list_instances() == 0
+    assert capsys.readouterr().out == (
+        "No operators yet. Start one with: operator start\n"
+    )

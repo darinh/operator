@@ -1,6 +1,6 @@
 """`operator handoff` -- end this session and leave the next one a record.
 
-The preamble has advertised this to every seat since it was written, naming a
+The preamble has advertised this to every operator since it was written, naming a
 bare `handoff` that belongs to `copilot-tools` rather than here. The kernel's
 half was always present: `exits.handoff_state` reads the file and
 `supervisor.py` polls the marker, while nothing here wrote either.
@@ -18,7 +18,7 @@ from .home import _bootstrap
 VALUE_FLAGS = ("--instance", "--status", "--next", "--context")
 SWITCHES = ("--no-restart",)
 
-USAGE = ("Usage: operator handoff --instance NAME --status TEXT "
+USAGE = ("Usage: operator handoff --instance ID --status TEXT "
          "[--next TEXT] [--context TEXT] [--no-restart]")
 
 
@@ -64,7 +64,7 @@ def parse(options: list[str]) -> "dict[str, str] | None":
             return None
         if "--instance" not in values:
             # `operator handoff alpha --status ...`, the shape every other
-            # verb here accepts for a seat name.
+            # verb here accepts for an operator name.
             values["--instance"] = arg
             i += 1
             continue
@@ -85,17 +85,17 @@ def main(rest: list[str]) -> int:
     values = parse(options)
     if values is None:
         return 2
-    seat = values.get("--instance", "").strip()
+    operator = values.get("--instance", "").strip()
     status = values.get("--status", "").strip()
-    if not seat or not status:
+    if not operator or not status:
         print(USAGE, file=sys.stderr)
         return 2
-    if not guid_is_usable(seat):
-        # A seat name is one component of a filename the next session has to
-        # find, so `../elsewhere` is not a seat this can write for.
-        print(f"the seat name {seat!r} is not usable", file=sys.stderr)
+    if not guid_is_usable(operator):
+        # An operator id is one component of a filename the next session has to
+        # find, so `../elsewhere` is not an id this can write for.
+        print(f"the operator id {operator!r} is not usable", file=sys.stderr)
         return 2
-    landed = write_handoff(Path.cwd(), seat, status,
+    landed = write_handoff(Path.cwd(), operator, status,
                            values.get("--next", ""),
                            values.get("--context", ""))
     if landed is CATALOG_UNREADABLE:
@@ -111,12 +111,12 @@ def main(rest: list[str]) -> int:
     print(f"handoff written to {landed}")
     if "--no-restart" in values:
         # The write is the durable half and the restart is not always wanted.
-        # A seat checkpointing before a long step needs the file on disk and
+        # An operator checkpointing before a long step needs the file on disk and
         # needs to keep running.
         return 0
-    if not request_restart(seat):
+    if not request_restart(operator):
         print("the handoff was written but the restart could not be requested",
               file=sys.stderr)
         return 1
-    print(f"restart requested for {seat}")
+    print(f"restart requested for {operator}")
     return 0

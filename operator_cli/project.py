@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import os
+import shutil
 import sys
 import time
 import uuid
@@ -189,3 +190,42 @@ def _ensure_registered_locked(target: Path) -> "tuple[int, str, bool]":
         print("could not write the project catalog", file=sys.stderr)
         return 1, "", False
     return 0, guid, True
+
+
+def forget(path: "str | Path") -> None:
+    """Drop the catalog row and project directory for `path`.
+
+    Never deletes a path outside ``projects_root``. A missing row is a no-op.
+    """
+    target = _resolve(str(path), must_exist=False)
+    if target is None:
+        return
+    try:
+        with _catalog_lock():
+            _forget_locked(target)
+    except OSError:
+        return
+
+
+def _forget_locked(target: Path) -> None:
+    import paths
+
+    found = paths.catalog_guid(target)
+    if found.undecided or not found.guid:
+        return
+    catalog = paths.project_catalog_path()
+    rows = _rows(catalog)
+    if rows is None:
+        return
+    kept = [(stored, guid) for stored, guid in rows if not _same_path(target, stored)]
+    if len(kept) != len(rows) and not _write_rows(catalog, kept):
+        return
+    root = paths.projects_root().resolve()
+    proj = paths.project_dir(found.guid)
+    try:
+        resolved = proj.resolve()
+    except OSError:
+        return
+    if resolved == root or root not in resolved.parents:
+        return
+    shutil.rmtree(resolved, ignore_errors=True)

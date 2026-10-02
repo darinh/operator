@@ -150,22 +150,19 @@ def handoff_state(workdir: Path, instance_id: str = "") -> HandoffState:
 #: `write_handoff` could address the file and could not write it. Distinct
 #: from `None`, which means there was nowhere to write in the first place: one
 #: is a full disk or a denied directory, the other is an unregistered project,
-#: and the seat is owed different sentences for them.
+#: and the operator is owed different sentences for them.
 WRITE_FAILED = "write-failed"
 
 
 def write_handoff(workdir: Path, instance_id: str, status: str,
                   next_steps: str = "", context: str = "") -> object:
-    """Write this seat's handoff, returning the path it landed at.
+    """Write this operator's handoff, returning the path it landed at.
 
-    ``instance_id`` is the seat **id**, never the display name. That is the
+    ``instance_id`` is the operator **id**, never the display name. That is the
     name the supervisor probes with (``handoff_state(workdir, instance.id)``
-    at `supervisor.py`) and the name the file is called, and
-    ``safe_instance_id`` maps ``a.b`` to ``a-b-69f664`` -- so a handoff filed
+    at `supervisor.py`) and the name the file is called, so a handoff filed
     under the display name is written somewhere the next session does not
-    look, while the restart it triggers happens anyway. `preamble.py` makes
-    the same point about ``operator remember``, three clauses further down,
-    and both reviewers of this change caught it here independently.
+    look, while the restart it triggers happens anyway.
 
     The writer lives beside :func:`handoff_state`, its reader, because the two
     agree on a location and nothing else checks that they still do. They were
@@ -177,12 +174,12 @@ def write_handoff(workdir: Path, instance_id: str, status: str,
 
     The path values are :func:`project_handoff_file`'s, deliberately
     unchanged. "The catalog would not open", "this project is not registered
-    or that seat name cannot be a filename" and a real path are different
+    or that operator name cannot be a filename" and a real path are different
     facts and the caller owes the agent different sentences, which is the
     argument :func:`handoff_state` already makes for refusing to collapse
     them.
 
-    Never raises. A seat that cannot write its handoff still has to be able to
+    Never raises. An operator that cannot write its handoff still has to be able to
     report that, and a traceback out of the last command a session runs is the
     one place an error message is worth most.
 
@@ -198,7 +195,7 @@ def write_handoff(workdir: Path, instance_id: str, status: str,
         # `project_handoff_file` answers an empty id with the project's legacy
         # `next-session.md`, which the reader still needs for an unmigrated
         # project. A *writer* must never land there: it is one shared file per
-        # project, so a seat with no id would overwrite another seat's baton.
+        # project, so an operator with no id would overwrite another operator's baton.
         return None
     if handoff_file is CATALOG_UNREADABLE or handoff_file is None:
         return handoff_file
@@ -232,18 +229,16 @@ def write_handoff(workdir: Path, instance_id: str, status: str,
 
 
 def request_restart(instance_id: str) -> bool:
-    """Ask this seat's supervisor to end the session and launch the next one.
+    """Ask this operator's supervisor to end the session and launch the next one.
 
     Separate from :func:`write_handoff` so the file is on disk before the
     supervisor is told to look. The marker is what `supervisor.py` polls, and
     it tears the session down as soon as it sees it -- so touching it first
     would race the write it exists to announce.
 
-    Addressed through :func:`instance.restart_marker_for` rather than by
-    building an `Instance`, because ``instance_id`` is already an id and
-    ``safe_instance_id`` is not idempotent. False if the marker could not be
-    set, which leaves a written handoff and a session that keeps running: the
-    recoverable half of the two.
+    Addressed through :func:`instance.restart_marker_for`. False if the marker
+    could not be set, which leaves a written handoff and a session that keeps
+    running: the recoverable half of the two.
     """
     if not guid_is_usable(instance_id):
         return False

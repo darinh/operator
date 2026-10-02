@@ -2,7 +2,7 @@
 
 The kernel half of this is tested in `test_exits.py`. What is here is the
 door: flags in, exit codes and printed lines out, and the two side effects a
-seat depends on, which are the file on disk and the marker the supervisor
+operator depends on, which are the file on disk and the marker the supervisor
 polls.
 """
 from __future__ import annotations
@@ -40,8 +40,8 @@ def test_it_writes_the_file_and_asks_for_the_next_session(
     assert marker.exists()
 
 
-def test_the_seat_name_can_be_positional(tmp_path, monkeypatch):
-    """Every other verb here takes a bare seat name, so this one does too."""
+def test_the_operator_name_can_be_positional(tmp_path, monkeypatch):
+    """Every other verb here takes a bare operator name, so this one does too."""
     work = _project(tmp_path, monkeypatch)
     assert cli.main(["handoff", "alpha", "--status", "done"]) == 0
     assert paths.project_handoff_file(work, "alpha").exists()
@@ -69,7 +69,7 @@ def test_no_status_is_a_usage_error(tmp_path, monkeypatch, capsys):
 
 def test_a_flag_left_without_a_value_names_itself(tmp_path, monkeypatch,
                                                   capsys):
-    """`--status` swallowing the end of argv would otherwise read as a seat
+    """`--status` swallowing the end of argv would otherwise read as an operator
     with no status, which reports the wrong problem."""
     _project(tmp_path, monkeypatch)
     assert cli.main(["handoff", "--instance", "alpha", "--status"]) == 2
@@ -77,7 +77,7 @@ def test_a_flag_left_without_a_value_names_itself(tmp_path, monkeypatch,
 
 
 def test_it_can_checkpoint_without_ending_the_session(tmp_path, monkeypatch):
-    """A seat about to start something long wants the file on disk and wants
+    """An operator about to start something long wants the file on disk and wants
     to keep running."""
     work = _project(tmp_path, monkeypatch)
     assert cli.main(["handoff", "--instance", "alpha", "--status", "midway",
@@ -124,7 +124,7 @@ def test_a_whitespace_only_status_is_not_a_status(tmp_path, monkeypatch,
     assert "Usage: operator handoff" in capsys.readouterr().err
 
 
-def test_a_seat_name_that_escapes_the_handoff_directory_is_refused(
+def test_a_operator_name_that_escapes_the_handoff_directory_is_refused(
         tmp_path, monkeypatch, capsys):
     """`--instance ../escape` addressed a file outside `handoff/`."""
     _project(tmp_path, monkeypatch)
