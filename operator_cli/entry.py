@@ -95,40 +95,18 @@ class _Actions:
 
     def sections(self):
         import operators
-        import supervisor_control
-        from supervisor_records import _running_loop_pid
+        from .listing import sections
         from .menu import Op
-        records = operators.all_operators() or []
-        live = {inst.id for inst in supervisor_control.active_instances()}
-        running, offline = [], []
-        for record in records:
-            label = f"{record.name}  ({record.cwd})"
-            if record.id in live:
-                pid = _running_loop_pid(record.instance())
-                if pid:
-                    label = f"{label}  pid {pid}"
-                running.append(Op(record.name, record.cwd, label, True))
-            else:
-                offline.append(Op(record.name, record.cwd, label, False))
-        return running, offline
+        running, offline = sections(operators.all_operators() or [])
+        return ([Op(op.name, op.cwd, label, True) for op, label in running],
+                [Op(op.name, op.cwd, label, False) for op, label in offline])
 
-    def start(self, argv):
-        return _start(argv)
-
-    def attach(self, argv):
-        return _attach(argv)
-
-    def stop(self, argv):
-        return _stop(argv)
-
-    def rename(self, argv):
-        return _rename(argv)
-
-    def delete(self, argv):
-        return _delete(argv)
-
-    def recover(self, names):
-        return recover.main(list(names))
+    start = staticmethod(_start)
+    attach = staticmethod(_attach)
+    stop = staticmethod(_stop)
+    rename = staticmethod(_rename)
+    delete = staticmethod(_delete)
+    recover = staticmethod(recover.main)
 
 
 def _interactive() -> int:

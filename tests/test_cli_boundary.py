@@ -17,8 +17,8 @@ CLI = REPO / "operator_cli"
 # The old prompts lived in entry.py and verbs.py and were deleted. The decoder
 # (keys.py) and the screens (menu.py) are new modules, and no module crosses
 # the per-module ceiling. 1266 and 1610 are the measured sizes.
-MAX_CLI_CODE_LINES = 1266
-MAX_CLI_TOTAL_LINES = 1610
+MAX_CLI_CODE_LINES = 1251
+MAX_CLI_TOTAL_LINES = 1593
 
 
 def cli_modules() -> list[Path]:
