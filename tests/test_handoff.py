@@ -83,9 +83,10 @@ def test_the_operator_name_can_be_positional(tmp_path, monkeypatch, capsys):
 
 def test_an_unknown_operator_exits_2_and_writes_nothing(
         tmp_path, monkeypatch, capsys):
-    _project(tmp_path, monkeypatch)
+    work = _project(tmp_path, monkeypatch)
+    _seat(monkeypatch, _operator(work))
     assert cli.main(["handoff", "--instance", "missing", "--status", "x"]) == 2
-    assert "not inside an operator session" in capsys.readouterr().err
+    assert "this session is alpha, not missing" in capsys.readouterr().err
     assert list(paths.projects_root().rglob("*.md")) == []
     assert not op.restart_marker_for("missing").exists()
 
@@ -178,9 +179,10 @@ def test_a_operator_name_that_escapes_the_handoff_directory_is_refused(
         tmp_path, monkeypatch, capsys):
     """`--instance ../escape` is not an operator, so it never becomes a path."""
     work = _project(tmp_path, monkeypatch)
+    _seat(monkeypatch, _operator(work))
     assert cli.main(["handoff", "--instance", "../escape",
                      "--status", "done"]) == 2
-    assert "not inside an operator session" in capsys.readouterr().err
+    assert "this session is alpha, not ../escape" in capsys.readouterr().err
     assert list(paths.projects_root().rglob("escape.md")) == []
     assert not op.restart_marker_for("../escape").exists()
     assert work.is_dir()

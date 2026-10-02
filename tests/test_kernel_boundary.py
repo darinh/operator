@@ -136,8 +136,10 @@ MAX_MODULE_LINES = 603
 #:
 #: Raised from 2329 to 2555 for chain-of-custody handoff. `process_tree.py`
 #: and `custody.py` are the new modules; the marker claim lives in `exits.py`
-#: so `supervisor.py` did not grow a reader. 2555 is the measured size.
-MAX_KERNEL_CODE_LINES = 2555
+#: so `supervisor.py` did not grow a reader. Then to 2568 so the Windows walk
+#: stops at a parent born after its child, a pid Windows has reused. 2568 is
+#: the measured size.
+MAX_KERNEL_CODE_LINES = 2568
 
 #: Per-module code ceiling, the same split applied one file down.
 #: Raised from 325 when the runner records custody beside the pid file.

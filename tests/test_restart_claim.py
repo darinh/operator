@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 import op
 
 
@@ -113,6 +115,22 @@ def test_an_empty_marker_is_an_unrequested_exit(monkeypatch, tmp_path):
 def test_a_garbage_marker_is_an_unrequested_exit(monkeypatch, tmp_path):
     def write(instance, session_num):
         instance.restart_marker.write_text("not json", encoding="utf-8")
+
+    rc, _seen, text = _ignored(monkeypatch, tmp_path, write)
+    assert rc == 1
+    assert "restart signal detected" not in text
+    assert "Ignoring restart marker" in text
+
+
+@pytest.mark.parametrize("fake", [True, 1.0])
+def test_a_session_that_only_equals_the_number_is_an_unrequested_exit(
+        monkeypatch, tmp_path, fake):
+    """JSON `true` and `1.0` compare equal to 1 in Python. Neither is a session."""
+    def write(instance, session_num):
+        assert session_num == 1
+        instance.restart_marker.write_text(
+            json.dumps({"id": instance.id, "session": fake}),
+            encoding="utf-8")
 
     rc, _seen, text = _ignored(monkeypatch, tmp_path, write)
     assert rc == 1

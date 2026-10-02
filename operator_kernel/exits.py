@@ -284,6 +284,7 @@ def restart_claimed(instance_id: str, session_num: int) -> bool:
         payload = None
     if (not isinstance(payload, dict)
             or payload.get("id") != instance_id
+            or type(payload.get("session")) is not int
             or payload.get("session") != session_num):
         log(f"  Ignoring restart marker for {instance_id}: "
             f"not a claim for session #{session_num}")

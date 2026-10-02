@@ -41,7 +41,7 @@ operator handoff --status "what you did" [--next "what is next"]
 
 Handoff is for the agent inside the session, not the menu. It writes a handoff file for that operator's own repo and asks the supervisor to start the next session. When to hand off is the repository's business, in AGENTS.md or from the user. The launch preamble only says that a handoff is possible and how to run it.
 
-`operator handoff` identifies the calling session by walking its process ancestry and matching the custody record the runner wrote at launch. It refuses if it cannot find exactly one operator. `--instance` is an optional cross-check, not the address. This is a check against a caller confused about which session it is in. It is not a security boundary against other code running as the same user.
+`operator handoff` identifies the calling session by walking its process ancestry and matching the custody record the runner wrote at launch. It refuses if it cannot find exactly one operator. `--instance` is an optional cross-check, not the address. This is a check against a caller confused about which session it is in. It is not a security boundary against other code running as the same user. Sessions launched before this check existed have no custody record, so stop and restart those operators after upgrading.
 
 ## Tests
 
