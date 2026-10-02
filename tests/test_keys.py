@@ -120,20 +120,27 @@ def _piped(data: bytes):
 def test_read_utf8_returns_a_multibyte_character_whole():
     import os
     fd = _piped("\u00e9a".encode("utf-8"))
+    held = bytearray()
     try:
-        assert keys._read_utf8(fd) == "\u00e9"
-        assert keys._read_utf8(fd) == "a"
-        assert keys._read_utf8(fd) == ""
+        assert keys._read_utf8(fd, held) == "\u00e9"
+        assert keys._read_utf8(fd, held) == "a"
+        assert keys._read_utf8(fd, held) == ""
     finally:
         os.close(fd)
 
 
 def test_a_byte_that_is_never_utf8_does_not_swallow_later_keys():
     import os
-    fd = _piped(b"\xffq")
+    fd = _piped(b"\xffq\xc3zx")
+    held = bytearray()
     try:
-        assert keys._read_utf8(fd) == keys.UNDECODABLE
-        assert keys._read_utf8(fd) == "q"
+        assert keys._read_utf8(fd, held) == keys.UNDECODABLE
+        assert keys._read_utf8(fd, held) == "q"
+        # \xc3 opens a two-byte character that z breaks; z is still a key.
+        assert keys._read_utf8(fd, held) == keys.UNDECODABLE
+        assert keys._read_utf8(fd, held) == "z"
+        assert keys._read_utf8(fd, held) == "x"
+        assert keys._read_utf8(fd, held) == ""
     finally:
         os.close(fd)
     assert list(keys.decode(_pull([keys.UNDECODABLE, "q"]), windows=False,
