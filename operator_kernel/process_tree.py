@@ -125,6 +125,18 @@ def _procfs() -> bool:
         return False
 
 
+def _win_created(pid: int) -> "int | None":
+    """Creation time of a live process, or ``None`` if it is gone or closed to us."""
+    import process_identity
+    token = process_identity.process_start_token(pid)
+    if not token or not token.startswith("win:"):
+        return None
+    try:
+        return int(token[4:])
+    except ValueError:
+        return None
+
+
 def ancestry(pid: int) -> "list[int] | None":
     """Parents of ``pid``, nearest first. ``None`` if the table cannot be read."""
     if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
@@ -134,6 +146,7 @@ def ancestry(pid: int) -> "list[int] | None":
         table = _win_parents()
         if table is None:
             return None
+        child_born = _win_created(pid)
     use_proc = not IS_WINDOWS and _procfs()
 
     chain: list[int] = []
@@ -141,10 +154,14 @@ def ancestry(pid: int) -> "list[int] | None":
     current = pid
     while len(chain) < _ANCESTRY_CAP:
         if IS_WINDOWS:
-            if current not in table:
-                parent = None
-            else:
-                parent = table[current]
+            parent = table.get(current)
+            if parent is not None and parent > 0:
+                # Windows keeps a dead parent's pid and reuses pids, so the
+                # recorded parent may be a stranger born after the child.
+                born = _win_created(parent)
+                if born is None or child_born is None or born > child_born:
+                    break
+                child_born = born
         elif use_proc:
             parent = _linux_parent(current)
         else:
