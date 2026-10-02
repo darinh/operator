@@ -52,7 +52,9 @@ def _one_then_stop(attempts, fingerprints=None):
         if attempts["n"] >= 2:
             instance.stop_marker.touch()
         else:
-            instance.restart_marker.touch()
+            instance.restart_marker.write_text(
+                json.dumps({"id": instance.id, "session": session_num}),
+                encoding="utf-8")
     return start_session
 
 

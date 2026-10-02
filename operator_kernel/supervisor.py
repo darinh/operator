@@ -13,7 +13,7 @@ from config import (HEALTHY_SESSION_SECONDS, IS_WINDOWS, LAUNCH_BACKOFF_BASE,
                     MAX_LAUNCH_FAILURES, MAX_SESSIONS, MUX, POLL_INTERVAL,
                     RESTART_PAUSE_SECONDS, SESSION_ID_WAIT, UUID_RE)
 from exits import (handoff_state, HANDOFF_MISSING, HANDOFF_UNKNOWN,
-                   HANDOFF_WAITING)
+                   HANDOFF_WAITING, restart_claimed)
 from instance import Instance
 from argtail import before_terminator
 from launch import (args_have_explicit_session, extract_agent_from_args,
@@ -251,14 +251,11 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool) -> i
                         unknown_markers = 0
                         uptime = (None if session_started_at is None
                                   else time.time() - session_started_at)
-                        # Probed as a tri-state and recorded as one. `marker_set`
-                        # answers False for "not there" and for "could not
-                        # look", which is the right call for the *branch* -- one
-                        # more poll is cheap -- but writing that False into the
-                        # evidence would enter a guess as an observation, and the
-                        # postmortem reading it has no way to tell them apart.
-                        restart_probe = marker_state(instance.restart_marker)
-                        if restart_probe is True:
+                        # A restart is a claim naming this operator and this
+                        # session. An empty marker, a stale session, or a
+                        # claim for someone else is not one, and an exit with
+                        # no claim is an exit nobody asked for.
+                        if restart_claimed(instance.id, session_num):
                             log(f"Session #{session_num}: restart signal detected!")
                             crash_failures = 0
                         else:
@@ -290,11 +287,11 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool) -> i
                                 return 1
                         restart_requested = True
                         break
-                    if marker_set(instance.restart_marker):
+                    if restart_claimed(instance.id, session_num):
                         log(f"Session #{session_num}: restart signal detected!")
                         crash_failures = 0
                         # The handoff path arrives here, not above: `handoff`
-                        # touches the marker while copilot is still up, so the
+                        # writes the marker while copilot is still up, so the
                         # supervisor sees the request before it sees the exit.
                         restart_requested = True
                         break

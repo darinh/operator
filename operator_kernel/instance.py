@@ -65,6 +65,12 @@ class Instance:
         return RESTART_DIR / f"{self.id}.pid"
 
     @property
+    def custody_file(self) -> Path:
+        """Pid, start token, and session of the copilot this supervisor launched."""
+        from custody import file_in
+        return file_in(RESTART_DIR, self.id)
+
+    @property
     def exit_file(self) -> Path:
         return RESTART_DIR / f"{self.id}.exit"
 
@@ -223,7 +229,7 @@ class Instance:
 
     def _state_files(self) -> tuple[Path, ...]:
         return (self.restart_marker, self.managed_file, self.spec_file,
-                self.pid_file, self.exit_file, self.session_file,
+                self.pid_file, self.custody_file, self.exit_file, self.session_file,
                 self.loop_pid_file, self.loop_startup_file,
                 self.stop_marker, self.loop_args_file)
 

@@ -17,8 +17,13 @@ CLI = REPO / "operator_cli"
 # The old prompts lived in entry.py and verbs.py and were deleted. The decoder
 # (keys.py) and the screens (menu.py) are new modules, and no module crosses
 # the per-module ceiling. 1266 and 1610 are the measured sizes.
-MAX_CLI_CODE_LINES = 1279
-MAX_CLI_TOTAL_LINES = 1632
+# Raised from 1266/1610 when handoff refuses a whitespace status, an unknown
+# option, and a value that looks like a flag. 1279 and 1632 are the measured
+# sizes.
+# Raised from 1279/1632 when handoff derives the operator from process custody
+# and treats `--instance` as a cross-check. 1288 and 1641 are the measured sizes.
+MAX_CLI_CODE_LINES = 1288
+MAX_CLI_TOTAL_LINES = 1641
 
 
 def cli_modules() -> list[Path]:

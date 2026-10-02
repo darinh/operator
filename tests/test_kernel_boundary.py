@@ -60,7 +60,9 @@ FORBIDDEN = frozenset({
 #: twenty well-sized modules is navigable at any total, which is why this is
 #: the only total-line ceiling here -- see the note on `MAX_KERNEL_CODE_LINES`
 #: about the kernel-wide one that used to sit beside it.
-MAX_MODULE_LINES = 602
+#: Raised from 602 when the runner records custody beside the pid file.
+#: `runner.py` is 603. 603 is the measured size.
+MAX_MODULE_LINES = 603
 
 #: The complexity budget, in **code** lines -- docstrings, comments and blanks
 #: excluded.
@@ -131,11 +133,16 @@ MAX_MODULE_LINES = 602
 #: Raised from 2281 to 2322 for the records lock, the unreadable-file signal,
 #: and `delete_files` reporting a path it could not remove. 2322 is the
 #: measured size.
-MAX_KERNEL_CODE_LINES = 2329
+#:
+#: Raised from 2329 to 2555 for chain-of-custody handoff. `process_tree.py`
+#: and `custody.py` are the new modules; the marker claim lives in `exits.py`
+#: so `supervisor.py` did not grow a reader. 2555 is the measured size.
+MAX_KERNEL_CODE_LINES = 2555
 
 #: Per-module code ceiling, the same split applied one file down.
-#: `runner.py` is the largest at 325.
-MAX_MODULE_CODE_LINES = 325
+#: Raised from 325 when the runner records custody beside the pid file.
+#: `runner.py` is the largest at 331. 331 is the measured size.
+MAX_MODULE_CODE_LINES = 331
 
 
 def code_lines(source: str) -> int:

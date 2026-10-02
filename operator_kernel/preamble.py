@@ -17,8 +17,7 @@ def build_preamble(instance: Instance, *, crash_recovery: bool = False,
         "You are running unattended under the operator supervisor, which "
         "relaunches this session when it ends. Nobody is reading this session.",
         "To end this session and start the next one, run: "
-        f"`operator handoff --instance {instance.id} "
-        '--status "..." --next "..." --context "..."`.',
+        '`operator handoff --status "..." --next "..."`.',
     ]
     if handoff_waiting:
         lines.append(
