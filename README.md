@@ -1,81 +1,45 @@
 # operator
 
-Start a supervised Copilot CLI session, and let it hand off to the next one.
+`operator` starts a supervised Copilot CLI session that relaunches, and lets the agent hand off to a fresh session.
 
-You give an agent a repository and walk away. `operator` starts a Copilot CLI session in a terminal multiplexer and a supervisor that relaunches it. The agent ends a session with `operator handoff`. The next session is told where that handoff is. The tool writes no code itself.
-
-The unit it supervises is an **operator**. An operator outlives the sessions it runs.
+The unit it supervises is an operator. An operator outlives the sessions it runs. The tool writes no code itself.
 
 ## Install
+
+Python 3.10 or newer. The GitHub Copilot CLI must be on PATH, and so must `tmux` or `psmux`.
 
 ```
 pip install -e .
 operator doctor
 ```
 
-`doctor` names anything missing and how to install it. It needs the GitHub Copilot CLI on PATH and a terminal multiplexer (`tmux`, or `psmux` on Windows).
+`doctor` names anything missing and how to install it.
 
-Python 3.10 or newer. Nothing else is required.
+## Menu
 
-## Quickstart
+`operator` with no arguments opens a menu when stdin and stdout are a terminal. Otherwise it prints help and exits 2.
 
-```
-cd ~/repos/yourproject
-operator start --name alpha
-operator list
-operator attach alpha
-```
+Up and Down move the highlight. Space toggles a row on the recover screen. Enter confirms. Esc goes back. Esc on the main menu quits. Ctrl-C exits 130 and restores the terminal.
 
-`start` registers the current directory. The agent inside the session hands off with:
+The main menu is Start an operator, List operators, Recover operator sessions when any need it, and Quit. When none need recovery, that row says so and selecting it stays on the menu. After an action you return to the screen you came from. Attach, and Start and attach, are the exceptions. They leave the menu and take this terminal.
+
+## Verbs
 
 ```
-operator handoff --instance alpha --status "what you did" --next "what is next" --context "what the next session needs"
-```
-
-That writes the handoff file and asks the supervisor to start the next session. `alpha` is the operator's name or its id. The file and the restart marker use the id.
-
-## Use it
-
-```
-operator                      the menu
-operator doctor               is this machine ready
-operator start --name alpha   start a supervised operator here
-operator list                 list operators, running and not
-operator attach alpha         attach your terminal to it
-operator stop alpha           ask its supervisor to stop
-operator rename alpha bravo   rename an operator
-operator delete alpha --yes   delete an operator and its settings
-operator recover              list operators a crash or reboot took down
+operator doctor               check that this machine can run operator
+operator start [NAME]         start a supervised operator
+operator list                 list operators
+operator attach NAME          attach this terminal to a running operator
+operator stop NAME            ask an operator's supervisor to stop
+operator rename NAME NEW      rename an operator
+operator delete NAME [--yes]  delete an operator and its settings
+operator recover [NAME ...]   list operators that need recovering after a crash
 operator recover --all        bring those supervisors back
-operator handoff --instance alpha --status "what you did"
-                              end this session and leave the next one the file
+operator handoff --instance NAME --status "what you did"
 ```
 
-## What it actually does
+Handoff is for the agent inside the session, not the menu. It writes a handoff file and asks the supervisor to start the next session. When to hand off is the repository's business, in AGENTS.md or from the user. The launch preamble only says that a handoff is possible and how to run it.
 
-**Relaunches.** The supervisor starts the session, watches it, and starts the next one when the agent hands off or the session ends. A run stops after 1000 sessions.
-
-**Stops a crash loop.** Five unexpected exits in a row, each inside 120 seconds, ends the run. A session that stayed up longer resets that count.
-
-**Survives a reboot.** `operator recover` lists operators whose supervisor is gone. `operator recover --all`, or an operator name, starts the supervisor again and continues the session numbering.
-
-## What it does not do
-
-It does not decide when an operator should hand off. That is the repository's business. The launch preamble only says that a handoff is possible and how to run it.
-
-It does not give an operator its next task. The next session reads the handoff the previous one wrote.
-
-Agents run as you. There is no separate account and no trust boundary.
-
-## Layout
-
-| | |
-| --- | --- |
-| `operator_kernel/` | the supervisor, the handoff, the launch preamble |
-| `operator_cli/` | the one entry point, including the menu |
-
-## Contributing
+## Tests
 
 `python -m pytest -q` runs the suite. CI is Windows and Linux on Python 3.10 and 3.12.
-
-Before opening a PR, read `.github/skills/pr-gate/SKILL.md` and run `python .github/skills/pr-gate/preflight.py --pr <number>`.

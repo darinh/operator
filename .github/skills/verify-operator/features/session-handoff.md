@@ -24,8 +24,8 @@ before the file is a restart racing the thing it exists to announce.
   optional `--next`, `--context` and `--no-restart`. The argument is a display name or a record id. The file and the marker use the id.
 - Pass the operator name positionally: `operator handoff <name> --status "<text>"`.
 - Use `--instance=<operator>` and `--status=<text>` if you prefer joined flags.
-- Choose "Hand off to the next session" from the `operator` menu, which prompts
-  for the operator name and the status and prints the command before running it.
+- Handoff is not on the keyboard menu. The agent runs the verb. A person at the
+  keyboard starts, lists, attaches, stops, renames, deletes, and recovers.
 - Every launch preamble advertises this command, already filled in with that
   operator's id.
 
