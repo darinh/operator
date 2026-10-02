@@ -42,6 +42,8 @@ def _launch_preamble(monkeypatch, tmp_path, *, remembered: str = "") -> str:
 
     from operator_cli.project import ensure_registered
     assert ensure_registered()[0] == 0
+    import operators
+    record = operators.create("alpha", work)
 
     seen: list[str] = []
 
@@ -51,7 +53,7 @@ def _launch_preamble(monkeypatch, tmp_path, *, remembered: str = "") -> str:
         instance.stop_marker.touch()
 
     monkeypatch.setattr(op, "start_session", capture)
-    op.run_loop_mode(op.Instance(OPERATOR), ["--agent", "test:agent"], is_fresh=True)
+    op.run_loop_mode(record.instance(), ["--agent", "test:agent"], is_fresh=True)
     assert seen, "the loop never launched a session, so this proves nothing"
     return seen[0]
 
@@ -207,13 +209,17 @@ def test_a_fresh_operator_is_told_how_to_restart_itself(monkeypatch, tmp_path):
     Naming it is not enough, which is the whole lesson of this file: the
     command is run, so a clause that drifts from the parser fails here.
     """
-    from instance import Instance, restart_marker_for
+    from instance import restart_marker_for
     from paths import project_handoff_file
 
     found = _commands(_launch_preamble(monkeypatch, tmp_path))
     restart = [c for c in found if "handoff" in c]
     assert len(restart) == 1, found
-    op_id = Instance(OPERATOR).id
+    import operators
+    record = operators.find("alpha")
+    assert record is not None
+    op_id = record.id
+    assert f"--instance {op_id}" in restart[0]
     handoff = project_handoff_file(tmp_path / "work", op_id)
     marker = restart_marker_for(op_id)
     assert not handoff.exists() and not marker.exists()
