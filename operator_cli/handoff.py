@@ -1,12 +1,12 @@
 """`operator handoff` -- end this session and leave the next one a record.
 
-The preamble has advertised this to every operator since it was written, naming a
-bare `handoff` that belongs to `copilot-tools` rather than here. The kernel's
-half was always present: `exits.handoff_state` reads the file and
-`supervisor.py` polls the marker, while nothing here wrote either.
+The caller is not trusted to name its operator. Identity comes from the
+process ancestry and the custody file the runner wrote at launch. `--instance`
+is only a cross-check.
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -18,8 +18,8 @@ from .home import _bootstrap
 VALUE_FLAGS = ("--instance", "--status", "--next", "--context")
 SWITCHES = ("--no-restart",)
 
-USAGE = ("Usage: operator handoff --instance NAME --status TEXT "
-         "[--next TEXT] [--context TEXT] [--no-restart]")
+USAGE = ("Usage: operator handoff --status TEXT "
+         "[--next TEXT] [--context TEXT] [--instance NAME] [--no-restart]")
 
 
 def parse(options: list[str]) -> "dict[str, str] | None":
@@ -86,29 +86,38 @@ def main(rest: list[str]) -> int:
     values = parse(options)
     if values is None:
         return 2
-    operator = values.get("--instance", "").strip()
     status = values.get("--status", "").strip()
-    if not operator or not status:
+    if not status:
         print(USAGE, file=sys.stderr)
         return 2
-    record = operators.find(operator)
-    if record is None:
-        print(f"No operator '{operator}'.", file=sys.stderr)
+    from custody import identify
+    found = identify(os.getpid())
+    if isinstance(found, str):
+        print(found, file=sys.stderr)
         return 2
+    record, session = found
+    named = values.get("--instance", "").strip()
+    if named:
+        claimed = operators.find(named)
+        if claimed is None or claimed.id != record.id:
+            print(f"operator handoff: this session is {record.name}, not {named}",
+                  file=sys.stderr)
+            return 2
     op_id = record.id
     if not guid_is_usable(op_id):
         # The id is one component of a filename the next session has to find.
         print(f"the operator id {op_id!r} is not usable", file=sys.stderr)
         return 2
-    landed = write_handoff(Path.cwd(), op_id, status,
+    # The operator's repo, not wherever the process has since cd'd.
+    landed = write_handoff(Path(record.cwd), op_id, status,
                            values.get("--next", ""),
                            values.get("--context", ""))
     if landed is CATALOG_UNREADABLE:
         print("could not read the project catalog", file=sys.stderr)
         return 1
     if landed is None:
-        print("this directory is not a registered project", file=sys.stderr)
-        print("start an operator in this directory first", file=sys.stderr)
+        print(f"{record.cwd} is not a registered project", file=sys.stderr)
+        print("start an operator in that directory first", file=sys.stderr)
         return 1
     if landed is WRITE_FAILED:
         print("could not write the handoff", file=sys.stderr)
@@ -119,7 +128,7 @@ def main(rest: list[str]) -> int:
         # An operator checkpointing before a long step needs the file on disk and
         # needs to keep running.
         return 0
-    if not request_restart(op_id):
+    if not request_restart(op_id, session):
         print("the handoff was written but the restart could not be requested",
               file=sys.stderr)
         return 1

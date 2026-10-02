@@ -23,6 +23,7 @@ On POSIX the generated run script ends in
 State written to the instance state directory:
 
 ``{id}.pid``      Copilot's real process id, removed on exit
+``{id}.custody.json``  That pid, its start token, and the session number
 ``{id}.session``  Copilot CLI session UUID, once discovered
 ``{id}.exit``     Exit code, written as soon as Copilot terminates.
                   See :func:`run` for why that ordering is load-bearing.
@@ -48,6 +49,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 from console import enable_utf8_output               # noqa: E402
+from custody import write as write_custody           # noqa: E402
 
 SESSION_ID_TIMEOUT = 20
 LOG_PIN_TIMEOUT = 30
@@ -486,6 +488,13 @@ def run(spec_path: Path) -> int:
         return EXIT_BAD_SPEC
 
     pid_file.write_text(str(proc.pid), encoding="utf-8")
+    try:
+        write_custody(state_dir / f"{instance}.custody.json", proc.pid,
+                      session_num)
+    except OSError as exc:
+        # Copilot is already up. A missed custody file refuses handoff later,
+        # which is the safe direction. Killing the runner here would orphan it.
+        _log(state_dir, instance, f"custody not recorded: {exc}")
     _log(state_dir, instance, f"launcher pid={proc.pid}")
 
     # Snapshot the process tree immediately: if the launcher is a shim it

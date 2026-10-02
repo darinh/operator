@@ -7,6 +7,8 @@ polls.
 """
 from __future__ import annotations
 
+import json
+
 import op
 import paths
 import pytest
@@ -25,13 +27,30 @@ def _operator(work, name="alpha"):
     return operators.create(name, work)
 
 
+def _seat(monkeypatch, record, *, pid=424242, token="win:100", session=7):
+    """Make `record` the operator this process is inside."""
+    import json
+    import process_identity
+    import process_tree
+    op.Instance(record.id).custody_file.write_text(
+        json.dumps({"pid": pid, "start": token, "session": session}),
+        encoding="utf-8")
+    monkeypatch.setattr(process_tree, "ancestry", lambda _pid: [pid])
+    monkeypatch.setattr(process_identity, "process_start_token",
+                        lambda asked: token if asked == pid else None)
+    return session
+
+
 def test_it_writes_the_file_and_asks_for_the_next_session(
         tmp_path, monkeypatch, capsys):
     """Key fact (2) of every launch preamble, end to end through the CLI."""
     work = _project(tmp_path, monkeypatch)
     record = _operator(work)
-    assert cli.main(["handoff", "--instance", "alpha",
-                     "--status", "landed the parser",
+    _seat(monkeypatch, record)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    assert cli.main(["handoff", "--status", "landed the parser",
                      "--next", "wire the menu",
                      "--context", "budgets are tight"]) == 0
     out = capsys.readouterr().out
@@ -42,7 +61,9 @@ def test_it_writes_the_file_and_asks_for_the_next_session(
     assert "budgets are tight" in body
     assert f"handoff written to {written}" in out
     assert f"restart requested for {record.id}" in out
-    assert op.restart_marker_for(record.id).exists()
+    marker = op.restart_marker_for(record.id)
+    assert json.loads(marker.read_text(encoding="utf-8")) == {
+        "id": record.id, "session": 7}
     assert not paths.project_handoff_file(work, "alpha").exists()
     assert not op.restart_marker_for("alpha").exists()
 
@@ -51,6 +72,7 @@ def test_the_operator_name_can_be_positional(tmp_path, monkeypatch, capsys):
     """Every other verb here takes a bare operator name, so this one does too."""
     work = _project(tmp_path, monkeypatch)
     record = _operator(work)
+    _seat(monkeypatch, record)
     assert cli.main(["handoff", "alpha", "--status", "done"]) == 0
     out = capsys.readouterr().out
     assert paths.project_handoff_file(work, record.id).is_file()
@@ -63,23 +85,24 @@ def test_an_unknown_operator_exits_2_and_writes_nothing(
         tmp_path, monkeypatch, capsys):
     _project(tmp_path, monkeypatch)
     assert cli.main(["handoff", "--instance", "missing", "--status", "x"]) == 2
-    assert capsys.readouterr().err.strip() == "No operator 'missing'."
+    assert "not inside an operator session" in capsys.readouterr().err
     assert list(paths.projects_root().rglob("*.md")) == []
     assert not op.restart_marker_for("missing").exists()
 
 
-def test_an_unregistered_directory_is_refused_and_the_fix_named(
+def test_an_unregistered_operator_repo_is_refused_and_the_fix_named(
         tmp_path, monkeypatch, capsys):
-    """A handoff has nowhere to go without a catalog entry. Saying so beats
-    writing one where nothing will look for it."""
+    """The file is written in the operator's repo, not the caller's cwd. An
+    unregistered repo still has nowhere to put it."""
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     record = _operator(elsewhere)
+    _seat(monkeypatch, record)
     monkeypatch.chdir(tmp_path)
-    assert cli.main(["handoff", "--instance", "alpha", "--status", "x"]) == 1
+    assert cli.main(["handoff", "--status", "x"]) == 1
     err = capsys.readouterr().err
     assert "not a registered project" in err
-    assert "start an operator in this directory first" in err
+    assert "start an operator in that directory first" in err
     assert not op.restart_marker_for(record.id).exists()
 
 
@@ -105,8 +128,8 @@ def test_it_can_checkpoint_without_ending_the_session(tmp_path, monkeypatch):
     to keep running."""
     work = _project(tmp_path, monkeypatch)
     record = _operator(work)
-    assert cli.main(["handoff", "--instance", "alpha", "--status", "midway",
-                     "--no-restart"]) == 0
+    _seat(monkeypatch, record)
+    assert cli.main(["handoff", "--status", "midway", "--no-restart"]) == 0
     assert paths.project_handoff_file(work, record.id).is_file()
     assert not op.restart_marker_for(record.id).exists()
 
@@ -137,6 +160,7 @@ def test_flag_equals_value_is_accepted(tmp_path, monkeypatch):
     """Every other verb on this entry point takes `--name=value`."""
     work = _project(tmp_path, monkeypatch)
     record = _operator(work)
+    _seat(monkeypatch, record)
     assert cli.main(["handoff", "--instance=alpha", "--status=done",
                      "--no-restart"]) == 0
     assert paths.project_handoff_file(work, record.id).is_file()
@@ -156,7 +180,7 @@ def test_a_operator_name_that_escapes_the_handoff_directory_is_refused(
     work = _project(tmp_path, monkeypatch)
     assert cli.main(["handoff", "--instance", "../escape",
                      "--status", "done"]) == 2
-    assert capsys.readouterr().err.strip() == "No operator '../escape'."
+    assert "not inside an operator session" in capsys.readouterr().err
     assert list(paths.projects_root().rglob("escape.md")) == []
     assert not op.restart_marker_for("../escape").exists()
     assert work.is_dir()
@@ -203,6 +227,7 @@ def test_joined_syntax_is_how_you_mean_an_option_literally(tmp_path,
     to look like a flag becomes unsayable."""
     work = _project(tmp_path, monkeypatch)
     record = _operator(work)
+    _seat(monkeypatch, record)
     assert cli.main(["handoff", "--instance", "alpha", "--status", "done",
                      "--context=--no-restart", "--no-restart"]) == 0
     body = paths.project_handoff_file(work, record.id).read_text(encoding="utf-8")
@@ -259,6 +284,7 @@ def test_the_refusal_says_how_to_pass_a_value_that_looks_like_a_flag(
     """
     work = _project(tmp_path, monkeypatch)
     record = _operator(work)
+    _seat(monkeypatch, record)
     assert cli.main(["handoff", "--instance", "alpha", "--status", status]) == 2
     err = capsys.readouterr().err
     assert "looks like an option" in err

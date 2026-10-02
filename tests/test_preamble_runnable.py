@@ -215,23 +215,36 @@ def test_a_fresh_operator_is_told_how_to_restart_itself(monkeypatch, tmp_path):
     found = _commands(_launch_preamble(monkeypatch, tmp_path))
     restart = [c for c in found if "handoff" in c]
     assert len(restart) == 1, found
+    assert "--instance" not in restart[0]
+    import json
     import operators
+    import process_identity
+    import process_tree
     record = operators.find("alpha")
     assert record is not None
     op_id = record.id
-    assert f"--instance {op_id}" in restart[0]
     handoff = project_handoff_file(tmp_path / "work", op_id)
     marker = restart_marker_for(op_id)
     assert not handoff.exists() and not marker.exists()
+    # The advertised command no longer names an operator. Identity is the
+    # process tree, so the guard has to seat this process in alpha's custody
+    # or the command it runs is one a real session could not run either.
+    pid, token, session = 424242, "win:100", 1
+    op.Instance(op_id).custody_file.write_text(
+        json.dumps({"pid": pid, "start": token, "session": session}),
+        encoding="utf-8")
+    monkeypatch.setattr(process_tree, "ancestry", lambda _pid: [pid])
+    monkeypatch.setattr(process_identity, "process_start_token",
+                        lambda asked: token if asked == pid else None)
     assert _run(restart[0]) == 0, f"the preamble advertises `{restart[0]}`"
     assert handoff.read_text(encoding="utf-8").strip()
-    assert marker.exists()
+    assert json.loads(marker.read_text(encoding="utf-8")) == {
+        "id": op_id, "session": session}
 
 
-def test_the_restart_clause_advertises_the_op_id_not_the_display_name():
-    """The supervisor probes with `instance.id` and the handoff file is named
-    for it, so a clause naming the display name files the handoff where the
-    next session does not look."""
+def test_the_restart_clause_does_not_name_an_operator():
+    """Identity is derived from the process tree. A clause that names a
+    display name, or even an id, is a handoff for whoever typed it."""
     import preamble as P
     from instance import Instance
 
@@ -240,8 +253,9 @@ def test_the_restart_clause_advertises_the_op_id_not_the_display_name():
     restart = [c for c in _commands(P.build_preamble(operator)) if "handoff" in c]
     assert restart, "no handoff command was advertised at all"
     for command in restart:
-        assert f"--instance {operator.id}" in command, command
-        assert operator.display_name not in command.replace(operator.id, ""), command
+        assert "--instance" not in command, command
+        assert operator.id not in command, command
+        assert operator.display_name not in command, command
 
 
 def test_an_executable_named_in_a_lone_span_is_still_a_command():

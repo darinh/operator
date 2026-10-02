@@ -30,7 +30,7 @@ def test_cleanup_removes_only_the_files_a_live_operator_still_owns(tmp_path, mon
     operator = op.Instance("alpha")
     owned = (
         operator.restart_marker, operator.managed_file, operator.spec_file, operator.pid_file,
-        operator.exit_file, operator.session_file, operator.loop_pid_file,
+        operator.custody_file, operator.exit_file, operator.session_file, operator.loop_pid_file,
         operator.loop_startup_file, operator.stop_marker, operator.loop_args_file,
     )
     for path in owned:

@@ -27,7 +27,8 @@ def test_preamble_teaches_operator_handoff_not_the_predecessors_script():
     """
     text = (Path(__file__).resolve().parent.parent / "operator_kernel"
             / "preamble.py").read_text(encoding="utf-8")
-    assert "`operator handoff --instance" in text
+    assert '`operator handoff --status "..." --next "..."' in text
+    assert "--instance" not in text
     assert "command: handoff --instance" not in text
 
 
@@ -35,7 +36,9 @@ def test_preamble_names_the_handoff_command_for_this_instance():
     import preamble as P
     from instance import Instance
     text = P.build_preamble(Instance("alpha"))
-    assert "operator handoff --instance alpha" in text
+    assert 'operator handoff --status "..." --next "..."' in text
+    assert "--instance" not in text
+    assert "alpha" not in text
     assert "when context gets heavy" not in text
     assert "remember" not in text
     assert "Nobody is reading" in text

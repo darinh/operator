@@ -100,7 +100,11 @@ def test_resume_without_handoff_file_gets_crash_note(monkeypatch, tmp_path):
         instance.stop_marker.touch()
 
     monkeypatch.setattr(op, "start_session", capture)
-    monkeypatch.setattr(op, "project_handoff_file", lambda cwd, instance_id="": None)
+    # None is "this directory is not a project", which is not a crash. An
+    # absent path is a project with no handoff, which is.
+    missing = tmp_path / "next-session.md"
+    monkeypatch.setattr(op, "project_handoff_file",
+                        lambda cwd, instance_id="": missing)
 
     inst = op.Instance("crashy")
     sid = "3f2a9c1e-1111-2222-3333-444455556666"
@@ -108,7 +112,7 @@ def test_resume_without_handoff_file_gets_crash_note(monkeypatch, tmp_path):
 
     op.run_loop_mode(inst, ["--agent", "test:agent"], is_fresh=False)
 
-    assert "crash" in seen_preambles[0].lower()
+    assert "handoff file could not be found" in seen_preambles[0].lower()
 
 
 def test_resume_with_handoff_file_present_has_no_crash_note(monkeypatch, tmp_path):
@@ -193,7 +197,8 @@ def test_a_handoff_written_by_session_one_silences_the_note_for_session_two(
         if n == 1:
             # Exactly what `handoff` does: write the file, ask for a restart.
             handoff.write_text("# handoff", encoding="utf-8")
-            instance.restart_marker.touch()
+            session = int(instance.load_state()["SESSION_NUM"])
+            op.exits.request_restart(instance.id, session)
         else:
             instance.stop_marker.touch()
         instance.exit_file.write_text("0", encoding="utf-8")

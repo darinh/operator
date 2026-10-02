@@ -22,7 +22,7 @@ from paths import guid_is_usable, project_handoff_file
 
 from config import CATALOG_UNREADABLE
 from presence import path_present
-from probes import log
+from probes import log, remove_file
 
 #: A handoff from the previous session is on disk and waiting to be read.
 HANDOFF_WAITING = "waiting"
@@ -228,13 +228,16 @@ def write_handoff(workdir: Path, instance_id: str, status: str,
     return handoff_file
 
 
-def request_restart(instance_id: str) -> bool:
-    """Ask this operator's supervisor to end the session and launch the next one.
+def request_restart(instance_id: str, session: int) -> bool:
+    """Ask this operator's supervisor to end session ``session`` and launch the next.
+
+    The marker content is the claim: this operator, this session. An empty
+    file is not a claim. A later session must not honour a marker left from
+    the one before it.
 
     Separate from :func:`write_handoff` so the file is on disk before the
     supervisor is told to look. The marker is what `supervisor.py` polls, and
-    it tears the session down as soon as it sees it -- so touching it first
-    would race the write it exists to announce.
+    it tears the session down as soon as it sees a claim it accepts.
 
     Addressed through :func:`instance.restart_marker_for`. False if the marker
     could not be set, which leaves a written handoff and a session that keeps
@@ -242,11 +245,48 @@ def request_restart(instance_id: str) -> bool:
     """
     if not guid_is_usable(instance_id):
         return False
+    if isinstance(session, bool) or not isinstance(session, int) or session <= 0:
+        return False
     marker = instance.restart_marker_for(instance_id)
+    payload = json.dumps({"id": instance_id, "session": session})
+    tmp = marker.with_name(f"{marker.name}.{os.getpid()}.tmp")
     try:
         marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.touch()
+        tmp.write_text(payload, encoding="utf-8")
+        os.replace(tmp, marker)
     except OSError:
         log(f"  Could not set the restart marker for {instance_id}")
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return False
+    return True
+
+
+def restart_claimed(instance_id: str, session_num: int) -> bool:
+    """True only when the marker names this operator and this session.
+
+    Anything else that is present is logged and removed. Absence is not a
+    claim. A marker that cannot be read is not a claim and is left in place:
+    deleting a file we failed to read could throw away a claim the next poll
+    would have accepted.
+    """
+    marker = instance.restart_marker_for(instance_id)
+    if path_present(marker) is not True:
+        return False
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+    except OSError:
+        log(f"  Could not read the restart marker for {instance_id}")
+        return False
+    except ValueError:
+        payload = None
+    if (not isinstance(payload, dict)
+            or payload.get("id") != instance_id
+            or payload.get("session") != session_num):
+        log(f"  Ignoring restart marker for {instance_id}: "
+            f"not a claim for session #{session_num}")
+        remove_file(marker)
         return False
     return True

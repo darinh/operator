@@ -97,6 +97,12 @@ def test_runner_records_pid_and_exit_code(tmp_path, state_dir, db_path, launch_s
     assert (state_dir / "testinst.exit").read_text(encoding="utf-8").strip() == "7"
     # The pid file is transient and removed once the child exits.
     assert not (state_dir / "testinst.pid").exists()
+    # Custody outlives the pid file. The token is what makes the pid an
+    # identity, and a later handoff refuses a recycled pid that no longer matches.
+    custody = json.loads((state_dir / "testinst.custody.json").read_text(encoding="utf-8"))
+    assert custody["session"] == 1
+    assert isinstance(custody["pid"], int) and custody["pid"] > 0
+    assert isinstance(custody["start"], str) and custody["start"]
 
 
 def test_runner_clears_stale_exit_marker(tmp_path, state_dir, db_path, launch_spec):
