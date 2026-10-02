@@ -61,7 +61,7 @@ commands and observable proof.
 ## Core features
 
 - [Session handoff](./session-handoff.md). `operator handoff`, the file the next
-  launch announces, the restart marker, and the seat-id key both share.
+  launch announces, the restart marker, and the operator-id key both share.
 
 ## Coverage gaps
 

@@ -1,6 +1,6 @@
 """Drive `operator` against a disposable operator home, and keep the proof.
 
-It drives the one console script: start, list, join, stop, recover, handoff,
+It drives the one console script: start, list, attach, stop, recover, handoff,
 and doctor. Session handoff is the state worth snapshotting.
 
 Everything a run creates lives under one run directory. `up` builds it, every
