@@ -164,8 +164,10 @@ def _windows_keys():
 def _posix_keys(fd):
     import select
 
+    held = bytearray()
+
     def pull():
-        return _read_utf8(fd)
+        return _read_utf8(fd, held)
 
     def ready(timeout):
         return bool(select.select([fd], [], [], timeout)[0])
@@ -173,16 +175,24 @@ def _posix_keys(fd):
     yield from decode(pull, windows=False, ready=ready)
 
 
-def _read_utf8(fd) -> str:
-    """One character. ``UNDECODABLE`` for a byte no UTF-8 character starts with."""
+def _read_utf8(fd, held: bytearray) -> str:
+    """One character, or ``UNDECODABLE`` for bytes that are not one.
+
+    A byte that breaks a multibyte character is put back in ``held``, because
+    it may be the start of the next real key.
+    """
     decoder = codecs.getincrementaldecoder("utf-8")()
+    started = False
     while True:
-        data = os.read(fd, 1)
+        data = bytes([held.pop(0)]) if held else os.read(fd, 1)
         if not data:
             return ""
         try:
             text = decoder.decode(data)
         except UnicodeDecodeError:
+            if started:
+                held.insert(0, data[0])
             return UNDECODABLE
+        started = True
         if text:
             return text
