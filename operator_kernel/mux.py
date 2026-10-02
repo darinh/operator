@@ -31,7 +31,6 @@ after the previous one ended hits this in production, not only in tests, so
 """
 from __future__ import annotations
 
-import hashlib
 import os
 import platform
 import re
@@ -45,20 +44,12 @@ __all__ = [
     "MuxSessionError",
     "Mux",
     "sanitize_name",
-    "safe_instance_id",
 ]
 
 # Characters that are illegal in Windows filenames or that a multiplexer
 # rewrites. Instance names become filenames, so this applies on every platform
 # to keep state directories portable.
 _UNSAFE = r'[.:\\/*?"<>|\x00-\x1f]'
-
-# Windows reserved device names. A file called CON or NUL cannot be created.
-_RESERVED = {
-    "CON", "PRN", "AUX", "NUL",
-    *(f"COM{i}" for i in range(1, 10)),
-    *(f"LPT{i}" for i in range(1, 10)),
-}
 
 # On Windows, a process with no console of its own (e.g. `operator --loop`'s
 # background supervisor) auto-allocates a brand-new *visible* console for any
@@ -124,46 +115,6 @@ def sanitize_name(name: str) -> str:
     """Replace characters that are unsafe in session names or filenames."""
     cleaned = re.sub(_UNSAFE, "-", name)
     cleaned = cleaned.strip().strip("-") or "instance"
-    return cleaned
-
-
-_DIGEST_SUFFIX = re.compile(r"-[0-9a-f]{6}$")
-
-# Windows and macOS filesystems are case-insensitive by default, and psmux
-# matches session names case-insensitively, so names differing only in case
-# must not be treated as distinct instances.
-_CASE_INSENSITIVE_FS = platform.system() in ("Windows", "Darwin")
-
-
-def safe_instance_id(name: str) -> str:
-    """Map a display name to a collision-free, filesystem-safe instance id.
-
-    Sanitizing alone is not enough: 'a.b', 'a:b' and 'a-b' all sanitize to
-    'a-b', so three distinct instances would share one set of state files and
-    silently destroy each other. When sanitizing changes the name, or produces
-    a Windows reserved device name, a short digest of the ORIGINAL name is
-    appended to keep distinct inputs distinct.
-
-    A name that already ends in something shaped like a digest is also
-    suffixed, otherwise a literal name such as ``a-b-69f664`` would collide
-    with the generated id for ``a.b``.
-
-    On case-insensitive filesystems the digest is computed from the
-    case-folded name, because ``Build`` and ``build`` would otherwise produce
-    two ids that resolve to the same files and the same backend session.
-    """
-    cleaned = sanitize_name(name)
-    reference = name
-    if _CASE_INSENSITIVE_FS:
-        # Fold the id: 'Build' and 'build' address the same file and the same
-        # backend session, so they must be one instance rather than two that
-        # silently share state. The display name keeps the original spelling.
-        cleaned = cleaned.casefold()
-        reference = name.casefold()
-    stem = cleaned.split(".", 1)[0].upper()
-    if cleaned != reference or stem in _RESERVED or _DIGEST_SUFFIX.search(cleaned):
-        digest = hashlib.sha1(reference.encode("utf-8")).hexdigest()[:6]
-        cleaned = f"{cleaned}-{digest}"
     return cleaned
 
 
