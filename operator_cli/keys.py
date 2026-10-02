@@ -6,12 +6,17 @@ put it back.
 """
 from __future__ import annotations
 
+import codecs
 import os
 import sys
 from contextlib import contextmanager
 
 #: How long a POSIX Esc may wait for the rest of an arrow sequence.
 ESC_WAIT = 0.05
+#: What ``_read_utf8`` returns for bytes that are not UTF-8. Never a key.
+UNDECODABLE = "\ufffd"
+#: The escape sequences that mean something here. Every other one is dropped whole.
+_SEQUENCES = {"[A": "up", "[B": "down", "OA": "up", "OB": "down"}
 #: ENABLE_VIRTUAL_TERMINAL_PROCESSING. Output only. Input stays scan codes.
 _VT = 0x0004
 
@@ -51,7 +56,7 @@ def _named(ch: str) -> str:
         return "backspace"
     if ch == " ":
         return "space"
-    if len(ch) == 1 and ch.isprintable():
+    if len(ch) == 1 and ch != UNDECODABLE and ch.isprintable():
         return ch
     return ""
 
@@ -77,14 +82,18 @@ def _posix(ch: str, take, ready, pending: list) -> str:
         if second:
             pending.append(second)
         return "esc"
-    if not ready(ESC_WAIT):
+    # CSI carries parameter bytes before its final byte (Delete is ESC [ 3 ~,
+    # Ctrl-Up is ESC [ 1 ; 5 A). Read through the final byte so no part of
+    # an unknown sequence comes back as typed text. SS3 is one byte.
+    body = ""
+    while len(body) < 16 and ready(ESC_WAIT):
+        nxt = take()
+        body += nxt
+        if second == "O" or not "\x20" <= nxt <= "\x3f":
+            break
+    if not body:
         return "esc"
-    third = take()
-    if third == "A":
-        return "up"
-    if third == "B":
-        return "down"
-    return ""
+    return _SEQUENCES.get(second + body, "")
 
 
 def enable_vt():
@@ -115,12 +124,13 @@ def restore_vt(previous) -> None:
         return
 
 
-def guard_termios(fd, termios, tty, body):
-    """cbreak for ``body()``, then the previous settings, including on interrupt."""
+@contextmanager
+def cbreak(fd, termios, tty):
+    """cbreak inside the block, the previous settings after it, however it ends."""
     saved = termios.tcgetattr(fd)
     try:
         tty.setcbreak(fd)
-        return body()
+        yield
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, saved)
 
@@ -138,14 +148,8 @@ def raw_keys():
     import termios
     import tty
     fd = sys.stdin.fileno()
-    # Same restore as guard_termios. The yield has to sit inside the try,
-    # because the caller pulls keys after raw_keys returns the generator.
-    saved = termios.tcgetattr(fd)
-    try:
-        tty.setcbreak(fd)
+    with cbreak(fd, termios, tty):
         yield _posix_keys(fd)
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
 
 
 def _windows_keys():
@@ -170,14 +174,15 @@ def _posix_keys(fd):
 
 
 def _read_utf8(fd) -> str:
-    data = os.read(fd, 1)
-    if not data:
-        return ""
+    """One character. ``UNDECODABLE`` for a byte no UTF-8 character starts with."""
+    decoder = codecs.getincrementaldecoder("utf-8")()
     while True:
+        data = os.read(fd, 1)
+        if not data:
+            return ""
         try:
-            return data.decode("utf-8")
+            text = decoder.decode(data)
         except UnicodeDecodeError:
-            more = os.read(fd, 1)
-            if not more:
-                return ""
-            data += more
+            return UNDECODABLE
+        if text:
+            return text

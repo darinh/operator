@@ -93,6 +93,21 @@ class _Actions:
                 return record.name
         return cwd.name
 
+    def taken_elsewhere(self, name: str) -> "str | None":
+        """The repo of another directory's operator already called ``name``."""
+        import operators
+        import paths
+        record = operators.find(name)
+        if record is None:
+            return None
+        try:
+            here = Path.cwd().resolve()
+        except OSError:
+            return record.cwd
+        if paths.catalog_paths_match(here, record.cwd) is True:
+            return None
+        return record.cwd
+
     def sections(self):
         import operators
         from .listing import sections
@@ -117,10 +132,10 @@ def _interactive() -> int:
     try:
         with raw_keys() as keys:
             outcome = run(keys, render, _Actions())
+        if isinstance(outcome, Leave):
+            return outcome.call()
     except KeyboardInterrupt:
         return 130
-    if isinstance(outcome, Leave):
-        return outcome.call()
     return outcome
 
 

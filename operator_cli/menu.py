@@ -177,13 +177,22 @@ def start_screen(keys, render, actions) -> str:
     question = [f"Create an operator for {cwd}?"]
     if needs and not confirm(question, keys, render):
         return ""
+    prefill, status = actions.default_name(), ""
     while True:
-        name = ask_text("Operator name:", keys, render,
-                        prefill=actions.default_name())
-        if name is not None:
-            return _captured(actions.start, [name], render)
-        if not needs or not confirm(question, keys, render):
-            return ""
+        name = ask_text("Operator name:", keys, render, prefill=prefill,
+                        status=status)
+        if name is None:
+            if not needs or not confirm(question, keys, render):
+                return ""
+            continue
+        prefill, name = name, name.strip()
+        elsewhere = actions.taken_elsewhere(name) if name else None
+        if not name:
+            status = "An operator needs a name."
+        elif elsewhere:
+            status = f"{name} already works in {elsewhere}. Choose another name."
+        else:
+            return _captured(actions.start, ["--name", name], render)
 
 
 def action_screen(item, keys, render, actions):
@@ -200,11 +209,12 @@ def action_screen(item, keys, render, actions):
         if choice == "Attach":
             return Leave(lambda name=item.name: actions.attach([name]))
         if choice == "Start and attach":
-            return Leave(lambda name=item.name: actions.start([name, "--attach"]))
+            return Leave(lambda name=item.name:
+                         actions.start(["--name", name, "--attach"]))
         if choice == "Stop":
             return _captured(actions.stop, [item.name], render)
         if choice == "Start":
-            return _captured(actions.start, [item.name], render)
+            return _captured(actions.start, ["--name", item.name], render)
         if choice == "Rename":
             new = ask_text("Operator name:", keys, render, prefill=item.name)
             if new is None:
@@ -217,7 +227,6 @@ def action_screen(item, keys, render, actions):
         ]
         if confirm(lines, keys, render, loose=True):
             return _captured(actions.delete, [item.name, "--yes"], render)
-        return ""
 
 
 def list_screen(keys, render, actions):

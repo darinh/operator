@@ -91,10 +91,50 @@ def test_termios_is_restored_when_the_body_is_interrupted():
         def setcbreak(fd):
             set_cbreak.append(fd)
 
-    def body():
-        raise KeyboardInterrupt
-
     with pytest.raises(KeyboardInterrupt):
-        keys.guard_termios(7, Termios, Tty, body)
+        with keys.cbreak(7, Termios, Tty):
+            assert restored == []
+            raise KeyboardInterrupt
     assert set_cbreak == [7]
     assert restored == [(7, Termios.TCSADRAIN, saved)]
+
+
+def test_a_csi_sequence_with_parameters_is_dropped_whole():
+    # Delete, then Ctrl-Up, then a typed x: nothing of either sequence leaks.
+    raw = ["\x1b", "[", "3", "~", "\x1b", "[", "1", ";", "5", "A", "x"]
+    assert _posix(raw, [True] * 8) == ["x"]
+
+
+def test_esc_bracket_with_nothing_after_is_esc():
+    assert _posix(["\x1b", "["], [True, False]) == ["esc"]
+
+
+def _piped(data: bytes):
+    import os
+    r, w = os.pipe()
+    os.write(w, data)
+    os.close(w)
+    return r
+
+
+def test_read_utf8_returns_a_multibyte_character_whole():
+    import os
+    fd = _piped("\u00e9a".encode("utf-8"))
+    try:
+        assert keys._read_utf8(fd) == "\u00e9"
+        assert keys._read_utf8(fd) == "a"
+        assert keys._read_utf8(fd) == ""
+    finally:
+        os.close(fd)
+
+
+def test_a_byte_that_is_never_utf8_does_not_swallow_later_keys():
+    import os
+    fd = _piped(b"\xffq")
+    try:
+        assert keys._read_utf8(fd) == keys.UNDECODABLE
+        assert keys._read_utf8(fd) == "q"
+    finally:
+        os.close(fd)
+    assert list(keys.decode(_pull([keys.UNDECODABLE, "q"]), windows=False,
+                            ready=lambda _t: False)) == ["q"]
