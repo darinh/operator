@@ -1,8 +1,7 @@
-"""The verb table is the only place that says what `operator` can do.
+"""The verb table is what `operator --help` lists.
 
-Three surfaces read it: the help text, the numbered menu, and the argv the
-menu builds. A verb listed but unroutable, or routable but unreachable from
-the menu, is the drift this file exists to refuse.
+The keyboard menu does not read it. A verb with no handler is the drift
+this file refuses.
 """
 from __future__ import annotations
 
@@ -15,46 +14,15 @@ def test_every_verb_in_the_table_has_somewhere_to_go():
         assert verb.tokens[0] in cli.HANDLERS, verb.tokens
 
 
-def test_every_prompt_a_verb_asks_for_has_a_label():
-    """A prompt key with no label raises KeyError at the prompt, which is
-    mid-menu, in front of a human, after they picked the item."""
-    for verb in verbs.VERBS:
-        for key in verb.prompts:
-            assert key in verbs.PROMPT_LABEL, (verb.tokens, key)
+def test_every_handler_is_in_the_table():
+    names = {verb.tokens[0] for verb in verbs.VERBS}
+    assert names == set(cli.HANDLERS)
 
 
-def test_the_menu_offers_every_verb_and_every_extra():
-    offered = {item.argv for item in verbs.menu_items()}
-    for verb in verbs.VERBS:
-        assert verb.tokens in offered, verb.tokens
-        for _, argv in verb.extra_menu:
-            assert argv in offered, argv
-
-
-def test_a_flagged_prompt_becomes_a_flag_and_a_positional_stays_bare():
-    """`--status` is the case that forced this distinction. Appending it
-    positionally would have handed the handoff verb an operator name."""
-    item = verbs.Item("x", ("handoff",), ("instance", "status"))
-    assert verbs.build_argv(item, {"instance": "alpha", "status": "done"}) == [
-        "handoff", "--instance", "alpha", "--status", "done"]
-    item = verbs.Item("x", ("attach",), ("name",))
-    assert verbs.build_argv(item, {"name": "alpha"}) == ["attach", "alpha"]
-    item = verbs.Item("x", ("rename",), ("name", "new_name"))
-    assert verbs.build_argv(item, {"name": "alpha", "new_name": "bravo"}) == [
-        "rename", "alpha", "bravo"]
-
-
-def test_every_verb_says_something_on_both_surfaces():
-    """The table feeds the help text and the menu, and a verb that is blank on
-    either is invisible to whichever reader uses that one."""
+def test_every_verb_has_help_text():
     for verb in verbs.VERBS:
         assert verb.help.strip(), verb.tokens
-        assert verb.menu.strip(), verb.tokens
-        assert verb.help != verb.menu, verb.tokens
 
 
-def test_entry_still_re_exports_what_callers_import_from_it():
-    """The table moved out of `entry.py` under its line ceiling. Anything
-    that imported it from there must keep working."""
+def test_entry_still_re_exports_the_table():
     assert cli.VERBS is verbs.VERBS
-    assert cli.menu_items is verbs.menu_items

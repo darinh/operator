@@ -1,13 +1,14 @@
-"""The `operator` front door: a menu you can read, verbs you can type.
+"""The `operator` front door: a keyboard menu, and verbs you can type.
 
-The menu is the risky half because it reads stdin. These tests never attach a
-real terminal. They feed a scripted stdin, or they prove stdin is not read.
+The menu reads keys, not lines. These tests never attach a real terminal.
+They feed a scripted key list, or they prove stdin is not read.
 """
 from __future__ import annotations
 
 import io
 import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -43,11 +44,12 @@ def _tty(monkeypatch, text=""):
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
 
 
-def _choice_for(argv):
-    for index, item in enumerate(cli.menu_items(), 1):
-        if item.argv == argv:
-            return index
-    raise AssertionError(f"no menu entry for {argv}")
+def _keys(monkeypatch, keys):
+    @contextmanager
+    def raw():
+        yield iter(keys)
+
+    monkeypatch.setattr("operator_cli.keys.raw_keys", raw)
 
 
 @pytest.fixture(autouse=True)
@@ -140,41 +142,90 @@ def test_the_verb_table_is_not_empty():
                      "delete", "recover", "handoff"}
 
 
-def test_every_menu_entry_maps_to_a_verb():
-    for item in cli.menu_items():
-        assert any(item.argv[:len(verb.tokens)] == verb.tokens
-                   for verb in cli.VERBS), item
-
-
 def test_every_verb_has_a_handler():
     for verb in cli.VERBS:
         assert verb.tokens[0] in cli.HANDLERS, verb.tokens
 
 
-def test_menu_dispatches_to_list(monkeypatch, capsys):
+def test_esc_on_the_menu_quits(monkeypatch, capsys):
+    _tty(monkeypatch)
+    _keys(monkeypatch, ["esc"])
+    assert cli.main([]) == 0
+    assert "Usage: operator" not in capsys.readouterr().err
+
+
+def test_ctrl_c_in_the_menu_exits_130(monkeypatch):
+    @contextmanager
+    def raw():
+        raise KeyboardInterrupt
+        yield  # pragma: no cover
+
+    _tty(monkeypatch)
+    monkeypatch.setattr("operator_cli.keys.raw_keys", raw)
+    assert cli.main([]) == 130
+
+
+def test_menu_attach_returns_the_attach_code(monkeypatch, capsys):
     import operators
     import supervisor_control
-    record = operators.create("alpha", Path.cwd())
+    record = operators.create("alpha beta", Path.cwd())
     monkeypatch.setattr(supervisor_control, "active_instances",
                         lambda: [record.instance()])
-    _tty(monkeypatch, f"{_choice_for(('list',))}\n")
-    assert cli.main([]) == 0
-    out = capsys.readouterr().out
-    assert "Running: operator list" in out
-    assert "alpha" in out
-    assert "Quit" in out
-
-
-def test_menu_prompts_then_attaches(monkeypatch, capsys):
     seen = []
+
+    def attach(session):
+        seen.append(session)
+        print("attached-for-real")
+        return 4
+
     monkeypatch.setattr(op.MUX, "has_session", lambda session: True)
-    monkeypatch.setattr(op.MUX, "attach", lambda session: seen.append(session) or 0)
-    import operators
-    record = operators.create("alpha", Path.cwd())
-    _tty(monkeypatch, f"{_choice_for(('attach',))}\nalpha\n")
-    assert cli.main([]) == 0
+    monkeypatch.setattr(op.MUX, "attach", attach)
+    _tty(monkeypatch)
+    _keys(monkeypatch, ["down", "enter", "enter", "enter"])
+    assert cli.main([]) == 4
     assert seen == [record.id]
-    assert "Running: operator attach alpha" in capsys.readouterr().out
+    assert "attached-for-real" in capsys.readouterr().out
+
+
+def test_a_menu_started_operator_exports_the_home_its_child_reads(monkeypatch):
+    """An operator chosen from the menu must be as defended as a typed one.
+
+    `_settle_home` exports unconditionally so that parent and child read the
+    same string instead of independently agreeing on a default.
+    """
+    import supervisor
+    seen = {}
+
+    def fake(instance, copilot_args, is_fresh, cwd=None):
+        seen["home"] = os.environ.get("COPILOT_OPERATOR_HOME")
+        return 7
+
+    monkeypatch.setattr(supervisor, "_spawn_background_loop", fake)
+    monkeypatch.delenv("COPILOT_OPERATOR_HOME", raising=False)
+    _tty(monkeypatch)
+    _keys(monkeypatch, ["enter", "y", "enter", "esc"])
+    assert cli.main([]) == 0
+    assert seen["home"] == str(Path.home() / ".operator")
+
+
+def test_menu_start_reuses_the_operator_already_recorded_here(tmp_path, monkeypatch):
+    import operators
+    import supervisor
+    from operator_cli import project
+    monkeypatch.chdir(tmp_path)
+    record = operators.create("alpha", tmp_path)
+    assert project.ensure_registered()[0] == 0
+    seen = {}
+
+    def fake(instance, copilot_args, is_fresh, cwd=None):
+        seen.update(name=instance.display_name, op_id=instance.id, cwd=cwd)
+        return 3
+
+    monkeypatch.setattr(supervisor, "_spawn_background_loop", fake)
+    _tty(monkeypatch)
+    _keys(monkeypatch, ["enter", "enter", "esc"])
+    assert cli.main([]) == 0
+    assert seen == {"name": "alpha", "op_id": record.id, "cwd": record.cwd}
 
 
 def _split_printed(command: str) -> list[str]:
@@ -209,21 +260,6 @@ def _split_printed(command: str) -> list[str]:
     return out
 
 
-def test_menu_quotes_a_name_with_spaces(monkeypatch, capsys):
-    seen = []
-    monkeypatch.setattr(op.MUX, "has_session", lambda session: True)
-    monkeypatch.setattr(op.MUX, "attach", lambda session: seen.append(session) or 0)
-    import operators
-    record = operators.create("alpha beta", Path.cwd())
-    _tty(monkeypatch, f"{_choice_for(('attach',))}\nalpha beta\n")
-    assert cli.main([]) == 0
-    assert seen == [record.id]
-    out = capsys.readouterr().out
-    line = [row for row in out.splitlines() if "Running:" in row]
-    assert line, out
-    assert _split_printed(line[0].split("operator ", 1)[1]) == ["attach", "alpha beta"]
-
-
 def test_printed_command_round_trips_a_quote_and_a_dollar():
     argv = ["remember", "--kind", "gotcha", "can't look at $HOME"]
     quoted = cli._argv.quote_argv(argv)
@@ -231,94 +267,6 @@ def test_printed_command_round_trips_a_quote_and_a_dollar():
     assert "$HOME" in quoted
     if os.name == "nt":
         assert "can''t look at $HOME" in quoted
-
-
-def test_menu_offers_recover_all():
-    assert any(item.argv == ("recover", "--all") for item in cli.menu_items())
-
-
-def test_doctor_is_first_on_the_menu():
-    assert cli.menu_items()[0].argv == ("doctor",)
-
-
-def test_menu_start_does_not_inject_an_agent(monkeypatch, capsys):
-    import supervisor
-    seen = {}
-
-    def fake(instance, copilot_args, is_fresh, cwd=None):
-        seen.update(name=instance.display_name, args=list(copilot_args))
-        return 9
-
-    monkeypatch.setattr(supervisor, "_spawn_background_loop", fake)
-    _tty(monkeypatch, f"{_choice_for(('start',))}\ndemo\nfix the parser\n\nn\n")
-    assert cli.main([]) == 0
-    assert seen["name"] == "demo"
-    assert "--agent" not in seen["args"]
-    assert "anvil:anvil" not in seen["args"]
-    assert "fix the parser" in seen["args"]
-    out = capsys.readouterr().out
-    assert "Running: operator start --name demo" in out
-    assert "fix the parser" in out
-
-
-def test_menu_start_passes_an_agent_and_can_attach(monkeypatch):
-    import supervisor
-    spawned = {}
-    attached = []
-
-    def fake(instance, copilot_args, is_fresh, cwd=None):
-        spawned.update(name=instance.display_name, args=list(copilot_args))
-        return 3
-
-    monkeypatch.setattr(supervisor, "_spawn_background_loop", fake)
-    monkeypatch.setattr(op.MUX, "has_session", lambda session: True)
-    monkeypatch.setattr(op.MUX, "attach", lambda session: attached.append(session) or 0)
-    _tty(monkeypatch, f"{_choice_for(('start',))}\ndemo\n\nmy-agent\ny\n")
-    assert cli.main([]) == 0
-    assert spawned["args"] == ["--agent", "my-agent"]
-    assert attached and attached[0].startswith("op-")
-
-
-def test_menu_reprompts_for_a_missing_operator_name(monkeypatch, capsys):
-    import operators
-    record = operators.create("alpha", Path.cwd())
-    seen = []
-    monkeypatch.setattr(op.MUX, "has_session", lambda session: True)
-    monkeypatch.setattr(op.MUX, "attach", lambda session: seen.append(session) or 0)
-    _tty(monkeypatch, f"{_choice_for(('attach',))}\n\nalpha\n")
-    assert cli.main([]) == 0
-    assert seen == [record.id]
-    assert "An operator name is needed." in capsys.readouterr().out
-
-
-def test_menu_quit_does_not_dispatch(monkeypatch, capsys):
-    _tty(monkeypatch, "0\n")
-    assert cli.main([]) == 0
-    out = capsys.readouterr().out
-    assert "Running:" not in out
-    assert "Quit" in out
-
-
-def test_a_menu_started_operator_exports_the_home_its_child_reads(monkeypatch):
-    """An operator chosen from the menu must be as defended as a typed one.
-
-    `_settle_home` exports unconditionally so that parent and child read the
-    same string instead of independently agreeing on a default. Reaching a verb
-    through the menu used to skip it, so the agreement was a coincidence of
-    both sides resolving `Path.home()` the same way.
-    """
-    import supervisor
-    seen = {}
-
-    def fake(instance, copilot_args, is_fresh, cwd=None):
-        seen["home"] = os.environ.get("COPILOT_OPERATOR_HOME")
-        return 7
-
-    monkeypatch.setattr(supervisor, "_spawn_background_loop", fake)
-    monkeypatch.delenv("COPILOT_OPERATOR_HOME", raising=False)
-    _tty(monkeypatch, f"{_choice_for(('start',))}\nalpha\n\n\nn\n")
-    assert cli.main([]) == 0
-    assert seen["home"] == str(Path.home() / ".operator")
 
 
 def test_dispatch_settles_the_home_for_every_caller(monkeypatch):
@@ -581,21 +529,6 @@ def test_the_console_script_is_declared():
     block = text.split("[project.scripts]", 1)[1].split("[", 1)[0]
     scripts = [line.strip() for line in block.splitlines() if line.strip()]
     assert scripts == ['operator = "operator_cli.entry:main"']
-
-
-# ── operator handoff ────────────────────────────────────────────
-
-
-def test_handoff_is_reachable_from_the_menu(monkeypatch, capsys):
-    """The menu is the documented way in for a human who has not memorised
-    the flags, and `--status` needs a prompt to reach the parser."""
-    choice = _choice_for(("handoff",))
-    printed = []
-    monkeypatch.setattr(cli, "dispatch", lambda argv, **k: printed.append(list(argv)) or 0)
-    _tty(monkeypatch, f"{choice}\nalpha\nfinished the sweep\n")
-    assert cli.main([]) == 0
-    assert printed and printed[-1] == [
-        "handoff", "--instance", "alpha", "--status", "finished the sweep"]
 
 
 def test_the_front_door_bootstraps_from_the_shared_home_helper():
