@@ -127,7 +127,11 @@ MAX_MODULE_LINES = 602
 #: Raised from 2199 to 2280 when operator records landed. `operators.py` is the
 #: durable name and cwd a clean stop used to delete. Dead id sanitising and the
 #: managed-instance roster were removed first. 2280 is the measured size.
-MAX_KERNEL_CODE_LINES = 2281
+#:
+#: Raised from 2281 to 2322 for the records lock, the unreadable-file signal,
+#: and `delete_files` reporting a path it could not remove. 2322 is the
+#: measured size.
+MAX_KERNEL_CODE_LINES = 2322
 
 #: Per-module code ceiling, the same split applied one file down.
 #: `runner.py` is the largest at 325.

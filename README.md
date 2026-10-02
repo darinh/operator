@@ -32,7 +32,7 @@ operator attach alpha
 operator handoff --instance alpha --status "what you did" --next "what is next" --context "what the next session needs"
 ```
 
-That writes the handoff file and asks the supervisor to start the next session.
+That writes the handoff file and asks the supervisor to start the next session. `alpha` is the operator's name or its id. The file and the restart marker use the id.
 
 ## Use it
 
@@ -43,6 +43,8 @@ operator start --name alpha   start a supervised operator here
 operator list                 list operators, running and not
 operator attach alpha         attach your terminal to it
 operator stop alpha           ask its supervisor to stop
+operator rename alpha bravo   rename an operator
+operator delete alpha --yes   delete an operator and its settings
 operator recover              list operators a crash or reboot took down
 operator recover --all        bring those supervisors back
 operator handoff --instance alpha --status "what you did"

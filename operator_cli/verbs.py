@@ -46,7 +46,7 @@ VERBS: tuple[Verb, ...] = (
 PROMPT_LABEL = {
     "name": ("Operator name: ", "operator name"),
     "new_name": ("New name: ", "new name"),
-    "instance": ("Operator id: ", "operator id"),
+    "instance": ("Operator name: ", "operator name"),
     "status": ("What you completed: ", "status"),
 }
 

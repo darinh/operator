@@ -22,9 +22,12 @@ def list_instances() -> int:
     import sys
 
     records = operators.all_operators()
-    if records is None:
+    failed = operators.unreadable()
+    if records is None or failed is None:
         print("could not read operators", file=sys.stderr)
         return 1
+    for path in failed:
+        print(f"could not read {path}", file=sys.stderr)
     if not records:
         print("No operators yet. Start one with: operator start")
         return 0

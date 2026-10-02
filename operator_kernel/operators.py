@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -69,6 +71,19 @@ def _write(op: Operator) -> None:
     os.replace(tmp, dest)
 
 
+def unreadable() -> list[Path] | None:
+    """Record files that could not be loaded, or None if the directory could not."""
+    directory = records_dir()
+    if not directory.exists():
+        return []
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return None
+    bad = [path for path in entries if path.suffix == ".json" and _load(path) is None]
+    return sorted(bad)
+
+
 def all_operators() -> list[Operator] | None:
     directory = records_dir()
     if not directory.exists():
@@ -120,13 +135,41 @@ def _new_id() -> str:
     raise BadName("could not allocate an operator id")
 
 
+_LOCK_WAIT = 0.25
+
+
+@contextmanager
+def _records_lock():
+    directory = records_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    lock = directory / ".lock"
+    deadline = time.monotonic() + _LOCK_WAIT
+    fd = None
+    while fd is None:
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_RDWR)
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise BadName("could not lock operator records")
+            time.sleep(0.02)
+    try:
+        yield
+    finally:
+        os.close(fd)
+        try:
+            lock.unlink()
+        except OSError:
+            pass
+
+
 def create(name: str, cwd: Path) -> Operator:
-    problem = name_problem(name)
-    if problem:
-        raise BadName(problem)
-    op = Operator(_new_id(), name.strip(), str(Path(cwd).resolve()), utcnow())
-    _write(op)
-    return op
+    with _records_lock():
+        problem = name_problem(name)
+        if problem:
+            raise BadName(problem)
+        op = Operator(_new_id(), name.strip(), str(Path(cwd).resolve()), utcnow())
+        _write(op)
+        return op
 
 
 def find(name_or_id: str) -> Operator | None:
@@ -144,12 +187,13 @@ def find(name_or_id: str) -> Operator | None:
 
 
 def rename(op: Operator, new_name: str) -> Operator:
-    problem = name_problem(new_name, ignore_id=op.id)
-    if problem:
-        raise BadName(problem)
-    updated = Operator(op.id, new_name.strip(), op.cwd, op.created)
-    _write(updated)
-    return updated
+    with _records_lock():
+        problem = name_problem(new_name, ignore_id=op.id)
+        if problem:
+            raise BadName(problem)
+        updated = Operator(op.id, new_name.strip(), op.cwd, op.created)
+        _write(updated)
+        return updated
 
 
 def remove(op: Operator) -> None:
