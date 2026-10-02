@@ -123,7 +123,11 @@ MAX_MODULE_LINES = 602
 #: Raised from 4100 when crash recovery landed: the kernel had 40 lines of it
 #: left, which is not room for a capability the tool was missing. Re-set at the
 #: measured size plus room, the same rule it was set by.
-MAX_KERNEL_CODE_LINES = 2199
+#:
+#: Raised from 2199 to 2280 when operator records landed. `operators.py` is the
+#: durable name and cwd a clean stop used to delete. Dead id sanitising and the
+#: managed-instance roster were removed first. 2280 is the measured size.
+MAX_KERNEL_CODE_LINES = 2280
 
 #: Per-module code ceiling, the same split applied one file down.
 #: `runner.py` is the largest at 325.
@@ -399,7 +403,7 @@ def test_the_scan_sees_dynamic_imports_too(source):
 
 @pytest.mark.parametrize("source", [
     'x = __import__(name)',
-    'x = importlib.import_module(module_for(seat))',
+    'x = importlib.import_module(module_for(operator))',
     'x = some.other.import_module("copilot_operator")',
 ])
 def test_the_dynamic_scan_does_not_invent_names(source):
