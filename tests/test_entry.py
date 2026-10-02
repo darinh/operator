@@ -682,3 +682,17 @@ def test_delete_keeps_the_catalog_while_another_operator_shares_the_cwd(
     assert cli.main(["delete", "bravo", "--yes"]) == 0
     assert not paths.catalog_guid(tmp_path).guid
     assert not paths.project_dir(guid).exists()
+
+def test_taken_elsewhere_names_only_another_directorys_operator(tmp_path, monkeypatch):
+    import operators
+    from operator_cli.entry import _Actions
+    here, there = tmp_path / "here", tmp_path / "there"
+    here.mkdir()
+    there.mkdir()
+    operators.create("mine", here)
+    operators.create("theirs", there)
+    monkeypatch.chdir(here)
+    actions = _Actions()
+    assert actions.taken_elsewhere("nobody") is None
+    assert actions.taken_elsewhere("mine") is None
+    assert actions.taken_elsewhere("theirs") == str(there.resolve())
