@@ -4,8 +4,89 @@ from __future__ import annotations
 import os
 import time
 
+import pytest
+
 import operators
 from operator_cli import lifecycle
+
+PREAMBLE_HEAD = "You are running unattended under the operator supervisor"
+
+
+@pytest.fixture
+def launched(monkeypatch, tmp_path):
+    import launch
+    import op
+    import supervisor
+    import supervisor_control
+    from operator_cli import supervise
+    argvs: list[list[str]] = []
+
+    def record(inst, argv, cwd, n):
+        argvs.append(list(argv))
+        inst.stop_marker.touch()
+        return inst.spec_file
+
+    def spawn(instance, copilot_args, is_fresh, cwd=None):
+        child = ["--_supervise", "--loop", "--id", instance.id, *copilot_args]
+        assert supervise.main(child) == 0
+        return 1
+
+    monkeypatch.setattr(launch, "write_launch_spec", record)
+    monkeypatch.setattr(launch, "copilot_executable", lambda: "copilot")
+    monkeypatch.setattr(op.Instance, "copilot_pid", lambda self: 1)
+    monkeypatch.setattr(op, "stop_session_gracefully", lambda instance: None)
+    monkeypatch.setattr(op, "COPILOT_LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(supervisor, "_spawn_background_loop", spawn)
+    monkeypatch.setattr(supervisor_control, "launch_status",
+                        lambda inst, pid, **k: ("ready", pid))
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    return argvs
+
+
+def _prompt(argv: list[str]) -> str:
+    assert argv.count("-i") == 1, argv
+    return argv[argv.index("-i") + 1]
+
+
+@pytest.mark.parametrize("words", [
+    ["fix", "the", "flaky", "test"],
+    ["fix the flaky test"],
+    ["--", "fix", "the", "flaky", "test"],
+])
+def test_the_words_after_the_name_are_the_task(launched, capsys, words):
+    assert lifecycle.start(["alpha", *words]) == 0
+    assert "started alpha (pid 1)" in capsys.readouterr().out
+    [argv] = launched
+    prompt = _prompt(argv)
+    assert prompt.startswith(PREAMBLE_HEAD)
+    assert prompt.endswith(" Task: fix the flaky test")
+    assert not {"fix", "the", "flaky", "test", "fix the flaky test",
+                "--"} & set(argv), argv
+
+
+def test_a_copilot_option_keeps_its_value_beside_a_task(launched):
+    assert lifecycle.start(["alpha", "--model", "claude-haiku-4.5", "fix", "it"]) == 0
+    [argv] = launched
+    assert argv[argv.index("--model") + 1] == "claude-haiku-4.5"
+    assert _prompt(argv).endswith(" Task: fix it")
+    assert not {"fix", "it", "--"} & set(argv), argv
+
+
+def test_a_task_that_starts_with_a_dash_stays_a_task(launched):
+    assert lifecycle.start(["alpha", "--", "--fresh", "start", "over"]) == 0
+    [argv] = launched
+    assert _prompt(argv).endswith(" Task: --fresh start over")
+    assert not {"--fresh", "start", "over", "--"} & set(argv), argv
+
+
+def test_no_task_is_just_the_preamble(launched):
+    assert lifecycle.start(["alpha"]) == 0
+    [argv] = launched
+    prompt = _prompt(argv)
+    assert prompt.startswith(PREAMBLE_HEAD)
+    assert "Task:" not in prompt
 
 
 def test_rename_prints_the_old_and_new_names(tmp_path, capsys):
