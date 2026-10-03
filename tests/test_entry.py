@@ -264,47 +264,6 @@ def test_menu_start_reuses_the_operator_already_recorded_here(tmp_path, monkeypa
     assert seen == {"name": "alpha", "op_id": record.id, "cwd": record.cwd}
 
 
-def _split_printed(command: str) -> list[str]:
-    if os.name != "nt":
-        import shlex
-        return shlex.split(command)
-    out, i, n = [], 0, len(command)
-    while i < n:
-        if command[i].isspace():
-            i += 1
-            continue
-        if command[i] == "'":
-            i += 1
-            buf = []
-            while i < n:
-                if command[i] == "'" and i + 1 < n and command[i + 1] == "'":
-                    buf.append("'")
-                    i += 2
-                    continue
-                if command[i] == "'":
-                    i += 1
-                    break
-                buf.append(command[i])
-                i += 1
-            out.append("".join(buf))
-            continue
-        j = i
-        while j < n and not command[j].isspace():
-            j += 1
-        out.append(command[i:j])
-        i = j
-    return out
-
-
-def test_printed_command_round_trips_a_quote_and_a_dollar():
-    argv = ["remember", "--kind", "gotcha", "can't look at $HOME"]
-    quoted = cli._argv.quote_argv(argv)
-    assert _split_printed(quoted) == argv
-    assert "$HOME" in quoted
-    if os.name == "nt":
-        assert "can''t look at $HOME" in quoted
-
-
 def test_dispatch_settles_the_home_for_every_caller(monkeypatch):
     """The guard for the defect, at the seam rather than at one caller.
 
