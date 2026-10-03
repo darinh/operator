@@ -22,8 +22,11 @@ CLI = REPO / "operator_cli"
 # sizes.
 # Raised from 1279/1632 when handoff derives the operator from process custody
 # and treats `--instance` as a cross-check. 1288 and 1641 are the measured sizes.
-MAX_CLI_CODE_LINES = 1288
-MAX_CLI_TOTAL_LINES = 1641
+# Lowered from 1288/1641 when the quoting helpers nothing has called since the
+# keyboard menu were deleted and start took its free words as the task. 1284
+# and 1632 are the measured sizes.
+MAX_CLI_CODE_LINES = 1284
+MAX_CLI_TOTAL_LINES = 1632
 
 
 def cli_modules() -> list[Path]:

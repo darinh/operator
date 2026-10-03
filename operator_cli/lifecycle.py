@@ -32,14 +32,14 @@ def _named(rest: list[str]) -> str:
 def start(rest: list[str]) -> int:
     from .entry import _bootstrap
     _bootstrap()
-    name, fresh, attach_now, copilot = "", False, False, []
+    name, fresh, attach_now, copilot, words = "", False, False, [], []
     options, literal = at_dashdash(rest)
     i = 0
     while i < len(options):
         arg = options[i]
         if arg in ("-h", "--help"):
             print("Usage: operator start [NAME] [--name NAME] [--agent AGENT] "
-                  "[--attach] [--fresh] [prompt...]")
+                  "[--attach] [--fresh] [task...]")
             return 0
         if arg == "--fresh":
             fresh = True
@@ -61,12 +61,18 @@ def start(rest: list[str]) -> int:
             copilot += ["--agent", options[i]]
         elif arg.startswith("--agent="):
             copilot += ["--agent", arg.split("=", 1)[1]]
-        else:
+        elif arg.startswith("-"):
             copilot.append(arg)
+            if "=" not in arg and i + 1 < len(options) and not options[i + 1].startswith("-"):
+                i += 1
+                copilot.append(options[i])
+        else:
+            words.append(arg)
         i += 1
-    copilot.extend(literal)
-    if not name.strip() and copilot and not copilot[0].startswith("-"):
-        name, copilot = copilot[0], copilot[1:]
+    if not name.strip() and words:
+        name, words = words[0], words[1:]
+    if words or literal[1:]:
+        copilot += ["--", *words, *literal[1:]]
     import operators
     from supervisor import _spawn_background_loop
     from supervisor_control import active_instances, launch_status, wait_for_session

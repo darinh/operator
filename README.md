@@ -27,7 +27,7 @@ The main menu is Start an operator, List operators, Recover operator sessions wh
 
 ```
 operator doctor               check that this machine can run operator
-operator start [NAME]         start a supervised operator
+operator start [NAME] [TASK]  start a supervised operator
 operator list                 list operators
 operator attach NAME          attach this terminal to a running operator
 operator stop NAME            ask an operator's supervisor to stop
@@ -38,6 +38,8 @@ operator recover NAME ...     bring the named operators back
 operator recover --all        bring every one of them back
 operator handoff --status "what you did" [--next "what is next"]
 ```
+
+Words after NAME are the task, and Copilot receives them inside its opening prompt. With `--name`, every word is the task. A word that follows a Copilot option such as `--model` and does not start with `-` is that option's value. Pass a value that starts with `-` as `--model=VALUE`. After a flag that takes no value, start the task with `--`.
 
 Handoff is for the agent inside the session, not the menu. It writes a handoff file for that operator's own repo and asks the supervisor to start the next session. When to hand off is the repository's business, in AGENTS.md or from the user. The launch preamble only says that a handoff is possible and how to run it.
 

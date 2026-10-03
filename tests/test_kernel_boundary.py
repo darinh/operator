@@ -139,7 +139,11 @@ MAX_MODULE_LINES = 603
 #: so `supervisor.py` did not grow a reader. Then to 2568 so the Windows walk
 #: stops at a parent born after its child, a pid Windows has reused. 2568 is
 #: the measured size.
-MAX_KERNEL_CODE_LINES = 2568
+#:
+#: Lowered from 2568 to 2559 when `start_session` folded the start task into
+#: the prompt and the unused imports in `launch.py` were deleted. 2559 is the
+#: measured size.
+MAX_KERNEL_CODE_LINES = 2559
 
 #: Per-module code ceiling, the same split applied one file down.
 #: Raised from 325 when the runner records custody beside the pid file.
