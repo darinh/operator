@@ -95,17 +95,11 @@ def test_generated_options_ignore_the_literal_tail(looping, monkeypatch, tail):
     op.run_loop_mode(inst, tail, is_fresh=False)
     assert captured, "start_session never wrote a launch spec"
     argv = captured[0]
-    assert "--" in argv
-    cut = argv.index("--")
-    assert f"--resume={RESUME_ID}" in argv[:cut]
-    assert argv[cut:].count("--log-level=info") == (
-        1 if tail[-1] == "--log-level=info" else 0)
-    assert "--log-level" in argv[:cut]
-    assert "debug" in argv[:cut]
-    if tail[-1] == "--resume=literal":
-        assert "--resume=literal" in argv[cut:]
-    if tail[-1] == "some text":
-        assert "some text" in argv[cut:]
+    assert "--" not in argv
+    assert f"--resume={RESUME_ID}" in argv
+    assert tail[-1] not in argv
+    assert argv[argv.index("-i") + 1].endswith(f" Task: {tail[-1]}")
+    assert argv[argv.index("--log-level") + 1] == "debug"
 
 
 def test_resume_is_threaded_through_before_terminator():
