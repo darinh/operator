@@ -3,21 +3,11 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
-import subprocess
 import sys
 import time
 import uuid
-import hashlib
-import sqlite3
-import signal
-import contextlib
-import ntpath
-from contextlib import contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
-import instance
 
 from config import (COPILOT_LOG_DIR, MUX, RESTART_DIR, SESSION_ARG_RE)
 from presence import path_present
