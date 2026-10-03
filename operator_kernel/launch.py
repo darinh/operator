@@ -73,9 +73,10 @@ def start_session(instance: Instance, copilot_args: list[str], session_num: int,
         die("GitHub Copilot CLI ('copilot') was not found on PATH.\n"
             "  Install it: https://docs.github.com/en/copilot/how-tos/copilot-cli")
 
-    extra = ["-i", preamble] if preamble else []
-    argv = [exe, *before_terminator(copilot_args, extra)]
-    argv = _ensure_usage_logging(argv)
+    options, literal = at_dashdash(copilot_args)
+    task = " ".join(literal[1:]).strip()
+    prompt = f"{preamble} Task: {task}".strip() if task else preamble
+    argv = _ensure_usage_logging([exe, *options, *(["-i", prompt] if prompt else [])])
 
     remove_file(instance.restart_marker)
     # `remove_file` already logs the failure; what is recorded here is the

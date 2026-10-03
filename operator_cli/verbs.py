@@ -17,7 +17,7 @@ class Verb:
 
 VERBS: tuple[Verb, ...] = (
     Verb(("doctor",), "check that this machine can run operator"),
-    Verb(("start",), "start a supervised operator (start [NAME])"),
+    Verb(("start",), "start a supervised operator (start [NAME] [TASK])"),
     Verb(("list",), "list operators"),
     Verb(("attach",), "attach this terminal to a running operator"),
     Verb(("stop",), "ask an operator's supervisor to stop"),
