@@ -91,6 +91,10 @@ is the point.
 9. Does this add a command, flag, or entry point? The owner wants one `operator` entry point
    with a menu, not a family of binaries somebody has to memorise.
 10. What did I learn that belongs in this list? Add it.
+11. Does this build a command line for another program? Run that program on it. Copilot parses
+    its whole argv before it acts on `--version`, so `copilot <args> --version` checks a shape
+    without starting a session. d5e36be handed Copilot a task as bare words, which it rejects,
+    and the suite stayed green because no test runs Copilot.
 
 ## Merging
 
