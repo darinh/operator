@@ -14,7 +14,7 @@ ARGV_NAMES = frozenset({
     "args", "argv", "user_args", "copilot_args", "launch_args",
 })
 EXEMPT = frozenset({
-    "at_dashdash", "before_terminator", "quote_argv", "quote_one",
+    "at_dashdash", "before_terminator",
 })
 
 
