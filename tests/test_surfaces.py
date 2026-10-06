@@ -645,6 +645,9 @@ OPTION = re.compile(r"^-{1,2}[A-Za-z][\w-]*=?$")
 #: verbs, and supervise.py parses what `operator start` hands its child.
 NOT_TYPED = ("supervise.py", "menu.py")
 DATA_ROW = re.compile(r"^(?:\[[ x]\] )?\d+\. (.+?)(?:  \(.*)?$")
+#: menu.py's input loops. tests/test_menu.py drives their keys; the walk need
+#: not run every line of them, only every line of the screens built on them.
+PRIMITIVES = ("render", "select", "multi_select", "confirm", "ask_text", "_captured")
 #: The verbs whose handlers live in entry.py, by function name.
 VERB_OF = {fn.__name__: verb for verb, fn in cli.HANDLERS.items()
            if fn.__module__ == cli.__name__}
@@ -761,37 +764,86 @@ def _busy() -> MenuActions:
     return actions
 
 
-@cache
-def _menu_items() -> frozenset:
-    """Every choice the menu offers, found by walking it with fake verbs.
+def _refusing() -> MenuActions:
+    actions = MenuActions()
+    actions.problems = {"demo": "taken"}
+    return actions
 
-    Each screen is surveyed by pressing Down until the highlight has visited
-    every row. A numbered row is an operator, so the walk enters it but does
-    not count it as an item. A count such as ``(1)`` is dropped.
+
+@dataclass(frozen=True)
+class Walk:
+    items: frozenset
+    ran: frozenset
+
+
+@cache
+def _walk() -> Walk:
+    """Every choice the menu offers, and the menu.py lines that ran to find them.
+
+    The walk drives fake verbs in three states and enters every row of every
+    screen it reaches. It surveys a screen by pressing Down until the highlight
+    has visited every row. A numbered row is an operator, so the walk enters it
+    but does not count it as an item, and it also ticks a row with a box and
+    presses Enter. A count such as ``(1)`` is dropped. On a screen with no
+    highlight, a text box or a question, it presses Enter and, separately, y.
     """
-    items, seen = set(), set()
-    for kind, make in (("idle", MenuActions), ("busy", _busy)):
-        todo = [()]
-        while todo:
-            path = todo.pop()
-            robot = Robot(path, then=["down"] * 12)
-            menu.run(robot.keys(), robot.render, make())
-            landed = robot.landed
-            if (landed is None or landed.highlight is None
-                    or (kind, landed.title) in seen):
-                continue
-            seen.add((kind, landed.title))
-            survey = robot.frames[robot.landed_at:robot.landed_at + 13]
-            labels = dict.fromkeys(frame.rows[frame.highlight] for frame in survey
-                                   if frame.title == landed.title
-                                   and frame.highlight is not None)
-            for label in labels:
-                data = DATA_ROW.match(label)
-                step = data.group(1) if data else re.sub(r" \(\d+\)$", "", label)
-                if not data:
-                    items.add(step)
-                todo.append(path + (step,))
-    return frozenset(items)
+    items, seen, ran = set(), set(), set()
+
+    def lines(frame, event, _arg):
+        if event == "line":
+            ran.add(frame.f_lineno)
+        return lines
+
+    def calls(frame, _event, _arg):
+        code = frame.f_code
+        if code.co_filename == menu.__file__ and code.co_name not in PRIMITIVES:
+            return lines
+        return None
+
+    previous = sys.gettrace()
+    sys.settrace(calls)
+    try:
+        for kind, make in (("idle", MenuActions), ("busy", _busy),
+                           ("refusing", _refusing)):
+            todo = [()]
+            while todo:
+                path = todo.pop()
+                robot = Robot(path, then=["down"] * 12)
+                menu.run(robot.keys(), robot.render, make())
+                landed = robot.landed
+                if landed is None or (kind, landed.title) in seen:
+                    continue
+                seen.add((kind, landed.title))
+                if landed.highlight is None:
+                    todo += [path + (ENTER,), path + (Key("y"),)]
+                    continue
+                survey = robot.frames[robot.landed_at:robot.landed_at + 13]
+                labels = dict.fromkeys(frame.rows[frame.highlight] for frame in survey
+                                       if frame.title == landed.title
+                                       and frame.highlight is not None)
+                for label in labels:
+                    data = DATA_ROW.match(label)
+                    step = data.group(1) if data else re.sub(r" \(\d+\)$", "", label)
+                    if not data:
+                        items.add(step)
+                    todo.append(path + (step,))
+                    if label.startswith(("[ ] ", "[x] ")):
+                        todo.append(path + (Toggle(step), ENTER))
+    finally:
+        sys.settrace(previous)
+    return Walk(frozenset(items), frozenset(ran))
+
+
+def _screen_statements() -> dict:
+    """Line to function, for each statement in menu.py outside the primitives."""
+    tree = ast.parse(Path(menu.__file__).read_text(encoding="utf-8"))
+    found = {}
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name not in PRIMITIVES:
+            body = node.body[1:] if ast.get_docstring(node) else node.body
+            found.update((inner.lineno, node.name) for statement in body
+                         for inner in ast.walk(statement) if isinstance(inner, ast.stmt))
+    return found
 
 
 def _two_sided(case: Case) -> bool:
@@ -827,11 +879,19 @@ def test_no_parser_takes_an_abbreviation():
 
 
 def test_every_menu_item_has_a_case():
-    items = _menu_items()
+    items = _walk().items
     assert {"Start an operator", "List operators", "Quit", "Attach",
             "Delete"} <= items
     on_paths = {label for case in CASES for label in _labels(case.menu)}
     assert sorted(items - on_paths) == []
+
+
+def test_the_walk_runs_every_statement_of_the_screens():
+    """A branch the walk never takes could hold a choice that has no case."""
+    statements = _screen_statements()
+    assert {"start_screen", "action_screen", "recover_screen"} <= set(statements.values())
+    missing = {line: fn for line, fn in statements.items() if line not in _walk().ran}
+    assert missing == {}
 
 
 def test_the_menu_calls_the_typed_handlers():
@@ -864,7 +924,7 @@ def _first_cells(text: str) -> list:
 def test_the_readme_maps_each_menu_choice_to_its_command():
     same = {label for case in CASES if _two_sided(case) and not case.menu_expect
             for label in _labels(case.menu)}
-    items = _menu_items()
+    items = _walk().items
     cells = _first_cells(_readme("## Menu and command line"))
     mapped = {part for cell in cells for part in cell.split(" > ") if part in items}
     assert mapped == items & same
@@ -883,7 +943,7 @@ def test_the_readme_names_what_only_the_command_line_can_do():
 def test_the_readme_names_what_only_the_menu_can_do():
     both = {label for case in CASES if _two_sided(case) for label in _labels(case.menu)}
     cells = _first_cells(_readme("### Only in the menu"))
-    assert set(cells) == _menu_items() - both
+    assert set(cells) == _walk().items - both
 
 
 def test_the_readme_explains_every_difference():
