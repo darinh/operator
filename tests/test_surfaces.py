@@ -141,14 +141,17 @@ class Case:
     """One outcome and the ways to reach it.
 
     ``menu`` None means the command line only, and ``()`` means the main menu
-    as it opens. ``answer`` "screen" compares the lines shown rather than the
-    message. ``menu_expect`` overrides ``expect`` for the menu, only where the
-    README documents the difference, and ``doc`` quotes that README line.
+    as it opens. ``leaves`` means the menu hands this terminal over or ends,
+    rather than staying open. ``answer`` "screen" compares the lines shown
+    rather than the message. ``menu_expect`` overrides ``expect`` for the
+    menu, only where the README documents the difference, and ``doc`` quotes
+    that README line.
     """
     id: str
     expect: dict = field(default_factory=dict)
     argv: tuple = ()
     menu: "tuple | None" = None
+    leaves: bool = False
     code: int = 0
     given: dict = field(default_factory=dict)
     recoverable: tuple = ()
@@ -217,7 +220,7 @@ WRITTEN = "handoff written to <home>/projects/<guid>/handoff/<id>.md"
 CASES = [
     Case("start-here-new",
          argv=(["start", "--attach"],),
-         menu=("Start an operator", ENTER),
+         menu=("Start an operator", ENTER), leaves=True,
          expect={"events": [spawned("demo"), attached("demo")],
                  "operators": [("demo", "here")], "registered": ["here"],
                  "said": REGISTERED + "\nstarted demo (pid 41)"}),
@@ -225,18 +228,18 @@ CASES = [
          argv=(["start", "--name", "new", "--attach"],
                ["start", "new", "--attach"],
                ["start", "--name=new", "--attach"]),
-         menu=("Start an operator", Text("new")),
+         menu=("Start an operator", Text("new")), leaves=True,
          expect={"events": [spawned("new"), attached("new")],
                  "operators": [("new", "here")], "registered": ["here"],
                  "said": REGISTERED + "\nstarted new (pid 41)"}),
     Case("start-here-existing", given=IDLE_HERE,
          argv=(["start", "--attach"],),
-         menu=("Start an operator", ENTER),
+         menu=("Start an operator", ENTER), leaves=True,
          expect={"events": [spawned("alpha"), attached("alpha")],
                  "said": "started alpha (pid 41)"}),
     Case("start-here-running", given={"alpha": ("here", "running")},
          argv=(["start", "--attach"], ["start", "alpha", "--attach"]),
-         menu=("Start an operator", ENTER),
+         menu=("Start an operator", ENTER), leaves=True,
          expect={"events": [attached("alpha")],
                  "said": "alpha is already running"}),
     Case("start-running-asks-more", given={"alpha": ("here", "running")}, code=1,
@@ -269,7 +272,7 @@ CASES = [
          doc="List operators shows `(none)` under both headings."),
     Case("attach", given=BUSY,
          argv=(["attach", "alpha"],),
-         menu=("List operators", "alpha", "Attach"),
+         menu=("List operators", "alpha", "Attach"), leaves=True,
          expect={"events": [attached("alpha")]}),
     Case("stop", given=BUSY,
          argv=(["stop", "alpha"],),
@@ -282,7 +285,7 @@ CASES = [
                  "said": "started bravo (pid 41)"}),
     Case("start-and-attach", given=BUSY,
          argv=(["start", "bravo", "--attach"],),
-         menu=("List operators", "bravo", "Start and attach"),
+         menu=("List operators", "bravo", "Start and attach"), leaves=True,
          expect={"events": [spawned("bravo", "there"), attached("bravo")],
                  "said": "started bravo (pid 41)"}),
     Case("rename", given=BUSY,
@@ -317,7 +320,7 @@ CASES = [
          menu_expect={"said": "Start an operator\nList operators\n"
                               "Recover operator sessions (1)\nQuit"},
          doc="The menu shows how many on its main menu row."),
-    Case("quit", menu=("Quit",)),
+    Case("quit", menu=("Quit",), leaves=True),
     Case("start-fresh", given=IDLE_HERE,
          argv=(["start", "--fresh"], ["start", "alpha", "--fresh"]),
          expect={"events": [spawned("alpha", fresh=True)],
@@ -528,6 +531,8 @@ def test_every_way_leaves_its_cases_outcome(world, case, argv):
     else:
         robot, code, text = world.drive(case.menu)
         surface = "menu"
+        assert (robot.landed is None) == case.leaves, (
+            "the menu left" if robot.landed is None else "the menu stayed open")
         if robot.landed is None:
             assert code == case.code, text
             said = text.strip()
