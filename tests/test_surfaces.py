@@ -186,6 +186,19 @@ START_USAGE = ("Usage: operator start [NAME] [--name NAME] [--agent AGENT] "
 DELETE_USAGE = "Usage: operator delete NAME [--yes]"
 HANDOFF_USAGE = ("Usage: operator handoff --status TEXT [--next TEXT] "
                  "[--context TEXT] [--instance NAME] [--no-restart]")
+RECOVER_HELP = """\
+usage: operator recover [-h] [--all] [--home HOME] [name ...]
+
+Restart the operators that were supervised when this machine stopped,
+continuing each where it left off.
+
+positional arguments:
+  name         operators to recover (default: list them)
+
+options:
+  -h, --help   show this help message and exit
+  --all        recover every operator that needs it
+  --home HOME  operator state directory (default: ~/.operator)"""
 HELP = """\
 Usage: operator [command]
 No command opens a keyboard menu when stdin and stdout are a TTY.
@@ -334,6 +347,9 @@ CASES = [
          argv=(["recover", "--all"],),
          expect={"events": [("recover", "alpha")],
                  "said": "Recovered 1 of 1 operator(s)."}),
+    Case("recover-help",
+         argv=(["recover", "--help"], ["recover", "-h"]),
+         expect={"said": RECOVER_HELP}),
     Case("doctor",
          argv=(["doctor"],),
          expect={"said": "copilot: /bin/copilot\nmultiplexer: fakemux\n"
@@ -372,6 +388,8 @@ class World:
         for name in ("here", "there", "other-home"):
             self.places[name].mkdir()
         monkeypatch.chdir(self.places["here"])
+        # argparse wraps recover's help to the terminal's width.
+        monkeypatch.setenv("COLUMNS", "80")
         self.events: list = []
         self.recoverable: tuple = ()
 
@@ -567,8 +585,21 @@ def _owner(path: Path, node) -> "str | None":
     return path.stem
 
 
+def _parser_help(call) -> tuple:
+    """argparse gives every parser -h and --help unless add_help=False."""
+    name = getattr(call.func, "attr", getattr(call.func, "id", None))
+    if name != "ArgumentParser" or any(
+            word.arg == "add_help" and getattr(word.value, "value", True) is False
+            for word in call.keywords):
+        return ()
+    return ("-h", "--help")
+
+
 def _typed_options() -> set:
-    """(verb, option) for every option literal in operator_cli."""
+    """(verb, option) for every option operator_cli accepts.
+
+    That is each option literal, and the help argparse adds to each parser.
+    """
     found = set()
     for path in sorted(CLI.glob("*.py")):
         if path.name in NOT_TYPED:
@@ -578,6 +609,9 @@ def _typed_options() -> set:
                 if (isinstance(inner, ast.Constant) and isinstance(inner.value, str)
                         and OPTION.match(inner.value)):
                     found.add((_owner(path, node), inner.value.rstrip("=")))
+                if isinstance(inner, ast.Call):
+                    found.update((_owner(path, node), option)
+                                 for option in _parser_help(inner))
     return found
 
 
@@ -658,7 +692,7 @@ def test_every_option_has_a_case():
     options = _typed_options()
     assert {("start", "--name"), ("start", "--attach"), ("start", "--fresh"),
             ("start", "--agent"), ("delete", "--yes"),
-            ("handoff", "--status")} <= options
+            ("handoff", "--status"), ("recover", "--help")} <= options
     typed = _typed_by_cases(CASES)
     anywhere = {option for _, option in typed}
     peeled = {option for _, option in options
