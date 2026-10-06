@@ -35,8 +35,10 @@ CLI = REPO / "operator_cli"
 # the menu and the typed command share it. 1275 and 1628 are the measured sizes.
 # Raised to 1276/1630 for HELP_WORDS, which names the help words once so that a
 # test can require a case for each. Both are the measured sizes.
+# Lowered to 1276/1628 when dispatch's docstring stopped claiming the menu goes
+# through it. Both are the measured sizes.
 MAX_CLI_CODE_LINES = 1276
-MAX_CLI_TOTAL_LINES = 1630
+MAX_CLI_TOTAL_LINES = 1628
 
 
 def cli_modules() -> list[Path]:
