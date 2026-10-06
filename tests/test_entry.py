@@ -253,11 +253,10 @@ def test_a_menu_started_operator_exports_the_home_its_child_reads(
     assert seen == {"home": str(tmp_path / ".operator")}
 
 
-def test_dispatch_settles_the_home_for_every_caller(monkeypatch):
-    """The guard for the defect, at the seam rather than at one caller.
-
-    Both entry points reach a verb through `dispatch`, so settling there is
-    what makes the export unskippable. A third caller added later inherits it.
+def test_dispatch_settles_the_home_for_every_typed_verb(monkeypatch):
+    """Every typed verb reaches its handler through `dispatch`, so settling
+    there covers verbs added later too. The menu settles in `_interactive`,
+    which the test above covers.
     """
     import supervisor_control
     monkeypatch.setattr(supervisor_control, "active_instances", lambda: [])

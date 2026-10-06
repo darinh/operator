@@ -177,17 +177,15 @@ HANDLERS = {
 
 
 def dispatch(argv: list[str], home: "str | None" = None) -> int:
-    """Run one verb, with the home settled first.
+    """Run one typed verb, with the home settled first.
 
-    Every verb reaches its handler through here, from typed argv and from the
-    menu alike, so settling here is what makes the export unskippable. It used
-    to sit in `main` only: an operator started from the menu spawned its child
-    without the export, and the two agreed on the home by coincidence rather
-    than by construction.
+    Only typed argv comes through here. The menu calls the same handlers
+    through `_Actions`, after `_interactive` has settled the home. A handler's
+    SystemExit becomes this function's return code, and in the menu it ends
+    the menu instead.
 
-    This is the only settle on the *routing* path, not in the package.
     `recover.py` settles again inside its own `--home`. Settling twice is
-    harmless: it resolves and exports the same string.
+    harmless because both resolve and export the same string.
     """
     _settle_home(home)
     verb = argv[0]
