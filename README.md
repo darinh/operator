@@ -23,7 +23,7 @@ Up and Down move the highlight. Space toggles a row on the recover screen. Enter
 
 The main menu is Start an operator, List operators, Recover operator sessions when any need it, and Quit. When none need recovery, that row says so and selecting it stays on the menu.
 
-Start an operator asks for a name, prefilled with the operator already working in this directory or else the directory's name. Enter starts that operator and attaches this terminal to it, or attaches if it is already running. Attach, and Start and attach, on the list screen also leave the menu and take this terminal. Every other action returns you to the screen you came from.
+Start an operator asks for a name, prefilled with the operator already working in this directory or else the directory's name. The name is empty when several operators work here. Enter starts that operator and attaches this terminal to it, or attaches if it is already running. Attach, and Start and attach, on the list screen also leave the menu and take this terminal. Every other action returns you to the screen you came from.
 
 ## Menu and command line
 
@@ -63,6 +63,7 @@ Every menu choice calls the same function as a typed command. `tests/test_surfac
 ### Where they behave differently
 
 - Start an operator refuses a name that an operator in another directory has, and asks again. `operator start NAME` starts that operator in its own directory.
+- With several operators in this directory, Start an operator leaves the name empty and asks for one. `operator start` with no name lists them and exits 2.
 - `operator list` with no operators says "No operators yet. Start one with: operator start". List operators shows `(none)` under both headings.
 - `operator recover` with no names lists the operators that need recovering, or says none do. The menu shows how many on its main menu row.
 - A choice that keeps the menu open shows the command's message on the screen and has no exit code. The typed command prints the message and exits non-zero when it fails.
@@ -83,7 +84,7 @@ operator recover --all        bring every one of them back
 operator handoff --status "what you did" [--next "what is next"]
 ```
 
-`operator start` without NAME starts the operator already working in this directory, or creates one named after the directory. `--attach` attaches this terminal once the operator is up. When the operator is already running, `--attach` attaches to it. With `--fresh`, a Copilot option or a task, it says the operator is already running and exits 1.
+`operator start` without NAME starts the operator already working in this directory, or creates one named after the directory. When several work here, it lists them and exits 2. `--attach` attaches this terminal once the operator has a session, and exits 1 when none appears within 2 seconds, as between two sessions. When the operator is already running, `--attach` attaches to it. With `--fresh`, a Copilot option or a task, it says the operator is already running and exits 1.
 
 Words after NAME are the task, and Copilot receives them inside its opening prompt. With `--name`, every word is the task. A word that follows a Copilot option such as `--model` and does not start with `-` is that option's value. Pass a value that starts with `-` as `--model=VALUE`. After a flag that takes no value, start the task with `--`.
 

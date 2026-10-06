@@ -27,10 +27,12 @@ CLI = REPO / "operator_cli"
 # and 1632 are the measured sizes.
 # Lowered from 1284/1632 when the start screen became one name box that leaves
 # the menu to start and attach. The create question, the menu's own name
-# checks and its copy of the default name were deleted. 1261 and 1611 are the
-# measured sizes.
-MAX_CLI_CODE_LINES = 1261
-MAX_CLI_TOTAL_LINES = 1611
+# checks and its copy of the default name were deleted. Start then learned to
+# wait for a session before it attaches, to refuse a blank name, and to ask
+# which operator to start when several work in one directory. 1277 and 1632
+# are the measured sizes.
+MAX_CLI_CODE_LINES = 1277
+MAX_CLI_TOTAL_LINES = 1632
 
 
 def cli_modules() -> list[Path]:

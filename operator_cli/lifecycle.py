@@ -22,14 +22,19 @@ def _same_cwd(recorded: str, current) -> bool:
     return _cwd_match(recorded, current) is True
 
 
-def default_name() -> str:
-    """The operator already working here, or else this directory's name."""
+def _here() -> "list[str]":
     import operators
     here = Path.cwd()
-    for record in operators.all_operators() or []:
-        if _same_cwd(record.cwd, here):
-            return record.name
-    return here.name
+    return [record.name for record in operators.all_operators() or []
+            if _same_cwd(record.cwd, here)]
+
+
+def default_name() -> str:
+    """The operator working here, or else this directory's name. Empty if several."""
+    names = _here()
+    if len(names) > 1:
+        return ""
+    return names[0] if names else Path.cwd().name
 
 
 def _named(rest: list[str]) -> str:
@@ -42,7 +47,7 @@ def _named(rest: list[str]) -> str:
 def start(rest: list[str]) -> int:
     from .entry import _bootstrap
     _bootstrap()
-    name, fresh, attach_now, copilot, words = "", False, False, [], []
+    name, fresh, attach_now, copilot, words = None, False, False, [], []
     options, literal = at_dashdash(rest)
     i = 0
     while i < len(options):
@@ -55,14 +60,15 @@ def start(rest: list[str]) -> int:
             fresh = True
         elif arg == "--attach":
             attach_now = True
-        elif arg == "--name":
-            i += 1
-            if i >= len(options) or not options[i].strip():
+        elif arg == "--name" or arg.startswith("--name="):
+            if arg == "--name":
+                i += 1
+                name = options[i] if i < len(options) else ""
+            else:
+                name = arg.split("=", 1)[1]
+            if not name.strip():
                 print("operator start --name needs a value", file=sys.stderr)
                 return 2
-            name = options[i]
-        elif arg.startswith("--name="):
-            name = arg.split("=", 1)[1]
         elif arg == "--agent":
             i += 1
             if i >= len(options) or not options[i].strip():
@@ -79,22 +85,28 @@ def start(rest: list[str]) -> int:
         else:
             words.append(arg)
         i += 1
-    if not name.strip() and words:
+    if name is None and words:
         name, words = words[0], words[1:]
     if words or literal[1:]:
         copilot += ["--", *words, *literal[1:]]
     import operators
     from supervisor import _spawn_background_loop
-    from supervisor_control import active_instances, launch_status, wait_for_session
-    explicit = bool(name.strip())
+    from supervisor_control import active_instances, launch_status
+    explicit = name is not None
     if not explicit:
+        here = _here()
+        if len(here) > 1:
+            print(f"{len(here)} operators work here: {', '.join(here)}",
+                  file=sys.stderr)
+            print("pass a name: operator start NAME", file=sys.stderr)
+            return 2
         name = default_name()
     record = operators.find(name) if name.strip() else None
     if record is not None and (explicit or _same_cwd(record.cwd, Path.cwd())):
         if any(item.id == record.id for item in active_instances()):
             if attach_now and not fresh and not copilot:
                 print(f"{record.name} is already running")
-                return attach([record.name])
+                return _attach_when_up(record)
             print(f"{record.name} is already running", file=sys.stderr)
             return 1
     elif record is not None:
@@ -133,9 +145,18 @@ def start(rest: list[str]) -> int:
         return 1
     print(f"started {record.name} (pid {shown})")
     if attach_now:
-        wait_for_session(inst)
-        return attach([record.name])
+        return _attach_when_up(record)
     return 0
+
+
+def _attach_when_up(record) -> int:
+    """Attach once the session exists. A supervisor between sessions has none."""
+    from supervisor_control import wait_for_session
+    if not wait_for_session(record.instance()):
+        print(f"{record.name} has no session to attach to yet. "
+              f"Try again: operator attach {record.name}", file=sys.stderr)
+        return 1
+    return attach([record.name])
 
 
 def attach(rest: list[str]) -> int:

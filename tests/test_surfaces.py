@@ -247,6 +247,28 @@ CASES = [
                ["start", "alpha", "--attach", "fix", "it"],
                ["start", "alpha", "--attach", "--model", "gpt"]),
          expect={"said": "alpha is already running"}),
+    Case("start-here-between", given={"alpha": ("here", "between")}, code=1,
+         argv=(["start", "--attach"],),
+         menu=("Start an operator", ENTER), leaves=True,
+         expect={"said": "alpha is already running\nalpha has no session to "
+                         "attach to yet. Try again: operator attach alpha"}),
+    Case("start-several-here", code=2,
+         given={"alpha": ("here", "offline"), "bravo": ("here", "running")},
+         argv=(["start", "--attach"], ["start"]),
+         menu=("Start an operator", ENTER),
+         expect={"said": "2 operators work here: alpha, bravo\n"
+                         "pass a name: operator start NAME"},
+         menu_expect={"said": "a name is needed"},
+         doc="With several operators in this directory, Start an operator "
+             "leaves the name empty"),
+    Case("start-blank-name", code=2,
+         argv=(["start", "", "--attach"], ["start", " "]),
+         menu=("Start an operator", Text("")),
+         expect={"said": "a name is needed"}),
+    Case("start-name-needs-value", code=2,
+         argv=(["start", "--name"], ["start", "--name=", "--attach"],
+               ["start", "--name", " ", "--attach"]),
+         expect={"said": "operator start --name needs a value"}),
     Case("start-bad-name", code=2,
          argv=(["start", "--name=-x", "--attach"],),
          menu=("Start an operator", Text("-x")),
@@ -395,6 +417,7 @@ class World:
         monkeypatch.setenv("COLUMNS", "80")
         self.events: list = []
         self.recoverable: tuple = ()
+        self.between: set = set()
 
         def spawn(instance, copilot_args, is_fresh, cwd=None):
             self.events.append(spawned(
@@ -416,9 +439,16 @@ class World:
             return 0
 
         which = shutil.which
+        loop_pid = supervisor_control._running_loop_pid
+        wait = supervisor_control.wait_for_session
         monkeypatch.setattr(supervisor, "_spawn_background_loop", spawn)
         monkeypatch.setattr(supervisor_control, "launch_status",
                             lambda inst, pid, **k: ("ready", pid))
+        # A supervisor between sessions is alive and has no session.
+        monkeypatch.setattr(supervisor_control, "_running_loop_pid", lambda inst: (
+            43 if inst.id in self.between else loop_pid(inst)))
+        monkeypatch.setattr(supervisor_control, "wait_for_session",
+                            lambda inst, timeout=0: wait(inst, timeout=0))
         monkeypatch.setattr(supervisor_control, "_request_supervisor_stop", stop)
         monkeypatch.setattr(supervisor_control, "recover_loop", recover)
         monkeypatch.setattr(supervisor_control, "recoverable_instances", lambda: [
@@ -441,6 +471,8 @@ class World:
             record = operators.create(name, directory)
             if state == "running":
                 self._run(record.id, directory)
+            elif state == "between":
+                self.between.add(record.id)
         self.recoverable = case.recoverable
         if case.seated:
             _seat(self.monkeypatch, operators.find(case.seated))

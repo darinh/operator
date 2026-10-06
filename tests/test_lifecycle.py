@@ -148,9 +148,12 @@ def test_default_name_is_this_directory_when_no_operator_works_here(
 
 
 def _running_alpha(monkeypatch, tmp_path) -> list:
-    """alpha runs in this directory. Attach is recorded and answers 7."""
+    """alpha runs in this directory and has a session. Attach answers 7."""
+    import op
     import supervisor_control
     record = operators.create("alpha", tmp_path)
+    op.MUX.sessions[record.instance().session] = {
+        "cwd": str(tmp_path), "argv": [], "remain_on_exit": False, "dead": False}
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(supervisor_control, "active_instances",
                         lambda: [record.instance()])
