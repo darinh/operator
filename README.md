@@ -27,7 +27,7 @@ Start an operator asks for a name, prefilled with the operator already working i
 
 ## Menu and command line
 
-Every menu choice calls the same function as a typed command. `tests/test_surfaces.py` runs each choice both ways in a sandbox. Both ways must make the same calls to the supervisor and the multiplexer, leave the same operators and projects on disk, and tell the user the same thing. The test also fails when a command, an option or a menu item has no case, and when the tables below disagree with the cases.
+Each menu choice that runs a command calls the same handler as the typed command, and `tests/test_surfaces.py` checks that they are the same functions. List operators splits operators with the function `operator list` uses. The same test file runs each choice both ways in a sandbox. Both ways must spawn, stop, recover and attach the same operators, leave the same operators and projects on disk, and tell the user the same thing. The test also fails when a command, an option or a menu item has no case, and when the tables below disagree with the cases.
 
 | Menu | Command line |
 | --- | --- |

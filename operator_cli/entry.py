@@ -161,10 +161,6 @@ def _doctor(_rest: list[str]) -> int:
     return 0
 
 
-def _recover(rest: list[str]) -> int:
-    return recover.main(rest)
-
-
 HANDLERS = {
     "doctor": _doctor,
     "start": _start,
@@ -173,7 +169,7 @@ HANDLERS = {
     "stop": _stop,
     "rename": _rename,
     "delete": _delete,
-    "recover": _recover,
+    "recover": recover.main,
     "handoff": handoff.main,
 }
 
