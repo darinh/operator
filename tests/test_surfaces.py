@@ -216,6 +216,18 @@ No command opens a keyboard menu when stdin and stdout are a TTY.
   recover               list operators that need recovering after a crash
   handoff               write this operator's handoff and start the next session"""
 WRITTEN = "handoff written to <home>/projects/<guid>/handoff/<id>.md"
+TAKEN = ("Start an operator refuses a name that an operator in another directory "
+         "has, and asks again. `operator start NAME` starts that operator in its "
+         "own directory. `operator start` with no name exits 2 and asks for a "
+         "name when that operator has this directory's name.")
+LIST_SCREEN = ("The list screen offers Attach and Stop for a running operator, and "
+               "Start, Start and attach, Rename and Delete for a stopped one. For a "
+               "running operator, `operator rename` renames it, `operator start NAME "
+               "--attach` attaches, and `operator start NAME` and `operator delete` "
+               "refuse. For a stopped operator, `operator attach` refuses and "
+               "`operator stop` prints \"stop requested for NAME\" with nothing to stop.")
+RUNNING_ROWS = "Attach\nStop"
+STOPPED_ROWS = "Start\nStart and attach\nRename\nDelete"
 
 CASES = [
     Case("start-here-new",
@@ -280,8 +292,14 @@ CASES = [
                  "said": "started bravo (pid 41)"},
          menu_expect={"events": [],
                       "said": "bravo already works in <there>. Choose another name."},
-         doc="Start an operator refuses a name that an operator in another "
-             "directory has"),
+         doc=TAKEN),
+    Case("start-here-taken-elsewhere", given={"demo": ("there", "offline")}, code=2,
+         argv=(["start", "--attach"],),
+         menu=("Start an operator", ENTER),
+         expect={"said": "an operator named 'demo' already works in <there>\n"
+                         "pass a name: operator start --name NAME"},
+         menu_expect={"said": "demo already works in <there>. Choose another name."},
+         doc=TAKEN),
     Case("list", given=BUSY, answer="screen",
          argv=(["list"],),
          menu=("List operators",),
@@ -320,6 +338,38 @@ CASES = [
          menu=("List operators", "bravo", "Delete", Key("y")),
          expect={"operators": [("alpha", "here")], "registered": ["here"],
                  "said": "deleted bravo"}),
+    Case("rename-running", given=BUSY, answer="screen",
+         argv=(["rename", "alpha", "zed"],),
+         menu=("List operators", "alpha"),
+         expect={"operators": [("bravo", "there"), ("zed", "here")],
+                 "said": "renamed alpha to zed"},
+         menu_expect={"operators": [("alpha", "here"), ("bravo", "there")],
+                      "said": RUNNING_ROWS},
+         doc=LIST_SCREEN),
+    Case("start-running", given=BUSY, code=1, answer="screen",
+         argv=(["start", "alpha"],),
+         menu=("List operators", "alpha"),
+         expect={"said": "alpha is already running"},
+         menu_expect={"said": RUNNING_ROWS},
+         doc=LIST_SCREEN),
+    Case("delete-running", given=BUSY, code=1, answer="screen",
+         argv=(["delete", "alpha", "--yes"],),
+         menu=("List operators", "alpha"),
+         expect={"said": "stop it first: operator stop alpha"},
+         menu_expect={"said": RUNNING_ROWS},
+         doc=LIST_SCREEN),
+    Case("attach-stopped", given=BUSY, code=1, answer="screen",
+         argv=(["attach", "bravo"],),
+         menu=("List operators", "bravo"),
+         expect={"said": "No running operator 'bravo'."},
+         menu_expect={"said": STOPPED_ROWS},
+         doc=LIST_SCREEN),
+    Case("stop-stopped", given=BUSY, answer="screen",
+         argv=(["stop", "bravo"],),
+         menu=("List operators", "bravo"),
+         expect={"events": [("stop", "bravo")], "said": "stop requested for bravo"},
+         menu_expect={"events": [], "said": STOPPED_ROWS},
+         doc=LIST_SCREEN),
     Case("recover", given=IDLE_HERE, recoverable=("alpha",),
          argv=(["recover", "alpha"],),
          menu=("Recover operator sessions", Toggle("alpha"), ENTER),

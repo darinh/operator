@@ -62,8 +62,9 @@ Every menu choice calls the same function as a typed command. `tests/test_surfac
 
 ### Where they behave differently
 
-- Start an operator refuses a name that an operator in another directory has, and asks again. `operator start NAME` starts that operator in its own directory.
+- Start an operator refuses a name that an operator in another directory has, and asks again. `operator start NAME` starts that operator in its own directory. `operator start` with no name exits 2 and asks for a name when that operator has this directory's name.
 - With several operators in this directory, Start an operator leaves the name empty and asks for one. `operator start` with no name lists them and exits 2.
+- The list screen offers Attach and Stop for a running operator, and Start, Start and attach, Rename and Delete for a stopped one. For a running operator, `operator rename` renames it, `operator start NAME --attach` attaches, and `operator start NAME` and `operator delete` refuse. For a stopped operator, `operator attach` refuses and `operator stop` prints "stop requested for NAME" with nothing to stop.
 - `operator list` with no operators says "No operators yet. Start one with: operator start". List operators shows `(none)` under both headings.
 - `operator recover` with no names lists the operators that need recovering, or says none do. The menu shows how many on its main menu row.
 - A choice that keeps the menu open shows the command's message on the screen and has no exit code. The typed command prints the message and exits non-zero when it fails.
