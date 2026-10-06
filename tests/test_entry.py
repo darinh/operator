@@ -498,13 +498,6 @@ def test_doctor_ok_when_the_machine_is_ready(monkeypatch, capsys):
     assert "doctor: ok" in out
 
 
-def test_recover_delegates(monkeypatch):
-    seen = []
-    monkeypatch.setattr(cli.recover, "main", lambda argv: seen.append(argv) or 0)
-    assert cli.main(["recover", "--all"]) == 0
-    assert seen == [["--all"]]
-
-
 def test_the_console_script_is_declared():
     text = (REPO / "pyproject.toml").read_text(encoding="utf-8")
     assert 'operator = "operator_cli.entry:main"' in text

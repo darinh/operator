@@ -798,6 +798,18 @@ def test_every_menu_item_has_a_case():
     assert sorted(items - on_paths) == []
 
 
+def test_the_menu_calls_the_typed_handlers():
+    """Each verb a menu path reaches is bound to the typed command's handler.
+
+    List operators is the exception. It draws its own screen from the split
+    `operator list` prints.
+    """
+    reached = {_verb(argv) for case in CASES if _two_sided(case) for argv in case.argv}
+    assert {"start", "recover", "list"} <= reached
+    for verb in reached - {"list"}:
+        assert getattr(cli._Actions, verb) is cli.HANDLERS[verb], verb
+
+
 # ── the README says the same ────────────────────────────────────
 
 
