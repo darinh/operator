@@ -1040,10 +1040,13 @@ def test_the_readme_names_what_only_the_menu_can_do():
 
 
 def test_the_readme_explains_every_difference():
-    """Each bullet is a case's doc or STAYS, word for word, and each doc is a bullet."""
+    """Each line of the section is a bullet. Each bullet is a case's doc or STAYS,
+    word for word, and each doc is a bullet."""
     for case in CASES:
         if case.menu_expect:
             assert _two_sided(case) and case.doc, case.id
     section = _readme("### Where they behave differently")
-    bullets = {line[2:] for line in section.splitlines() if line.startswith("- ")}
+    lines = [line for line in section.splitlines() if line.strip()]
+    assert [line for line in lines if not line.startswith("- ")] == []
+    bullets = {line[2:] for line in lines}
     assert bullets == {case.doc for case in CASES if case.menu_expect} | {STAYS}
