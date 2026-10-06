@@ -8,6 +8,11 @@ the README line that documents it.
 
 The meta-tests at the bottom fail when a verb, an option or a menu item has no
 case, and when the README tables disagree with the cases.
+
+The README tests read the map table, the first column of each one-sided table
+and the bullets under Where they behave differently. A one-sided row must give
+a reason and each bullet must be a case's doc, but no test can tell whether
+either is true. The prose under Verbs is not read.
 """
 from __future__ import annotations
 
@@ -981,9 +986,14 @@ def _readme(heading: str) -> str:
     return re.split(r"\n#+ ", text.split(f"\n{heading}\n", 1)[1], maxsplit=1)[0]
 
 
-def _first_cells(text: str) -> list:
+def _rows(text: str) -> list:
+    """The stripped cells of each body row of the table in ``text``."""
     rows = [line for line in text.splitlines() if line.startswith("|")]
-    return [row.split("|")[1].strip() for row in rows[2:]]
+    return [[cell.strip() for cell in row.split("|")[1:-1]] for row in rows[2:]]
+
+
+def _first_cells(text: str) -> list:
+    return [cells[0] for cells in _rows(text)]
 
 
 def _map_row(case: Case) -> str:
@@ -1037,6 +1047,14 @@ def test_the_readme_names_what_only_the_menu_can_do():
     both = {label for case in CASES if _two_sided(case) for label in _labels(case.menu)}
     cells = _first_cells(_readme("### Only in the menu"))
     assert set(cells) == _walk().items - both
+
+
+@pytest.mark.parametrize("heading", ["### Only on the command line",
+                                     "### Only in the menu"])
+def test_each_thing_one_way_has_gives_a_reason(heading):
+    rows = _rows(_readme(heading))
+    assert rows
+    assert [cells for cells in rows if len(cells) != 2 or not cells[1]] == []
 
 
 def test_the_readme_explains_every_difference():
