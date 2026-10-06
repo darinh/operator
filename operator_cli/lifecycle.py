@@ -1,6 +1,7 @@
 """Start, attach, stop, rename, and delete. Routing stays in entry."""
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -42,6 +43,11 @@ def _named(rest: list[str]) -> str:
         if not arg.startswith("-"):
             return arg
     return ""
+
+
+def _typed(name: str) -> str:
+    """``name`` as a command takes it. Quoted unless it is one plain word."""
+    return name if re.fullmatch(r"[\w.-]+", name) else f'"{name}"'
 
 
 def start(rest: list[str]) -> int:
@@ -96,7 +102,7 @@ def start(rest: list[str]) -> int:
     if not explicit:
         here = _here()
         if len(here) > 1:
-            print(f"{len(here)} operators work here: {', '.join(here)}",
+            print(f"{len(here)} operators work here: {', '.join(map(_typed, here))}",
                   file=sys.stderr)
             print("pass a name: operator start NAME", file=sys.stderr)
             return 2
@@ -154,7 +160,7 @@ def _attach_when_up(record) -> int:
     from supervisor_control import wait_for_session
     if not wait_for_session(record.instance()):
         print(f"{record.name} has no session to attach to yet. "
-              f"Try again: operator attach {record.name}", file=sys.stderr)
+              f"Try again: operator attach {_typed(record.name)}", file=sys.stderr)
         return 1
     return attach([record.name])
 
@@ -256,7 +262,7 @@ def delete(rest: list[str]) -> int:
     inst = record.instance()
     if (any(item.id == record.id for item in active_instances())
             or _supervisor_present(inst) is not None):
-        print(f"stop it first: operator stop {record.name}", file=sys.stderr)
+        print(f"stop it first: operator stop {_typed(record.name)}", file=sys.stderr)
         return 1
     if not yes:
         from . import argv as _argv
