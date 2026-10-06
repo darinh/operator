@@ -95,6 +95,12 @@ is the point.
     its whole argv before it acts on `--version`, so `copilot <args> --version` checks a shape
     without starting a session. d5e36be handed Copilot a task as bare words, which it rejects,
     and the suite stayed green because no test runs Copilot.
+12. Did I drive the change the way its user will reach it? If the menu reaches it, press the
+    keys the screen tells a person to press, in a real terminal. #34 was proven through
+    `operator start` only. The menu's Start an operator asked a question with no key hint,
+    Enter meant No, and a test asserted exactly that, so the first person to press Enter got
+    nothing. `tests/test_surfaces.py` now holds the menu and the command line to the same
+    outcomes. It still runs in-process with a fake multiplexer, so it cannot see a real attach.
 
 ## Merging
 
