@@ -129,6 +129,55 @@ def test_an_invalid_name_does_not_register_the_project(tmp_path, monkeypatch, ca
     assert "cannot start with -" in capsys.readouterr().err
 
 
+def test_default_name_is_the_operator_already_working_here(tmp_path, monkeypatch):
+    here = tmp_path / "demo"
+    here.mkdir()
+    operators.create("alpha", here)
+    monkeypatch.chdir(here)
+    assert lifecycle.default_name() == "alpha"
+
+
+def test_default_name_is_this_directory_when_no_operator_works_here(
+        tmp_path, monkeypatch):
+    here, there = tmp_path / "demo", tmp_path / "elsewhere"
+    here.mkdir()
+    there.mkdir()
+    operators.create("alpha", there)
+    monkeypatch.chdir(here)
+    assert lifecycle.default_name() == "demo"
+
+
+def _running_alpha(monkeypatch, tmp_path) -> list:
+    """alpha runs in this directory. Attach is recorded and answers 7."""
+    import supervisor_control
+    record = operators.create("alpha", tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(supervisor_control, "active_instances",
+                        lambda: [record.instance()])
+    attached: list = []
+    monkeypatch.setattr(lifecycle, "attach",
+                        lambda rest: attached.append(rest) or 7)
+    return attached
+
+
+def test_attach_on_a_running_operator_attaches_and_returns_the_attach_code(
+        tmp_path, monkeypatch, capsys):
+    attached = _running_alpha(monkeypatch, tmp_path)
+    assert lifecycle.start(["alpha", "--attach"]) == 7
+    assert attached == [["alpha"]]
+    assert capsys.readouterr().out == "alpha is already running\n"
+
+
+@pytest.mark.parametrize("more", [["--fresh"], ["fix", "it"], ["--model", "gpt"]])
+def test_a_running_operator_refuses_what_attaching_would_drop(
+        tmp_path, monkeypatch, capsys, more):
+    attached = _running_alpha(monkeypatch, tmp_path)
+    assert lifecycle.start(["alpha", "--attach", *more]) == 1
+    assert attached == []
+    seen = capsys.readouterr()
+    assert (seen.out, seen.err) == ("", "alpha is already running\n")
+
+
 def test_delete_keeps_the_project_when_a_sibling_record_will_not_load(
         tmp_path, monkeypatch):
     import paths
