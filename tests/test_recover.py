@@ -138,6 +138,16 @@ def test_a_name_and_all_are_both_optional():
     assert args.name == [] and args.all is False
 
 
+def test_an_abbreviation_of_all_recovers_nothing(cli, capsys):
+    """argparse reads `--al` as `--all` unless told not to."""
+    cli["listed"].append(_operator("alpha"))
+    with pytest.raises(SystemExit) as exc:
+        recover.main(["--al"])
+    assert exc.value.code == 2
+    assert cli["recovered"] == []
+    assert "unrecognized arguments: --al" in capsys.readouterr().err
+
+
 def test_the_home_is_settled_before_the_kernel_resolves_it(tmp_path):
     """The bug this found, and the reason it is driven as a real process.
 

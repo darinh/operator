@@ -61,7 +61,7 @@ def _recover(args) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="operator recover",
+        prog="operator recover", allow_abbrev=False,
         description="Restart the operators that were supervised when this machine "
                     "stopped, continuing each where it left off.")
     parser.add_argument("name", nargs="*", help="operators to recover (default: list them)")

@@ -33,8 +33,10 @@ CLI = REPO / "operator_cli"
 # are the measured sizes.
 # Lowered from 1277/1632 when recover's handler became recover.main itself, so
 # the menu and the typed command share it. 1275 and 1628 are the measured sizes.
-MAX_CLI_CODE_LINES = 1275
-MAX_CLI_TOTAL_LINES = 1628
+# Raised to 1276/1630 for HELP_WORDS, which names the help words once so that a
+# test can require a case for each. Both are the measured sizes.
+MAX_CLI_CODE_LINES = 1276
+MAX_CLI_TOTAL_LINES = 1630
 
 
 def cli_modules() -> list[Path]:
