@@ -21,7 +21,51 @@ operator doctor
 
 Up and Down move the highlight. Space toggles a row on the recover screen. Enter confirms. Esc goes back. Esc on the main menu quits. Ctrl-C exits 130 and restores the terminal.
 
-The main menu is Start an operator, List operators, Recover operator sessions when any need it, and Quit. When none need recovery, that row says so and selecting it stays on the menu. After an action you return to the screen you came from. Attach, and Start and attach, are the exceptions. They leave the menu and take this terminal.
+The main menu is Start an operator, List operators, Recover operator sessions when any need it, and Quit. When none need recovery, that row says so and selecting it stays on the menu.
+
+Start an operator asks for a name, prefilled with the operator already working in this directory or else the directory's name. Enter starts that operator and attaches this terminal to it, or attaches if it is already running. Attach, and Start and attach, on the list screen also leave the menu and take this terminal. Every other action returns you to the screen you came from.
+
+## Menu and command line
+
+Every menu choice calls the same function as a typed command. `tests/test_surfaces.py` runs each choice both ways in a sandbox. Both ways must make the same calls to the supervisor and the multiplexer, leave the same operators and projects on disk, and tell the user the same thing. The test also fails when a command, an option or a menu item has no case, and when the tables below disagree with the cases.
+
+| Menu | Command line |
+| --- | --- |
+| Start an operator > Enter | `operator start --attach` |
+| Start an operator > type NAME > Enter | `operator start NAME --attach` |
+| List operators | `operator list` |
+| List operators > NAME > Attach | `operator attach NAME` |
+| List operators > NAME > Stop | `operator stop NAME` |
+| List operators > NAME > Start | `operator start NAME` |
+| List operators > NAME > Start and attach | `operator start NAME --attach` |
+| List operators > NAME > Rename > type NEW > Enter | `operator rename NAME NEW` |
+| List operators > NAME > Delete > y | `operator delete NAME --yes` |
+| Recover operator sessions > Space on each NAME > Enter | `operator recover NAME ...` |
+
+### Only on the command line
+
+| Command line | Why the menu lacks it |
+| --- | --- |
+| `operator handoff` with `--status`, `--next`, `--context`, `--instance` and `--no-restart` | The agent inside an operator's session runs it. Nobody hands off from the menu. |
+| `operator doctor` | It checks that this machine can run operator, before the first start. |
+| `--fresh` | It starts again at session 1. The menu always resumes the last session. |
+| `--agent`, any other Copilot option, and a task | The menu asks only for a name. |
+| `--all` | The recover screen has you pick each operator. |
+| `--home` | The menu uses `COPILOT_OPERATOR_HOME`, or `~/.operator` when that is unset. |
+| `--help` and `-h` | The menu lists its own choices. |
+
+### Only in the menu
+
+| Menu | Why the command line lacks it |
+| --- | --- |
+| Quit | A typed command ends by itself. |
+
+### Where they behave differently
+
+- Start an operator refuses a name that an operator in another directory has, and asks again. `operator start NAME` starts that operator in its own directory.
+- `operator list` with no operators says "No operators yet. Start one with: operator start". List operators shows `(none)` under both headings.
+- `operator recover` with no names lists the operators that need recovering, or says none do. The menu shows how many on its main menu row.
+- A choice that keeps the menu open shows the command's message on the screen and has no exit code. The typed command prints the message and exits non-zero when it fails.
 
 ## Verbs
 
@@ -38,6 +82,8 @@ operator recover NAME ...     bring the named operators back
 operator recover --all        bring every one of them back
 operator handoff --status "what you did" [--next "what is next"]
 ```
+
+`operator start` without NAME starts the operator already working in this directory, or creates one named after the directory. `--attach` attaches this terminal once the operator is up. When the operator is already running, `--attach` attaches to it. With `--fresh`, a Copilot option or a task, it says the operator is already running and exits 1.
 
 Words after NAME are the task, and Copilot receives them inside its opening prompt. With `--name`, every word is the task. A word that follows a Copilot option such as `--model` and does not start with `-` is that option's value. Pass a value that starts with `-` as `--model=VALUE`. After a flag that takes no value, start the task with `--`.
 

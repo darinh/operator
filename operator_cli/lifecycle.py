@@ -22,6 +22,16 @@ def _same_cwd(recorded: str, current) -> bool:
     return _cwd_match(recorded, current) is True
 
 
+def default_name() -> str:
+    """The operator already working here, or else this directory's name."""
+    import operators
+    here = Path.cwd()
+    for record in operators.all_operators() or []:
+        if _same_cwd(record.cwd, here):
+            return record.name
+    return here.name
+
+
 def _named(rest: list[str]) -> str:
     for arg in rest:
         if not arg.startswith("-"):
@@ -78,10 +88,13 @@ def start(rest: list[str]) -> int:
     from supervisor_control import active_instances, launch_status, wait_for_session
     explicit = bool(name.strip())
     if not explicit:
-        name = Path.cwd().name
+        name = default_name()
     record = operators.find(name) if name.strip() else None
     if record is not None and (explicit or _same_cwd(record.cwd, Path.cwd())):
         if any(item.id == record.id for item in active_instances()):
+            if attach_now and not fresh and not copilot:
+                print(f"{record.name} is already running")
+                return attach([record.name])
             print(f"{record.name} is already running", file=sys.stderr)
             return 1
     elif record is not None:

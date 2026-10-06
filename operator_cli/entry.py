@@ -18,7 +18,7 @@ from operator_kernel.argtail import at_dashdash
 from . import argv as _argv
 from . import handoff, recover
 from .home import _bootstrap, _home, _settle_home
-from .lifecycle import attach as _attach, delete as _delete, rename as _rename, start as _start, stop as _stop
+from .lifecycle import _same_cwd, attach as _attach, default_name as _default_name, delete as _delete, rename as _rename, start as _start, stop as _stop
 
 
 from .verbs import VERBS  # noqa: F401
@@ -73,40 +73,20 @@ class _Actions:
         from supervisor_control import recoverable_instances
         return [inst.display_name for inst in recoverable_instances()]
 
-    def onboarded(self) -> bool:
-        import paths
-        return bool(paths.catalog_guid(Path.cwd()).guid)
-
     def cwd(self) -> str:
         return str(Path.cwd())
 
-    def default_name(self) -> str:
-        import operators
-        import paths
-        cwd = Path.cwd()
-        try:
-            resolved = cwd.resolve()
-        except OSError:
-            return cwd.name
-        for record in operators.all_operators() or []:
-            if paths.catalog_paths_match(resolved, record.cwd) is True:
-                return record.name
-        return cwd.name
+    default_name = staticmethod(_default_name)
 
-    def taken_elsewhere(self, name: str) -> "str | None":
-        """The repo of another directory's operator already called ``name``."""
+    def start_problem(self, name: str) -> "str | None":
+        """Why the start screen will not start ``name`` here, or None."""
         import operators
-        import paths
         record = operators.find(name)
         if record is None:
+            return operators.name_problem(name)
+        if _same_cwd(record.cwd, Path.cwd()):
             return None
-        try:
-            here = Path.cwd().resolve()
-        except OSError:
-            return record.cwd
-        if paths.catalog_paths_match(here, record.cwd) is True:
-            return None
-        return record.cwd
+        return f"{record.name} already works in {record.cwd}. Choose another name."
 
     def sections(self):
         import operators

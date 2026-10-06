@@ -25,8 +25,12 @@ CLI = REPO / "operator_cli"
 # Lowered from 1288/1641 when the quoting helpers nothing has called since the
 # keyboard menu were deleted and start took its free words as the task. 1284
 # and 1632 are the measured sizes.
-MAX_CLI_CODE_LINES = 1284
-MAX_CLI_TOTAL_LINES = 1632
+# Lowered from 1284/1632 when the start screen became one name box that leaves
+# the menu to start and attach. The create question, the menu's own name
+# checks and its copy of the default name were deleted. 1261 and 1611 are the
+# measured sizes.
+MAX_CLI_CODE_LINES = 1261
+MAX_CLI_TOTAL_LINES = 1611
 
 
 def cli_modules() -> list[Path]:
