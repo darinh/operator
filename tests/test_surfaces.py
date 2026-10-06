@@ -26,6 +26,7 @@ from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -173,6 +174,7 @@ class Case:
             "operators": sorted((name, where) for name, (where, _) in self.given.items()),
             "registered": sorted({where for where, _ in self.given.values()}),
             "said": "",
+            "waited": 0.0,
         }
         want.update(self.expect)
         if surface == "menu":
@@ -279,7 +281,8 @@ CASES = [
          argv=(["start", "--attach"],),
          menu=("Start an operator", ENTER), leaves=True,
          expect={"said": "alpha is already running\nalpha has no session to "
-                         "attach to yet. Try again: operator attach alpha"}),
+                         "attach to yet. Try again: operator attach alpha",
+                 "waited": 2.0}),
     Case("start-several-here", code=2,
          given={"alpha": ("here", "offline"), "bravo": ("here", "running")},
          argv=(["start", "--attach"], ["start"]),
@@ -482,6 +485,10 @@ class World:
         self.events: list = []
         self.recoverable: tuple = ()
         self.between: set = set()
+        self.waited_ms = 0
+
+        def sleep(seconds):
+            self.waited_ms += round(seconds * 1000)
 
         def spawn(instance, copilot_args, is_fresh, cwd=None):
             self.events.append(spawned(
@@ -504,15 +511,16 @@ class World:
 
         which = shutil.which
         loop_pid = supervisor_control._running_loop_pid
-        wait = supervisor_control.wait_for_session
         monkeypatch.setattr(supervisor, "_spawn_background_loop", spawn)
         monkeypatch.setattr(supervisor_control, "launch_status",
                             lambda inst, pid, **k: ("ready", pid))
         # A supervisor between sessions is alive and has no session.
         monkeypatch.setattr(supervisor_control, "_running_loop_pid", lambda inst: (
             43 if inst.id in self.between else loop_pid(inst)))
-        monkeypatch.setattr(supervisor_control, "wait_for_session",
-                            lambda inst, timeout=0: wait(inst, timeout=0))
+        # The session wait runs whole on a clock that only sleeping moves, so a
+        # case says how long the user waited. Only this module's name changes.
+        monkeypatch.setattr(supervisor_control, "time", SimpleNamespace(
+            monotonic=lambda: self.waited_ms / 1000, sleep=sleep))
         monkeypatch.setattr(supervisor_control, "_request_supervisor_stop", stop)
         monkeypatch.setattr(supervisor_control, "recover_loop", recover)
         monkeypatch.setattr(supervisor_control, "recoverable_instances", lambda: [
@@ -575,6 +583,7 @@ class World:
             "registered": sorted(where for where in ("here", "there")
                                  if paths.catalog_guid(self.places[where]).guid),
             "said": self.scrub(said),
+            "waited": self.waited_ms / 1000,
         }
 
     def scrub(self, text: str) -> str:
