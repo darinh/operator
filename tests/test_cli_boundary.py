@@ -37,8 +37,11 @@ CLI = REPO / "operator_cli"
 # test can require a case for each. Both are the measured sizes.
 # Lowered to 1276/1628 when dispatch's docstring stopped claiming the menu goes
 # through it. Both are the measured sizes.
-MAX_CLI_CODE_LINES = 1276
-MAX_CLI_TOTAL_LINES = 1628
+# Raised to 1279/1634 when the commands operator prints quote a name that is
+# not one plain word, so a name with a space pastes back as one argument. Both
+# are the measured sizes.
+MAX_CLI_CODE_LINES = 1279
+MAX_CLI_TOTAL_LINES = 1634
 
 
 def cli_modules() -> list[Path]:

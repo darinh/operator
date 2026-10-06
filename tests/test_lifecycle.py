@@ -181,6 +181,26 @@ def test_a_running_operator_refuses_what_attaching_would_drop(
     assert (seen.out, seen.err) == ("", "alpha is already running\n")
 
 
+def test_a_name_with_a_space_is_quoted_in_what_it_tells_you_to_type(
+        tmp_path, monkeypatch, capsys):
+    import supervisor_control
+    spaced = operators.create("my op", tmp_path)
+    operators.create("bravo", tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(supervisor_control, "active_instances",
+                        lambda: [spaced.instance()])
+    monkeypatch.setattr(supervisor_control, "wait_for_session", lambda instance: False)
+    assert lifecycle.start([]) == 2
+    assert lifecycle.start(["my op", "--attach"]) == 1
+    assert lifecycle.delete(["my op", "--yes"]) == 1
+    assert capsys.readouterr().err.splitlines() == [
+        '2 operators work here: bravo, "my op"',
+        "pass a name: operator start NAME",
+        'my op has no session to attach to yet. Try again: operator attach "my op"',
+        'stop it first: operator stop "my op"',
+    ]
+
+
 def test_delete_keeps_the_project_when_a_sibling_record_will_not_load(
         tmp_path, monkeypatch):
     import paths
