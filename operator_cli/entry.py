@@ -23,6 +23,8 @@ from .lifecycle import _same_cwd, attach as _attach, default_name as _default_na
 
 from .verbs import VERBS  # noqa: F401
 
+HELP_WORDS = ("-h", "--help", "help")
+
 
 def _print_help(stream) -> None:
     print("Usage: operator [command]", file=stream)
@@ -210,7 +212,7 @@ def main(argv: "list[str] | None" = None) -> int:
             return _interactive()
         _print_help(sys.stderr)
         return 2
-    if raw[0] in ("-h", "--help", "help"):
+    if raw[0] in HELP_WORDS:
         _print_help(sys.stdout)
         return 0
     try:
@@ -221,7 +223,7 @@ def main(argv: "list[str] | None" = None) -> int:
     if not rest:
         _print_help(sys.stderr)
         return 2
-    if rest[0] in ("-h", "--help", "help"):
+    if rest[0] in HELP_WORDS:
         _print_help(sys.stdout)
         return 0
     return dispatch(rest, home)

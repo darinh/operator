@@ -645,11 +645,24 @@ OPTION = re.compile(r"^-{1,2}[A-Za-z][\w-]*=?$")
 #: verbs, and supervise.py parses what `operator start` hands its child.
 NOT_TYPED = ("supervise.py", "menu.py")
 DATA_ROW = re.compile(r"^(?:\[[ x]\] )?\d+\. (.+?)(?:  \(.*)?$")
+#: The verbs whose handlers live in entry.py, by function name.
+VERB_OF = {fn.__name__: verb for verb, fn in cli.HANDLERS.items()
+           if fn.__module__ == cli.__name__}
 
 
 def _verb(argv) -> "str | None":
     rest = cli._peel_home(list(argv))[1]
     return rest[0] if rest and rest[0] in cli.HANDLERS else None
+
+
+def _words(cases) -> set:
+    """The first word each argv hands the front door once --home is gone."""
+    return {word for case in cases for argv in case.argv
+            for word in cli._peel_home(list(argv))[1][:1]}
+
+
+def _front_words() -> set:
+    return set(cli.HANDLERS) | {word for word in cli.HELP_WORDS if word[0] != "-"}
 
 
 def _node_name(node) -> "str | None":
@@ -660,10 +673,18 @@ def _node_name(node) -> "str | None":
     return None
 
 
-def _owner(path: Path, node) -> "str | None":
-    """The verb that parses an option literal, or None for the front door."""
-    if path.name == "entry.py":
+def _peeled(spelling: str) -> bool:
+    """Whether the front door takes ``spelling`` before any verb can see it."""
+    tail = [spelling + "x"] if spelling.endswith("=") else [spelling, "x"]
+    return cli._peel_home(["list", *tail])[0] == "x"
+
+
+def _owner(path: Path, node, spelling: str) -> "str | None":
+    """The verb that parses an option, or None for the front door."""
+    if _peeled(spelling):
         return None
+    if path.name == "entry.py":
+        return VERB_OF.get(_node_name(node))
     if _node_name(node) in cli.HANDLERS:
         return _node_name(node)
     assert path.stem in cli.HANDLERS, (
@@ -672,10 +693,14 @@ def _owner(path: Path, node) -> "str | None":
     return path.stem
 
 
+def _is_parser(call) -> bool:
+    return isinstance(call, ast.Call) and getattr(
+        call.func, "attr", getattr(call.func, "id", None)) == "ArgumentParser"
+
+
 def _parser_help(call) -> tuple:
     """argparse gives every parser -h and --help unless add_help=False."""
-    name = getattr(call.func, "attr", getattr(call.func, "id", None))
-    if name != "ArgumentParser" or any(
+    if not _is_parser(call) or any(
             word.arg == "add_help" and getattr(word.value, "value", True) is False
             for word in call.keywords):
         return ()
@@ -683,9 +708,12 @@ def _parser_help(call) -> tuple:
 
 
 def _typed_options() -> set:
-    """(verb, option) for every option operator_cli accepts.
+    """(verb, spelling) for every option operator_cli accepts.
 
     That is each option literal, and the help argparse adds to each parser.
+    ``--name=`` is a spelling of its own because it has a branch of its own.
+    An option built from pieces, or parsed outside operator_cli, escapes this
+    scan.
     """
     found = set()
     for path in sorted(CLI.glob("*.py")):
@@ -693,16 +721,17 @@ def _typed_options() -> set:
             continue
         for node in ast.parse(path.read_text(encoding="utf-8")).body:
             for inner in ast.walk(node):
+                spellings = _parser_help(inner)
                 if (isinstance(inner, ast.Constant) and isinstance(inner.value, str)
                         and OPTION.match(inner.value)):
-                    found.add((_owner(path, node), inner.value.rstrip("=")))
-                if isinstance(inner, ast.Call):
-                    found.update((_owner(path, node), option)
-                                 for option in _parser_help(inner))
+                    spellings = (inner.value,)
+                found.update((_owner(path, node, spelling), spelling)
+                             for spelling in spellings)
     return found
 
 
 def _typed_by_cases(cases) -> set:
+    """(verb, spelling) for every option the cases type, owned as above."""
     pairs = set()
     for case in cases:
         for argv in case.argv:
@@ -711,7 +740,8 @@ def _typed_by_cases(cases) -> set:
                 if token == "--":
                     break
                 if token.startswith("-"):
-                    pairs.add((verb, token.split("=")[0]))
+                    spelling = token[:token.index("=") + 1] if "=" in token else token
+                    pairs.add((None if _peeled(spelling) else verb, spelling))
     return pairs
 
 
@@ -769,25 +799,31 @@ def _two_sided(case: Case) -> bool:
 
 
 def test_every_verb_has_a_case():
-    typed = {_verb(argv) for case in CASES for argv in case.argv}
-    assert set(cli.HANDLERS) - typed == set()
+    assert "help" in _front_words()
+    assert _front_words() - _words(CASES) == set()
 
 
 def test_every_option_has_a_case():
     for name in NOT_TYPED:
         assert (CLI / name).is_file(), name
     options = _typed_options()
-    assert {("start", "--name"), ("start", "--attach"), ("start", "--fresh"),
-            ("start", "--agent"), ("delete", "--yes"),
-            ("handoff", "--status"), ("recover", "--help")} <= options
-    typed = _typed_by_cases(CASES)
-    anywhere = {option for _, option in typed}
-    peeled = {option for _, option in options
-              if cli._peel_home(["list", option, "x"])[0] == "x"}
-    missing = sorted((verb or "", option) for verb, option in options
-                     if not (((verb is None or option in peeled) and option in anywhere)
-                             or (verb, option) in typed))
-    assert missing == []
+    assert {("start", "--name"), ("start", "--name="), ("start", "--attach"),
+            ("start", "--fresh"), ("start", "--agent="), ("delete", "--yes"),
+            ("handoff", "--status"), ("recover", "--all"), ("recover", "--help"),
+            (None, "--home"), (None, "--home="), (None, "--help")} <= options
+    missing = options - _typed_by_cases(CASES)
+    assert sorted((verb or "", spelling) for verb, spelling in missing) == []
+
+
+def test_no_parser_takes_an_abbreviation():
+    """argparse reads --al as --all unless told not to, and no case types --al."""
+    parsers = [(path.name, any(word.arg == "allow_abbrev"
+                               and getattr(word.value, "value", True) is False
+                               for word in call.keywords))
+               for path in sorted(CLI.glob("*.py")) if path.name not in NOT_TYPED
+               for call in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+               if _is_parser(call)]
+    assert parsers and all(refuses for _, refuses in parsers), parsers
 
 
 def test_every_menu_item_has_a_case():
@@ -836,12 +872,12 @@ def test_the_readme_maps_each_menu_choice_to_its_command():
 
 def test_the_readme_names_what_only_the_command_line_can_do():
     both = [case for case in CASES if _two_sided(case)]
-    verbs = set(cli.HANDLERS) - {_verb(argv) for case in both for argv in case.argv}
-    options = ({option for _, option in _typed_options()}
-               - {option for _, option in _typed_by_cases(both)})
+    words = _front_words() - _words(both)
+    options = ({spelling.rstrip("=") for _, spelling in _typed_options()}
+               - {spelling.rstrip("=") for _, spelling in _typed_by_cases(both)})
     cells = _first_cells(_readme("### Only on the command line"))
     shown = {token for cell in cells for token in re.findall(r"`([^`]+)`", cell)}
-    assert shown == {f"operator {verb}" for verb in verbs} | options
+    assert shown == {f"operator {word}" for word in words} | options
 
 
 def test_the_readme_names_what_only_the_menu_can_do():

@@ -52,7 +52,7 @@ Each menu choice that runs a command calls the same handler as the typed command
 | `--agent`, any other Copilot option, and a task | The menu asks only for a name. |
 | `--all` | The recover screen has you pick each operator. |
 | `--home` | The menu uses `COPILOT_OPERATOR_HOME`, or `~/.operator` when that is unset. |
-| `--help` and `-h` | The menu lists its own choices. |
+| `operator help`, `--help` and `-h` | The menu lists its own choices. |
 
 ### Only in the menu
 
