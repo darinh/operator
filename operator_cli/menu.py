@@ -2,7 +2,7 @@
 
 A screen returns a status string for the screen the user came from, or a
 ``Leave`` when the tool should restore the terminal and run a verb for real.
-Attach and start-and-attach are the only leaves.
+Start an operator, Attach, and Start and attach are the leaves.
 """
 from __future__ import annotations
 
@@ -93,16 +93,10 @@ def multi_select(title, labels, keys, render, status=""):
             return None
 
 
-def confirm(lines, keys, render, *, loose=False) -> bool:
-    """y is yes. n, Esc, and Enter are no. ``loose`` treats any other key as no."""
-    title, rows = lines[0], list(lines[1:])
-    while True:
-        render(title, rows, highlight=None)
-        key = next(keys)
-        if key in ("y", "Y"):
-            return True
-        if loose or key in ("n", "N", "esc", "enter"):
-            return False
+def confirm(lines, keys, render) -> bool:
+    """y is yes. Any other key is no."""
+    render(lines[0], list(lines[1:]), highlight=None)
+    return next(keys) in ("y", "Y")
 
 
 def ask_text(title, keys, render, prefill="", status="") -> "str | None":
@@ -171,28 +165,20 @@ def _main(keys, render, actions, status):
         return "start"
 
 
-def start_screen(keys, render, actions) -> str:
-    cwd = actions.cwd()
-    needs = not actions.onboarded()
-    question = [f"Create an operator for {cwd}?"]
-    if needs and not confirm(question, keys, render):
-        return ""
+def start_screen(keys, render, actions):
+    title = (f"Start an operator in {actions.cwd()}\n"
+             "Enter starts it and attaches this terminal. Esc goes back.\n"
+             "Name:")
     prefill, status = actions.default_name(), ""
     while True:
-        name = ask_text("Operator name:", keys, render, prefill=prefill,
-                        status=status)
-        if name is None:
-            if not needs or not confirm(question, keys, render):
-                return ""
-            continue
-        prefill, name = name, name.strip()
-        elsewhere = actions.taken_elsewhere(name) if name else None
-        if not name:
-            status = "An operator needs a name."
-        elif elsewhere:
-            status = f"{name} already works in {elsewhere}. Choose another name."
-        else:
-            return _captured(actions.start, ["--name", name], render)
+        typed = ask_text(title, keys, render, prefill=prefill, status=status)
+        if typed is None:
+            return ""
+        name = typed.strip()
+        status = actions.start_problem(name)
+        if status is None:
+            return Leave(lambda: actions.start(["--name", name, "--attach"]))
+        prefill = typed
 
 
 def action_screen(item, keys, render, actions):
@@ -225,7 +211,7 @@ def action_screen(item, keys, render, actions):
             f"Repo: {item.cwd}",
             "Delete? [y/N]",
         ]
-        if confirm(lines, keys, render, loose=True):
+        if confirm(lines, keys, render):
             return _captured(actions.delete, [item.name, "--yes"], render)
 
 
