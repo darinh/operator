@@ -36,7 +36,8 @@ README = REPO / "README.md"
 
 #: Why a menu run that stays open compares no exit code. README.md says so too.
 STAYS = ("A choice that keeps the menu open shows the command's message on "
-         "the screen and has no exit code.")
+         "the screen and has no exit code. The typed command prints the message "
+         "and exits non-zero when it fails.")
 
 
 # ── driving the menu ────────────────────────────────────────────
@@ -144,8 +145,8 @@ class Case:
     as it opens. ``leaves`` means the menu hands this terminal over or ends,
     rather than staying open. ``answer`` "screen" compares the lines shown
     rather than the message. ``menu_expect`` overrides ``expect`` for the
-    menu, only where the README documents the difference, and ``doc`` quotes
-    that README line.
+    menu, only where the README documents the difference, and ``doc`` is the
+    README bullet that documents it, word for word.
     """
     id: str
     expect: dict = field(default_factory=dict)
@@ -220,6 +221,15 @@ TAKEN = ("Start an operator refuses a name that an operator in another directory
          "has, and asks again. `operator start NAME` starts that operator in its "
          "own directory. `operator start` with no name exits 2 and asks for a "
          "name when that operator has this directory's name.")
+SEVERAL = ("With several operators in this directory, Start an operator leaves "
+           "the name empty and asks for one. `operator start` with no name lists "
+           "them and exits 2.")
+LIST_EMPTY = ("`operator list` with no operators says \"No operators yet. Start one "
+              "with: operator start\". List operators shows `(none)` under both "
+              "headings.")
+RECOVER_LISTS = ("`operator recover` with no names lists the operators that need "
+                 "recovering, or says none do. The menu shows how many on its main "
+                 "menu row.")
 LIST_SCREEN = ("The list screen offers Attach and Stop for a running operator, and "
                "Start, Start and attach, Rename and Delete for a stopped one. For a "
                "running operator, `operator rename` renames it, `operator start NAME "
@@ -271,8 +281,7 @@ CASES = [
          expect={"said": "2 operators work here: alpha, bravo\n"
                          "pass a name: operator start NAME"},
          menu_expect={"said": "a name is needed"},
-         doc="With several operators in this directory, Start an operator "
-             "leaves the name empty"),
+         doc=SEVERAL),
     Case("start-blank-name", code=2,
          argv=(["start", "", "--attach"], ["start", " "]),
          menu=("Start an operator", Text("")),
@@ -309,7 +318,7 @@ CASES = [
          menu=("List operators",),
          expect={"said": "No operators yet. Start one with: operator start"},
          menu_expect={"said": "Running:\n(none)\nOffline:\n(none)"},
-         doc="List operators shows `(none)` under both headings."),
+         doc=LIST_EMPTY),
     Case("attach", given=BUSY,
          argv=(["attach", "alpha"],),
          menu=("List operators", "alpha", "Attach"), leaves=True,
@@ -380,8 +389,7 @@ CASES = [
          expect={"said": "No operators need recovering."},
          menu_expect={"said": "Start an operator\nList operators\n"
                               "No operators need recovery.\nQuit"},
-         doc="`operator recover` with no names lists the operators that need "
-             "recovering, or says none do."),
+         doc=RECOVER_LISTS),
     Case("recover-listing", given=IDLE_HERE, recoverable=("alpha",), answer="screen",
          argv=(["recover"],),
          menu=(),
@@ -391,7 +399,7 @@ CASES = [
                          "Or one at a time with:    operator recover <name>"},
          menu_expect={"said": "Start an operator\nList operators\n"
                               "Recover operator sessions (1)\nQuit"},
-         doc="The menu shows how many on its main menu row."),
+         doc=RECOVER_LISTS),
     Case("quit", menu=("Quit",), leaves=True),
     Case("start-fresh", given=IDLE_HERE,
          argv=(["start", "--fresh"], ["start", "alpha", "--fresh"]),
@@ -921,13 +929,41 @@ def _first_cells(text: str) -> list:
     return [row.split("|")[1].strip() for row in rows[2:]]
 
 
+def _map_row(case: Case) -> str:
+    """The README row for a case: its menu path, and its shortest argv.
+
+    A given operator is NAME. A typed name is NAME, or NEW after a NAME. A
+    ticked operator is each NAME the command line lists.
+    """
+    menu_cells, words = [], {}
+    for step in case.menu:
+        if isinstance(step, Text):
+            words[step.value] = "NEW" if words else "NAME"
+            menu_cells += [f"type {words[step.value]}", "Enter"]
+        elif isinstance(step, Toggle):
+            words[step.label] = "NAME ..."
+            menu_cells.append("Space on each NAME")
+        elif isinstance(step, Key):
+            menu_cells.append("Enter" if step == ENTER else step.name)
+        elif step in case.given:
+            words[step] = "NAME"
+            menu_cells.append("NAME")
+        else:
+            menu_cells.append(step)
+    argv = min(case.argv, key=lambda argv: len(" ".join(argv)))
+    command = " ".join(words.get(word, word) for word in argv)
+    return f"| {' > '.join(menu_cells)} | `operator {command}` |"
+
+
 def test_the_readme_maps_each_menu_choice_to_its_command():
-    same = {label for case in CASES if _two_sided(case) and not case.menu_expect
-            for label in _labels(case.menu)}
+    agree = [case for case in CASES if _two_sided(case) and not case.menu_expect]
+    table = {line for line in _readme("## Menu and command line").splitlines()
+             if line.startswith("| ") and "`operator " in line}
+    assert table == {_map_row(case) for case in agree if case.code == 0}
     items = _walk().items
     cells = _first_cells(_readme("## Menu and command line"))
     mapped = {part for cell in cells for part in cell.split(" > ") if part in items}
-    assert mapped == items & same
+    assert mapped == items & {label for case in agree for label in _labels(case.menu)}
 
 
 def test_the_readme_names_what_only_the_command_line_can_do():
@@ -947,13 +983,10 @@ def test_the_readme_names_what_only_the_menu_can_do():
 
 
 def test_the_readme_explains_every_difference():
-    section = _readme("### Where they behave differently")
-    docs = [case.doc for case in CASES if case.menu_expect]
+    """Each bullet is a case's doc or STAYS, word for word, and each doc is a bullet."""
     for case in CASES:
         if case.menu_expect:
-            assert _two_sided(case), case.id
-            assert case.doc and case.doc in section, case.id
-    assert STAYS in section
-    for line in section.splitlines():
-        if line.startswith("- "):
-            assert any(doc in line for doc in [*docs, STAYS]), line
+            assert _two_sided(case) and case.doc, case.id
+    section = _readme("### Where they behave differently")
+    bullets = {line[2:] for line in section.splitlines() if line.startswith("- ")}
+    assert bullets == {case.doc for case in CASES if case.menu_expect} | {STAYS}
