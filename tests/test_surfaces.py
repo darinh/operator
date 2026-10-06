@@ -12,11 +12,12 @@ case, and when the README tables disagree with the cases.
 from __future__ import annotations
 
 import ast
+import io
 import os
 import re
 import shutil
 import sys
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
@@ -782,11 +783,14 @@ def _refusing() -> MenuActions:
 class Walk:
     items: frozenset
     ran: frozenset
+    shown: frozenset
+    passed: frozenset
+    returned: frozenset
 
 
 @cache
 def _walk() -> Walk:
-    """Every choice the menu offers, and the menu.py lines that ran to find them.
+    """Every choice the menu offers, and what the walk saw on the way.
 
     The walk drives fake verbs in three states and enters every row of every
     screen it reaches. It surveys a screen by pressing Down until the highlight
@@ -794,12 +798,19 @@ def _walk() -> Walk:
     but does not count it as an item, and it also ticks a row with a box and
     presses Enter. A count such as ``(1)`` is dropped. On a screen with no
     highlight, a text box or a question, it presses Enter and, separately, y.
+    When the menu leaves, the walk runs what it left to run.
+
+    It also keeps the menu.py lines that ran, each line drawn on a screen, each
+    argv token a fake verb received, and each str a screen function returned.
     """
     items, seen, ran = set(), set(), set()
+    shown, passed, returned = set(), set(), set()
 
-    def lines(frame, event, _arg):
+    def lines(frame, event, arg):
         if event == "line":
             ran.add(frame.f_lineno)
+        elif event == "return" and isinstance(arg, str):
+            returned.add(arg)
         return lines
 
     def calls(frame, _event, _arg):
@@ -817,7 +828,18 @@ def _walk() -> Walk:
             while todo:
                 path = todo.pop()
                 robot = Robot(path, then=["down"] * 12)
-                menu.run(robot.keys(), robot.render, make())
+                actions = make()
+                left = menu.run(robot.keys(), robot.render, actions)
+                if isinstance(left, menu.Leave):
+                    with redirect_stdout(io.StringIO()):
+                        left.call()
+                shown.update(line for frame in robot.frames
+                             for text in (frame.title, *frame.rows, frame.status)
+                             for line in text.split("\n"))
+                received = (actions.started, actions.stopped, actions.renamed,
+                            actions.deleted, actions.recovered, actions.attached)
+                passed.update(token for calls in received for argv in calls
+                              for token in argv)
                 landed = robot.landed
                 if landed is None or (kind, landed.title) in seen:
                     continue
@@ -839,19 +861,37 @@ def _walk() -> Walk:
                         todo.append(path + (Toggle(step), ENTER))
     finally:
         sys.settrace(previous)
-    return Walk(frozenset(items), frozenset(ran))
+    return Walk(frozenset(items), frozenset(ran), frozenset(shown),
+                frozenset(passed), frozenset(returned))
+
+
+def _screens() -> list:
+    """(name, statements) for each function in menu.py outside the primitives.
+
+    A docstring is not one of the statements.
+    """
+    tree = ast.parse(Path(menu.__file__).read_text(encoding="utf-8"))
+    return [(node.name, node.body[1:] if ast.get_docstring(node) is not None
+             else node.body)
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name not in PRIMITIVES]
 
 
 def _screen_statements() -> dict:
     """Line to function, for each statement in menu.py outside the primitives."""
-    tree = ast.parse(Path(menu.__file__).read_text(encoding="utf-8"))
-    found = {}
-    for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name not in PRIMITIVES:
-            body = node.body[1:] if ast.get_docstring(node) else node.body
-            found.update((inner.lineno, node.name) for statement in body
-                         for inner in ast.walk(statement) if isinstance(inner, ast.stmt))
-    return found
+    return {inner.lineno: name for name, body in _screens() for statement in body
+            for inner in ast.walk(statement) if isinstance(inner, ast.stmt)}
+
+
+def _screen_strings() -> dict:
+    """Each line of each str literal in those statements, to its function.
+
+    An f-string counts by its fixed parts. Blank lines are dropped.
+    """
+    return {part: name for name, body in _screens() for statement in body
+            for inner in ast.walk(statement)
+            if isinstance(inner, ast.Constant) and isinstance(inner.value, str)
+            for part in (piece.strip() for piece in inner.value.split("\n")) if part}
 
 
 def _two_sided(case: Case) -> bool:
@@ -900,6 +940,23 @@ def test_the_walk_runs_every_statement_of_the_screens():
     assert {"start_screen", "action_screen", "recover_screen"} <= set(statements.values())
     missing = {line: fn for line, fn in statements.items() if line not in _walk().ran}
     assert missing == {}
+
+
+def test_every_string_in_the_screens_is_shown_passed_or_returned():
+    """A choice or an option behind a condition inside one statement escapes the
+    walk's items and the statement trace, but its string has nowhere to go.
+
+    Each line of each str literal in the screens must be part of a line the walk
+    saw drawn, be an argv token a fake verb received, or be a str a screen
+    function returned. A label computed from data, or a branch that changes
+    what a verb receives without a string of its own, still escapes.
+    """
+    walk, strings = _walk(), _screen_strings()
+    assert {"Delete? [y/N]", "--attach", "list"} <= set(strings)
+    unused = {part: fn for part, fn in strings.items()
+              if part not in walk.passed and part not in walk.returned
+              and not any(part in line for line in walk.shown)}
+    assert unused == {}
 
 
 def test_the_menu_calls_the_typed_handlers():

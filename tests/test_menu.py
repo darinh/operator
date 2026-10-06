@@ -36,6 +36,7 @@ class Actions:
         self.renamed = []
         self.deleted = []
         self.recovered = []
+        self.attached = []
         self.problems = {}
 
     def start_problem(self, name):
@@ -96,6 +97,7 @@ class Actions:
         return 0
 
     def attach(self, argv):
+        self.attached.append(list(argv))
         print("attached-for-real")
         return 7
 
