@@ -19,9 +19,13 @@ class Board:
         })
 
 
+NAME_TITLE = ("Start an operator in C:\\work\\demo\n"
+              "Enter starts it and attaches this terminal. Esc goes back.\n"
+              "Name:")
+
+
 class Actions:
     def __init__(self):
-        self.on = True
         self.cwd_value = r"C:\work\demo"
         self.name = "demo"
         self.running = []
@@ -32,19 +36,16 @@ class Actions:
         self.renamed = []
         self.deleted = []
         self.recovered = []
-        self.elsewhere = {}
+        self.problems = {}
 
-    def taken_elsewhere(self, name):
-        return self.elsewhere.get(name)
+    def start_problem(self, name):
+        return self.problems.get(name)
 
     def recoverable_count(self):
         return len(self.recoverable)
 
     def recoverable_names(self):
         return list(self.recoverable)
-
-    def onboarded(self):
-        return self.on
 
     def cwd(self):
         return self.cwd_value
@@ -121,13 +122,10 @@ def test_select_skips_headings_and_esc_returns_none():
     assert board.frames[1]["highlight"] == 1
 
 
-def test_confirm_yes_is_y_and_enter_esc_n_are_no():
-    board = Board()
-    assert confirm(["Create an operator for C:\\work\\demo?"], iter(["y"]), board) is True
-    assert confirm(["Create an operator for C:\\work\\demo?"], iter(["n"]), board) is False
-    assert confirm(["Create an operator for C:\\work\\demo?"], iter(["enter"]), board) is False
-    assert confirm(["Create an operator for C:\\work\\demo?"], iter(["esc"]), board) is False
-    assert confirm(["Delete? [y/N]"], iter(["q"]), board, loose=True) is False
+def test_confirm_takes_only_y_as_yes():
+    for key, said in (("y", True), ("Y", True), ("n", False), ("enter", False),
+                      ("esc", False), ("q", False)):
+        assert confirm(["Delete? [y/N]"], iter([key]), Board()) is said, key
 
 
 def test_ask_text_edits_a_prefill_and_esc_cancels():
@@ -138,75 +136,51 @@ def test_ask_text_edits_a_prefill_and_esc_cancels():
     assert ask_text("Operator name:", iter(["esc"]), board, prefill="ab") is None
 
 
-def test_start_not_onboarded_confirms_then_starts_the_default_name():
+def test_enter_on_start_leaves_to_start_the_default_name_and_attach():
     actions = Actions()
-    actions.on = False
-    actions.name = "demo"
     board = Board()
-    assert run(iter(["enter", "y", "enter", "esc"]), board, actions) == 0
-    assert actions.started == [["--name", "demo"]]
-    assert board.frames[1]["title"] == "Create an operator for C:\\work\\demo?"
-    assert board.frames[2]["title"] == "Operator name:"
-    assert board.frames[2]["rows"] == ["demo"]
-    assert board.frames[3]["title"] == "Working..."
-    assert board.frames[4]["title"] == "operator"
-    assert board.frames[4]["status"] == "started demo (pid 9)"
-    assert board.frames[4]["rows"] == [
-        "Start an operator",
-        "List operators",
-        "No operators need recovery.",
-        "Quit",
-    ]
+    done = run(iter(["enter", "enter"]), board, actions)
+    assert isinstance(done, Leave)
+    assert actions.started == []
+    assert board.frames[1]["title"] == NAME_TITLE
+    assert board.frames[1]["rows"] == ["demo"]
+    assert done.call() == 0
+    assert actions.started == [["--name", "demo", "--attach"]]
 
 
-def test_start_onboarded_uses_the_existing_operators_name():
+def test_esc_on_the_name_starts_nothing():
     actions = Actions()
-    actions.on = True
-    actions.name = "alpha"
     board = Board()
-    assert run(iter(["enter", "enter", "esc"]), board, actions) == 0
-    assert actions.started == [["--name", "alpha"]]
-    assert all("Create an operator" not in frame["title"] for frame in board.frames)
-    assert board.frames[1]["rows"] == ["alpha"]
-
-
-def test_declining_the_create_confirm_does_not_start():
-    actions = Actions()
-    actions.on = False
-    for key in ("n", "enter", "esc"):
-        board = Board()
-        assert start_screen(iter([key]), board, actions) == ""
-        assert [frame["title"] for frame in board.frames] == [
-            "Create an operator for C:\\work\\demo?"]
+    assert start_screen(iter(["esc"]), board, actions) == ""
     assert actions.started == []
 
 
-def test_a_name_another_repo_uses_is_refused_and_asked_again():
+def test_a_refused_name_is_shown_and_asked_again():
     actions = Actions()
-    actions.on = False
     actions.name = "app"
-    actions.elsewhere = {"app": r"C:\old\app"}
+    actions.problems = {"app": r"app already works in C:\old\app. Choose another name."}
     board = Board()
-    keys = ["y", "enter", "backspace", "backspace", "backspace",
-            "n", "e", "w", "enter"]
-    assert start_screen(iter(keys), board, actions) == "started new (pid 9)"
-    assert actions.started == [["--name", "new"]]
-    asked = [frame for frame in board.frames if frame["title"] == "Operator name:"]
+    keys = ["enter", "backspace", "backspace", "backspace", "n", "e", "w", "enter"]
+    done = start_screen(iter(keys), board, actions)
+    assert isinstance(done, Leave)
+    asked = [frame for frame in board.frames if frame["title"] == NAME_TITLE]
     assert asked[0]["status"] == ""
     assert asked[1]["rows"] == ["app"]
     assert asked[1]["status"] == (
         r"app already works in C:\old\app. Choose another name.")
+    assert done.call() == 0
+    assert actions.started == [["--name", "new", "--attach"]]
 
 
 def test_an_empty_name_is_asked_again_and_never_started():
     actions = Actions()
     actions.name = ""
+    actions.problems = {"": "a name is needed"}
     board = Board()
     assert start_screen(iter(["space", "enter", "esc"]), board, actions) == ""
     assert actions.started == []
-    asked = [frame for frame in board.frames if frame["title"] == "Operator name:"]
-    assert asked[-1]["status"] == "An operator needs a name."
-    assert asked[-1]["rows"] == [" "]
+    assert board.frames[-1]["status"] == "a name is needed"
+    assert board.frames[-1]["rows"] == [" "]
 
 
 def test_list_numbers_each_section_and_skips_headings():
@@ -387,7 +361,6 @@ def test_enter_with_nothing_toggled_goes_back():
 
 def test_esc_backs_out_of_every_screen():
     actions = Actions()
-    actions.on = False
     actions.running = [Op("alpha", r"C:\a", r"alpha  (C:\a)", True)]
     actions.offline = [Op("bravo", r"C:\b", r"bravo  (C:\b)", False)]
     actions.recoverable = ["alpha"]
@@ -397,9 +370,7 @@ def test_esc_backs_out_of_every_screen():
         return [frame["title"] for frame in board.frames]
 
     assert titles(["esc"]) == ["operator"]
-    assert titles(["y", "esc", "n"], start_screen) == [
-        "Create an operator for C:\\work\\demo?", "Operator name:",
-        "Create an operator for C:\\work\\demo?"]
+    assert titles(["esc"], start_screen) == [NAME_TITLE]
     assert actions.started == []
     assert titles(["enter", "esc", "esc"], list_screen) == [
         "Operators", "alpha", "Operators"]

@@ -223,45 +223,34 @@ def test_menu_attach_returns_the_attach_code(monkeypatch, capsys):
     assert "attached-for-real" in capsys.readouterr().out
 
 
-def test_a_menu_started_operator_exports_the_home_its_child_reads(monkeypatch):
+def test_a_menu_started_operator_exports_the_home_its_child_reads(
+        tmp_path, monkeypatch):
     """An operator chosen from the menu must be as defended as a typed one.
 
     `_settle_home` exports unconditionally so that parent and child read the
-    same string instead of independently agreeing on a default.
+    same string instead of independently agreeing on a default. The user's
+    home and working directory are this test's own, so the project the start
+    registers lands in tmp_path and not in the real ~/.operator (#37).
     """
     import supervisor
     seen = {}
 
     def fake(instance, copilot_args, is_fresh, cwd=None):
         seen["home"] = os.environ.get("COPILOT_OPERATOR_HOME")
+        op.MUX.sessions[instance.session] = {
+            "cwd": cwd, "argv": [], "remain_on_exit": False, "dead": False}
         return 7
 
-    monkeypatch.setattr(supervisor, "_spawn_background_loop", fake)
-    monkeypatch.delenv("COPILOT_OPERATOR_HOME", raising=False)
-    _tty(monkeypatch)
-    _keys(monkeypatch, ["enter", "y", "enter", "esc"])
-    assert cli.main([]) == 0
-    assert seen["home"] == str(Path.home() / ".operator")
-
-
-def test_menu_start_reuses_the_operator_already_recorded_here(tmp_path, monkeypatch):
-    import operators
-    import supervisor
-    from operator_cli import project
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.chdir(tmp_path)
-    record = operators.create("alpha", tmp_path)
-    assert project.ensure_registered()[0] == 0
-    seen = {}
-
-    def fake(instance, copilot_args, is_fresh, cwd=None):
-        seen.update(name=instance.display_name, op_id=instance.id, cwd=cwd)
-        return 3
-
+    monkeypatch.delenv("COPILOT_OPERATOR_HOME", raising=False)
     monkeypatch.setattr(supervisor, "_spawn_background_loop", fake)
+    monkeypatch.setattr(op.MUX, "attach", lambda session: 0)
     _tty(monkeypatch)
     _keys(monkeypatch, ["enter", "enter", "esc"])
     assert cli.main([]) == 0
-    assert seen == {"name": "alpha", "op_id": record.id, "cwd": record.cwd}
+    assert seen == {"home": str(tmp_path / ".operator")}
 
 
 def test_dispatch_settles_the_home_for_every_caller(monkeypatch):
@@ -642,7 +631,7 @@ def test_delete_keeps_the_catalog_while_another_operator_shares_the_cwd(
     assert not paths.catalog_guid(tmp_path).guid
     assert not paths.project_dir(guid).exists()
 
-def test_taken_elsewhere_names_only_another_directorys_operator(tmp_path, monkeypatch):
+def test_start_problem_refuses_only_a_name_it_cannot_start_here(tmp_path, monkeypatch):
     import operators
     from operator_cli.entry import _Actions
     here, there = tmp_path / "here", tmp_path / "there"
@@ -652,6 +641,9 @@ def test_taken_elsewhere_names_only_another_directorys_operator(tmp_path, monkey
     operators.create("theirs", there)
     monkeypatch.chdir(here)
     actions = _Actions()
-    assert actions.taken_elsewhere("nobody") is None
-    assert actions.taken_elsewhere("mine") is None
-    assert actions.taken_elsewhere("theirs") == str(there.resolve())
+    assert actions.start_problem("nobody") is None
+    assert actions.start_problem("mine") is None
+    assert actions.start_problem("theirs") == (
+        f"theirs already works in {there.resolve()}. Choose another name.")
+    assert actions.start_problem("-x") == "a name cannot start with -"
+    assert actions.start_problem("") == "a name is needed"
