@@ -9,9 +9,10 @@ the README line that documents it.
 The meta-tests at the bottom fail when a verb, an option or a menu item has no
 case, and when the README tables disagree with the cases. They find menu items
 by walking the menu with fake verbs in four states. A choice none of those
-states shows escapes only when it has no statement and no string of its own, as
-when an index computed from data picks a label the walk draws elsewhere. Code
-outside menu.py escapes too.
+states shows still escapes when no statement of its own guards it and the walk
+sees its label elsewhere, as when an index computed from data picks it. A key
+that menu.py's input loops handle escapes too, and so does code outside
+menu.py.
 
 The README tests read the map table, the first column of each one-sided table
 and the bullets under Where they behave differently. A one-sided row must give
@@ -839,28 +840,31 @@ class Walk:
 
     @property
     def labels(self) -> frozenset:
-        return frozenset(item[-1] for item in self.items)
+        return frozenset(path[-1] for _, path in self.items)
 
 
 @cache
 def _walk() -> Walk:
-    """Every choice the menu offers, as the path that reaches it, and what the
-    walk saw on the way.
+    """Every choice the menu offers, as the state and the path it was found in,
+    and what the walk saw on the way.
 
     The walk drives fake verbs in four states: no operators, one of each kind,
-    two of each kind, and a start that refuses the name. It enters every row of
-    every screen it reaches. It surveys a screen by pressing Down until the
-    highlight has visited every row. A numbered row is an operator, so the walk
-    enters it but does not count it as an item, and it also ticks a row with a
-    box and presses Enter. A count such as ``(1)`` is dropped. On a screen with
-    no highlight, a text box or a question, it presses Enter and, separately,
-    y. When the menu leaves, the walk runs what it left to run.
+    two of each kind, and a start that refuses the name. It surveys each
+    screen it lands on by pressing Down until the highlight has visited every
+    row. The first time it lands on a screen in a state, it enters every row.
+    When it lands there again, after a verb ran, it enters nothing, and a
+    choice it finds counts under the path that first reached the screen. A
+    numbered row is an operator, so the walk enters it but does not count it as
+    an item, and it also ticks a row with a box and presses Enter. A count such
+    as ``(1)`` is dropped. On a screen with no highlight, a text box or a
+    question, it presses Enter and, separately, y. When the menu leaves, the
+    walk runs what it left to run.
 
     It also keeps the menu.py lines that ran, each title, row and status drawn,
     each argv token a fake verb received, each str a screen function returned,
     and (state, path, command) for each path that ran a command.
     """
-    items, seen, ran = set(), set(), set()
+    items, reached, ran = set(), {}, set()
     shown, passed, returned, commands = set(), set(), set(), set()
 
     def lines(frame, event, arg):
@@ -907,12 +911,15 @@ def _walk() -> Walk:
                 if command:
                     commands.add((kind, named, command))
                 landed = robot.landed
-                if landed is None or (kind, landed.title) in seen:
+                if landed is None:
                     continue
-                seen.add((kind, landed.title))
+                key = (kind, landed.title)
+                fresh = key not in reached
+                reached.setdefault(key, named)
                 if landed.highlight is None:
-                    todo += [(path + (ENTER,), named + (ENTER,)),
-                             (path + (Key("y"),), named + (Key("y"),))]
+                    if fresh:
+                        todo += [(path + (ENTER,), named + (ENTER,)),
+                                 (path + (Key("y"),), named + (Key("y"),))]
                     continue
                 survey = robot.frames[robot.landed_at:robot.landed_at + 13]
                 labels = dict.fromkeys(frame.rows[frame.highlight] for frame in survey
@@ -926,7 +933,9 @@ def _walk() -> Walk:
                         as_named = NAME if boxed else section[step]
                     else:
                         step = as_named = re.sub(r" \(\d+\)$", "", label)
-                        items.add(named + (step,))
+                        items.add((kind, reached[key] + (step,)))
+                    if not fresh:
+                        continue
                     todo.append((path + (step,), named + (as_named,)))
                     if boxed:
                         todo.append((path + (Toggle(step), ENTER),
@@ -1026,11 +1035,15 @@ def test_no_parser_takes_an_abbreviation():
 def test_every_menu_item_has_a_case():
     """Each choice the walk found, on the path it took there, begins a case's
     menu path. Attach for a running operator does not cover Attach for a
-    stopped one."""
-    items = _walk().items
+    stopped one. With one session to recover, the main menu says none need
+    recovery only after Recover ran, so the walk finds that when it lands there
+    a second time."""
+    walk = _walk()
+    items = {path for _, path in walk.items}
     assert {("Start an operator",), ("Quit",), ("Recover operator sessions",),
             ("List operators", RUNNING, "Attach"),
             ("List operators", OFFLINE, "Delete")} <= items
+    assert ("busy", ("No operators need recovery.",)) in walk.items
     paths = {_named(case) for case in CASES if case.menu is not None}
     assert sorted(item for item in items
                   if not any(path[:len(item)] == item for path in paths)) == []
