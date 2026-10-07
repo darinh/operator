@@ -15,7 +15,9 @@ def test_create_then_find_by_name_and_by_id(tmp_path):
     assert created.name == "Alpha"
     assert created.cwd == str(tmp_path.resolve())
     assert operators.find("alpha") == created
+    assert operators.find(" alpha ") == created
     assert operators.find(created.id) == created
+    assert operators.find(f" {created.id} ") == created
     assert operators.find("missing") is None
 
 

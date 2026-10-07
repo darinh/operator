@@ -184,12 +184,12 @@ def find(name_or_id: str) -> Operator | None:
     found = all_operators()
     if not found:
         return None
+    wanted = name_or_id.strip()
     for op in found:
-        if op.id == name_or_id:
+        if op.id == wanted:
             return op
-    folded = name_or_id.casefold()
     for op in found:
-        if op.name.casefold() == folded:
+        if op.name.casefold() == wanted.casefold():
             return op
     return None
 
