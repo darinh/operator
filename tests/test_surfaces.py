@@ -11,8 +11,8 @@ case, and when the README tables disagree with the cases. They find menu items
 by walking the menu with fake verbs in four states. A choice none of those
 states shows still escapes when no statement of its own guards it and the walk
 sees its label elsewhere, as when an index computed from data picks it. A key
-that menu.py's input loops handle escapes too, and so does code outside
-menu.py.
+or any other branch inside the input loops that menu.py's screens are built
+on escapes too, and so does code outside menu.py.
 
 The README tests read the map table, the first column of each one-sided table
 and the bullets under Where they behave differently. A one-sided row must give
@@ -23,10 +23,12 @@ from __future__ import annotations
 
 import ast
 import io
+import json
 import os
 import re
 import shutil
 import sys
+from collections import deque
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass, field
 from functools import cache
@@ -231,6 +233,7 @@ No command opens a keyboard menu when stdin and stdout are a TTY.
   recover               list operators that need recovering after a crash
   handoff               write this operator's handoff and start the next session"""
 WRITTEN = "handoff written to <home>/projects/<guid>/handoff/<id>.md"
+RECOVERING = "Recovering 'alpha' in <here>"
 TAKEN = ("Start an operator refuses a name that an operator in another directory "
          "has, and asks again. `operator start NAME` starts that operator in its "
          "own directory. `operator start` with no name exits 2 and asks for a "
@@ -409,7 +412,11 @@ CASES = [
     Case("recover", given=IDLE_HERE, recoverable=("alpha",),
          argv=(["recover", "alpha"],),
          menu=("Recover operator sessions", Toggle("alpha"), ENTER),
-         expect={"events": [("recover", "alpha")]}),
+         expect={"events": [spawned("alpha")], "said": RECOVERING}),
+    Case("recover-then-none", given=IDLE_HERE, recoverable=("alpha",),
+         menu=("Recover operator sessions", Toggle("alpha"), ENTER,
+               "No operators need recovery."),
+         expect={"events": [spawned("alpha")], "said": RECOVERING}),
     Case("recover-none", answer="screen",
          argv=(["recover"],),
          menu=("No operators need recovery.",),
@@ -455,8 +462,8 @@ CASES = [
                  "said": "started alpha (pid 41)"}),
     Case("recover-all", given=IDLE_HERE, recoverable=("alpha",),
          argv=(["recover", "--all"],),
-         expect={"events": [("recover", "alpha")],
-                 "said": "Recovered 1 of 1 operator(s)."}),
+         expect={"events": [spawned("alpha")],
+                 "said": RECOVERING + "\nRecovered 1 of 1 operator(s)."}),
     Case("recover-help",
          argv=(["recover", "--help"], ["recover", "-h"]),
          expect={"said": RECOVER_HELP}),
@@ -501,7 +508,6 @@ class World:
         # argparse wraps recover's help to the terminal's width.
         monkeypatch.setenv("COLUMNS", "80")
         self.events: list = []
-        self.recoverable: tuple = ()
         self.between: set = set()
         self.starting: list = []
         self.slow: set = set()
@@ -526,17 +532,15 @@ class World:
             self.events.append(("stop", instance.display_name))
             op.MUX.sessions.pop(instance.session, None)
 
-        def recover(instance):
-            self.events.append(("recover", instance.display_name))
-            return 0
-
         def attach(session):
             self.events.append(attached(operators.find(session).name))
             return 0
 
         which = shutil.which
         loop_pid = supervisor_control._running_loop_pid
-        monkeypatch.setattr(supervisor, "_spawn_background_loop", spawn)
+        # Recover spawns through supervisor_control's own binding.
+        for module in (supervisor, supervisor_control):
+            monkeypatch.setattr(module, "_spawn_background_loop", spawn)
         monkeypatch.setattr(supervisor_control, "launch_status",
                             lambda inst, pid, **k: ("ready", pid))
         # A supervisor between sessions is alive and has no session. A starting
@@ -549,9 +553,6 @@ class World:
         monkeypatch.setattr(supervisor_control, "time", SimpleNamespace(
             monotonic=lambda: self.waited_ms / 1000, sleep=sleep))
         monkeypatch.setattr(supervisor_control, "_request_supervisor_stop", stop)
-        monkeypatch.setattr(supervisor_control, "recover_loop", recover)
-        monkeypatch.setattr(supervisor_control, "recoverable_instances", lambda: [
-            operators.find(name).instance() for name in self.recoverable])
         monkeypatch.setattr(op.MUX, "attach", attach)
         monkeypatch.setattr(shutil, "which", lambda name, *a, **k: (
             "/bin/copilot" if name == "copilot" else which(name, *a, **k)))
@@ -577,7 +578,12 @@ class World:
                 self.starting.append((record.id, directory))
             elif state == "slow":
                 self.slow.add(record.id)
-        self.recoverable = case.recoverable
+            if name in case.recoverable:
+                # How its supervisor was started, which a crash leaves behind.
+                loop_args = record.instance().loop_args_file
+                loop_args.parent.mkdir(parents=True, exist_ok=True)
+                loop_args.write_text(json.dumps({"user_args": [], "cwd": str(directory)}),
+                                     encoding="utf-8")
         if case.seated:
             _seat(self.monkeypatch, operators.find(case.seated))
         self.capsys.readouterr()
@@ -864,22 +870,24 @@ def _walk() -> Walk:
     and what the walk saw on the way.
 
     The walk drives fake verbs in four states: no operators, one of each kind,
-    two of each kind, and a start that refuses the name. It surveys each
-    screen it lands on by pressing Down until the highlight has visited every
-    row. The first time it lands on a screen in a state, it enters every row.
-    When it lands there again, after a verb ran, it enters nothing, and a
-    choice it finds counts under the path that first reached the screen. A
-    numbered row is an operator, so the walk enters it but does not count it as
-    an item, and it also ticks a row with a box and presses Enter. A count such
-    as ``(1)`` is dropped. On a screen with no highlight, a text box or a
-    question, it presses Enter and, separately, y. When the menu leaves, the
-    walk runs what it left to run.
+    two of each kind, and a start that refuses the name. It takes shorter paths
+    first. It surveys each screen it lands on by pressing Down until the
+    highlight has visited every row, and it enters every row the first time it
+    lands on that screen in a state. When it lands there again, after a verb
+    ran, it enters only a row it has not entered there before, and that choice
+    counts under the path that reached it this time. A numbered row is an
+    operator, known by its kind: running, stopped, or one in a box. The walk
+    enters it but does not count it as an item, and it also ticks a row with a
+    box and presses Enter. A count such as ``(1)`` is dropped. On a screen with
+    no highlight, a text box or a question, it presses Enter and, separately,
+    y, the first time it lands there. When the menu leaves, the walk runs what
+    it left to run.
 
     It also keeps the menu.py lines that ran, each title, row and status drawn,
     each argv token a fake verb received, each str a screen function returned,
     and (state, path, command) for each path that ran a command.
     """
-    items, reached, ran = set(), {}, set()
+    items, ran = set(), set()
     shown, passed, returned, commands = set(), set(), set(), set()
 
     def lines(frame, event, arg):
@@ -901,12 +909,11 @@ def _walk() -> Walk:
         for kind, make in (("idle", MenuActions), ("busy", _busy), ("many", _many),
                            ("refusing", _refusing)):
             given = make()
-            section = {op.name: RUNNING for op in given.running}
-            section.update({op.name: OFFLINE for op in given.offline})
-            names = {*section, *given.recoverable, given.default_name()}
-            todo = [((), ())]
+            names = {op.name for op in (*given.running, *given.offline)}
+            names |= {*given.recoverable, given.default_name()}
+            todo, seen = deque([((), ())]), {}
             while todo:
-                path, named = todo.pop()
+                path, named = todo.popleft()
                 robot = Robot(path, then=["down"] * 12)
                 actions = make()
                 left = menu.run(robot.keys(), robot.render, actions)
@@ -928,9 +935,10 @@ def _walk() -> Walk:
                 landed = robot.landed
                 if landed is None:
                     continue
-                key = (kind, landed.title)
-                fresh = key not in reached
-                reached.setdefault(key, named)
+                section = {op.name: RUNNING for op in actions.running}
+                section.update({op.name: OFFLINE for op in actions.offline})
+                fresh = landed.title not in seen
+                known = seen.setdefault(landed.title, set())
                 if landed.highlight is None:
                     if fresh:
                         todo += [(path + (ENTER,), named + (ENTER,)),
@@ -940,6 +948,7 @@ def _walk() -> Walk:
                 labels = dict.fromkeys(frame.rows[frame.highlight] for frame in survey
                                        if frame.title == landed.title
                                        and frame.highlight is not None)
+                found = set()
                 for label in labels:
                     data = DATA_ROW.match(label)
                     boxed = label.startswith(("[ ] ", "[x] "))
@@ -948,13 +957,16 @@ def _walk() -> Walk:
                         as_named = NAME if boxed else section[step]
                     else:
                         step = as_named = re.sub(r" \(\d+\)$", "", label)
-                        items.add((kind, reached[key] + (step,)))
-                    if not fresh:
+                    if as_named in known:
                         continue
+                    found.add(as_named)
+                    if not data:
+                        items.add((kind, named + (step,)))
                     todo.append((path + (step,), named + (as_named,)))
                     if boxed:
                         todo.append((path + (Toggle(step), ENTER),
                                      named + (Toggle(NAME), ENTER)))
+                known |= found
     finally:
         sys.settrace(previous)
     return Walk(frozenset(items), frozenset(ran), frozenset(shown),
@@ -1051,14 +1063,15 @@ def test_every_menu_item_has_a_case():
     """Each choice the walk found, on the path it took there, begins a case's
     menu path. Attach for a running operator does not cover Attach for a
     stopped one. With one session to recover, the main menu says none need
-    recovery only after Recover ran, so the walk finds that when it lands there
-    a second time."""
+    recovery only after Recover ran, so the walk finds that row when it lands
+    there a second time, and the path that ran Recover is the path to it."""
     walk = _walk()
     items = {path for _, path in walk.items}
     assert {("Start an operator",), ("Quit",), ("Recover operator sessions",),
             ("List operators", RUNNING, "Attach"),
             ("List operators", OFFLINE, "Delete")} <= items
-    assert ("busy", ("No operators need recovery.",)) in walk.items
+    assert ("busy", ("Recover operator sessions", Toggle(NAME), ENTER,
+                     "No operators need recovery.")) in walk.items
     paths = {_named(case) for case in CASES if case.menu is not None}
     assert sorted(item for item in items
                   if not any(path[:len(item)] == item for path in paths)) == []
