@@ -12,7 +12,9 @@ by walking the menu with fake verbs in four states. A choice none of those
 states shows still escapes when no statement of its own guards it and the walk
 sees its label elsewhere, as when an index computed from data picks it. A key
 or any other branch inside the input loops that menu.py's screens are built
-on escapes too, and so does code outside menu.py.
+on escapes too, and so does code outside menu.py. An option escapes when it is
+built from pieces or when code outside operator_cli parses it. One that
+operator_cli imports from another package fails a test of its own.
 
 The README tests read the map table, the first column of each one-sided table
 and the bullets under Where they behave differently. A one-sided row must give
@@ -22,6 +24,7 @@ either is true. The prose under Verbs is not read.
 from __future__ import annotations
 
 import ast
+import importlib.util
 import io
 import json
 import os
@@ -34,7 +37,7 @@ from dataclasses import dataclass, field
 from functools import cache
 from itertools import takewhile
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -785,7 +788,8 @@ def _typed_options() -> set:
     That is each option literal, and the help argparse adds to each parser.
     ``--name=`` is a spelling of its own because it has a branch of its own.
     An option built from pieces, or parsed outside operator_cli, escapes this
-    scan.
+    scan. One that operator_cli imports from another package fails
+    test_no_option_comes_from_another_package.
     """
     found = set()
     for path in sorted(CLI.glob("*.py")):
@@ -815,6 +819,53 @@ def _typed_by_cases(cases) -> set:
                 if OPTION.match(spelling):
                     pairs.add((None if _peeled(spelling) else verb, spelling))
     return pairs
+
+
+def _ours(origin) -> bool:
+    """Whether a module's file is this repository's code outside operator_cli."""
+    if not origin:
+        return False
+    path = Path(origin).resolve()
+    return path.is_relative_to(REPO) and not path.is_relative_to(CLI)
+
+
+def _module(name: str) -> "ModuleType | None":
+    """The module ``name`` if it is ours. Nothing else is imported, so a module
+    that exists on one platform only is never loaded on another."""
+    spec = importlib.util.find_spec(name)
+    if spec is None or not spec.has_location or not _ours(spec.origin):
+        return None
+    return importlib.import_module(name)
+
+
+def _from_import(module: str, name: str):
+    """What ``from module import name`` binds, if module is ours."""
+    source = _module(module)
+    if source is not None and not hasattr(source, name) and hasattr(source, "__path__"):
+        return _module(f"{module}.{name}")
+    return getattr(source, name, None)
+
+
+def _read(node, bound):
+    """What an attribute chain such as ``a.b.C`` reads, when every module along
+    it is ours."""
+    if isinstance(node, ast.Name):
+        return bound.get(node.id)
+    outer = _read(node.value, bound) if isinstance(node, ast.Attribute) else None
+    if isinstance(outer, ModuleType) and _ours(getattr(outer, "__file__", None)):
+        return getattr(outer, node.attr, None)
+    return None
+
+
+def _options_in(value) -> list:
+    """The option spellings in a str, or in a collection of them."""
+    if isinstance(value, dict):
+        value = [*value, *value.values()]
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, (tuple, list, set, frozenset)):
+        return []
+    return sorted(item for item in value if isinstance(item, str) and OPTION.match(item))
 
 
 def _labels(path):
@@ -1056,6 +1107,35 @@ def test_every_option_has_a_case():
             (None, "--home"), (None, "--home="), (None, "--help")} <= options
     missing = options - _typed_by_cases(CASES)
     assert sorted((verb or "", spelling) for verb, spelling in missing) == []
+
+
+def test_no_option_comes_from_another_package():
+    """The scan above reads the literals in operator_cli, so an option that
+    operator_cli imports from the kernel would escape it. None may."""
+    found, resolved = [], set()
+    for path in sorted(CLI.glob("*.py")):
+        if path.name in NOT_TYPED:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        bound = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.level == 0:
+                bound.update((alias.asname or alias.name,
+                              _from_import(node.module, alias.name))
+                             for alias in node.names)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    name = alias.name if alias.asname else alias.name.partition(".")[0]
+                    bound[alias.asname or name] = _module(name)
+        reads = {ast.unparse(node): _read(node, bound) for node in ast.walk(tree)
+                 if isinstance(node, ast.Attribute)}
+        resolved.update(name for name, value in (*bound.items(), *reads.items())
+                        if value is not None)
+        found += [(path.name, name, option)
+                  for name, value in (*bound.items(), *reads.items())
+                  for option in _options_in(value)]
+    assert {"at_dashdash", "MUX", "operators", "operators.find"} <= resolved
+    assert sorted(found) == []
 
 
 def test_no_parser_takes_an_abbreviation():
