@@ -37,11 +37,11 @@ def home(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _plant(op_id: str) -> None:
+def _plant(op_id: str, name: str = "") -> None:
     directory = op.OPERATOR_HOME / "operators"
     directory.mkdir(parents=True, exist_ok=True)
     (directory / f"{op_id}.json").write_text(json.dumps({
-        "id": op_id, "name": op_id, "cwd": str(op.OPERATOR_HOME),
+        "id": op_id, "name": name or op_id, "cwd": str(op.OPERATOR_HOME),
         "created": "2026-01-01T00:00:00Z",
     }), encoding="utf-8")
 
@@ -205,6 +205,26 @@ def test_a_supervisor_without_a_name_is_refused(home):
 def test_an_unusable_name_is_refused(argv, home):
     with pytest.raises(SystemExit):
         supervise.main(argv)
+
+
+@pytest.mark.parametrize("sent", [
+    pytest.param("alpha", id="a name"),
+    pytest.param(" op-abcdef01 ", id="a padded id"),
+])
+def test_only_the_exact_id_reaches_the_loop(sent, home, monkeypatch, capsys):
+    """operators.find takes a name as well as an id, and strips either, so
+    main checks that the record it found has exactly the id it was sent."""
+    import supervisor
+    ran = []
+    monkeypatch.setattr(supervisor, "run_loop_mode",
+                        lambda instance, args, fresh: ran.append(instance.id) or 0)
+    _plant("op-abcdef01", name="alpha")
+
+    assert supervise.main(["--_supervise", "--id", sent]) == 2
+    assert capsys.readouterr().err == f"no operator with id {sent!r}\n"
+    assert ran == []
+    assert supervise.main(["--_supervise", "--id", "op-abcdef01"]) == 0
+    assert ran == ["op-abcdef01"]
 
 
 # ── the parser ───────────────────────────────────────────────────
