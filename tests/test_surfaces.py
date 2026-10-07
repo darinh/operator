@@ -289,13 +289,14 @@ CASES = [
                  "operators": [("demo", "here")], "registered": ["here"],
                  "said": REGISTERED + "\nstarted demo (pid 41)", "waited": 0.05}),
     Case("start-typed-name",
-         argv=(["start", "--name", "new", "--attach"],
-               ["start", "new", "--attach"],
-               ["start", "--name=new", "--attach"]),
-         menu=("Start an operator", Text("new")), leaves=True,
-         expect={"events": [spawned("new"), attached("new")],
-                 "operators": [("new", "here")], "registered": ["here"],
-                 "said": REGISTERED + "\nstarted new (pid 41)", "waited": 0.05}),
+         argv=(["start", "--name", "my new operator", "--attach"],
+               ["start", "my new operator", "--attach"],
+               ["start", "--name=my new operator", "--attach"]),
+         menu=("Start an operator", Text("my new operator")), leaves=True,
+         expect={"events": [spawned("my new operator"), attached("my new operator")],
+                 "operators": [("my new operator", "here")], "registered": ["here"],
+                 "said": REGISTERED + "\nstarted my new operator (pid 41)",
+                 "waited": 0.05}),
     Case("start-here-existing", given=IDLE_HERE,
          argv=(["start", "--attach"],),
          menu=("Start an operator", ENTER), leaves=True,
@@ -981,11 +982,13 @@ def _busy() -> MenuActions:
 
 def _many() -> MenuActions:
     """Two of each kind, so a choice that needs more than one shows, and a path
-    runs for two operators in one state."""
+    runs for two operators in one state. The second of each kind has spaces in
+    its name and more than ten characters, so a choice that passes on part of
+    a name runs a command of its own."""
     actions = MenuActions()
-    actions.running = [_op("alpha", True), _op("delta", True)]
-    actions.offline = [_op("bravo", False), _op("echo", False)]
-    actions.recoverable = ["charlie", "foxtrot"]
+    actions.running = [_op("alpha", True), _op("delta force one", True)]
+    actions.offline = [_op("bravo", False), _op("echo base two", False)]
+    actions.recoverable = ["charlie", "foxtrot unit three"]
     return actions
 
 
