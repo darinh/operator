@@ -43,8 +43,11 @@ CLI = REPO / "operator_cli"
 # Raised to 1284/1643 when those commands type an operator by its id if a shell
 # would change its name even inside quotes, and the list of operators in one
 # directory shows the name beside that id. Both are the measured sizes.
-MAX_CLI_CODE_LINES = 1284
-MAX_CLI_TOTAL_LINES = 1643
+# Raised to 1287/1646 when the main menu's recover row and its Quit test became
+# statements, so the walk's line trace sees each way through them. Both are the
+# measured sizes.
+MAX_CLI_CODE_LINES = 1287
+MAX_CLI_TOTAL_LINES = 1646
 
 
 def cli_modules() -> list[Path]:
