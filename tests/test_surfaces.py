@@ -284,6 +284,11 @@ CASES = [
          expect={"said": "alpha is already running\nalpha has no session to "
                          "attach to yet. Try again: operator attach alpha",
                  "waited": 2.0}),
+    Case("start-here-starting", given={"alpha": ("here", "starting")},
+         argv=(["start", "--attach"], ["start", "alpha", "--attach"]),
+         menu=("Start an operator", ENTER), leaves=True,
+         expect={"events": [attached("alpha")],
+                 "said": "alpha is already running", "waited": 0.05}),
     Case("start-several-here", code=2,
          given={"alpha": ("here", "offline"), "bravo": ("here", "running")},
          argv=(["start", "--attach"], ["start"]),
@@ -486,10 +491,13 @@ class World:
         self.events: list = []
         self.recoverable: tuple = ()
         self.between: set = set()
+        self.starting: list = []
         self.waited_ms = 0
 
         def sleep(seconds):
             self.waited_ms += round(seconds * 1000)
+            while self.starting:
+                self._run(*self.starting.pop())
 
         def spawn(instance, copilot_args, is_fresh, cwd=None):
             self.events.append(spawned(
@@ -515,7 +523,8 @@ class World:
         monkeypatch.setattr(supervisor, "_spawn_background_loop", spawn)
         monkeypatch.setattr(supervisor_control, "launch_status",
                             lambda inst, pid, **k: ("ready", pid))
-        # A supervisor between sessions is alive and has no session.
+        # A supervisor between sessions is alive and has no session. A starting
+        # one gets its session the first time the clock moves.
         monkeypatch.setattr(supervisor_control, "_running_loop_pid", lambda inst: (
             43 if inst.id in self.between else loop_pid(inst)))
         # The session wait runs whole on a clock that only sleeping moves, so a
@@ -539,13 +548,16 @@ class World:
         import operators
         from operator_cli import project
         for name, (where, state) in case.given.items():
+            assert state in ("offline", "running", "between", "starting"), state
             directory = self.places[where]
             assert project.ensure_registered(str(directory))[0] == 0
             record = operators.create(name, directory)
             if state == "running":
                 self._run(record.id, directory)
-            elif state == "between":
+            elif state in ("between", "starting"):
                 self.between.add(record.id)
+            if state == "starting":
+                self.starting.append((record.id, directory))
         self.recoverable = case.recoverable
         if case.seated:
             _seat(self.monkeypatch, operators.find(case.seated))
