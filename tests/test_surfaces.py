@@ -16,10 +16,13 @@ sees its label elsewhere, as when an index computed from data picks it. A key
 or any other branch inside the input loops that menu.py's screens are built
 on escapes too, and so does code outside menu.py. An option escapes when it is
 built from pieces or when code outside operator_cli parses it. One that
-operator_cli imports from another package fails a test of its own when it sits
-in a collection or an object's attributes, however deep. It escapes when it
-exists only once code has run, sits anywhere else, such as in a closure, or is
-reached by a name built when the code runs.
+operator_cli imports from another package fails a test of its own when it sits,
+however deep, in a collection, in an object's attributes, or in an attribute or
+slot that a class of ours declares. That test also fails on a spelling that
+operator_cli imports and never parses. It escapes when it exists only once code
+has run, as a property's value does, sits anywhere else, such as in a
+function's defaults or closure, or is reached by a name built when the code
+runs.
 
 The README tests read the map table, the first column of each one-sided table
 and the bullets under Where they behave differently. A one-sided row must give
@@ -37,12 +40,13 @@ import re
 import shutil
 import sys
 from collections import deque
+from collections.abc import Collection, Mapping
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass, field
 from functools import cache
 from itertools import takewhile
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import MappingProxyType, MemberDescriptorType, ModuleType, SimpleNamespace
 
 import pytest
 
@@ -933,11 +937,13 @@ def _read(node, bound):
 def _options_in(value, seen=None) -> list:
     """The option spellings anywhere in ``value``.
 
-    A str is one or is not. A dict, a tuple, a list or a set is searched
-    through what it holds. Any other object is searched through the attributes
-    in its ``__dict__``, and in those of its class and the class's bases that
-    are ours. A module is not searched: operator_cli reads only the names it
-    imports from one, and each of those is searched.
+    A str is one or is not. A mapping is searched through its keys and values,
+    and any other collection through what it holds. Every value is also
+    searched through its attributes: those in its ``__dict__`` and its slots,
+    and those of its class and the class's bases that are ours. A module is not
+    searched: operator_cli reads only the names it imports from one, and each
+    of those is searched. Nor is a function's code, its defaults or its closure,
+    or an attribute that code computes when it is read.
     """
     seen = set() if seen is None else seen
     if isinstance(value, str):
@@ -945,19 +951,19 @@ def _options_in(value, seen=None) -> list:
     if isinstance(value, ModuleType) or id(value) in seen:
         return []
     seen.add(id(value))
-    if isinstance(value, dict):
-        held = [*value, *value.values()]
-    elif isinstance(value, (tuple, list, set, frozenset)):
-        held = list(value)
-    else:
-        mro = value.__mro__ if isinstance(value, type) else type(value).__mro__
-        owners = [cls for cls in mro
-                  if _ours(getattr(sys.modules.get(cls.__module__), "__file__", None))]
-        if not isinstance(value, type):
-            owners.append(value)
-        held = [item for owner in owners
-                for item in getattr(owner, "__dict__", {}).values()]
-    return sorted(option for item in held for option in _options_in(item, seen))
+    held = ([*value, *value.values()] if isinstance(value, Mapping)
+            else list(value) if isinstance(value, Collection) else [])
+    mro = value.__mro__ if isinstance(value, type) else type(value).__mro__
+    owners = [cls for cls in mro
+              if _ours(getattr(sys.modules.get(cls.__module__), "__file__", None))]
+    if not isinstance(value, type):
+        owners.append(value)
+    attributes = [item for owner in owners
+                  for item in getattr(owner, "__dict__", {}).values()]
+    slots = [getattr(value, item.__name__, None) for item in attributes
+             if isinstance(item, MemberDescriptorType)]
+    return sorted(option for item in [*held, *attributes, *slots]
+                  for option in _options_in(item, seen))
 
 
 def _labels(path):
@@ -1263,7 +1269,9 @@ def test_every_option_has_a_case():
 def test_no_option_comes_from_another_package():
     """The scan above reads the literals in operator_cli, so an option that
     operator_cli imports from the kernel would escape it. None may sit in what
-    operator_cli imports, however deep. _options_in says where it looks."""
+    operator_cli imports, however deep. _options_in says where it looks. The
+    test cannot tell an option operator_cli parses from one it only hands on,
+    so it fails on both, and its message says what to do."""
     found, resolved = [], set()
     for path in _typed_sources():
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -1286,29 +1294,47 @@ def test_no_option_comes_from_another_package():
                   for option in _options_in(value)]
     assert {"at_dashdash", "MUX", "operators", "operators.find",
             "getattr(operator_kernel, '__file__', None)"} <= resolved
-    assert sorted(found) == []
+    assert sorted(found) == [], (
+        "operator_cli imports these option spellings from another package, where "
+        "the scan above cannot see them. If operator_cli parses one, move its "
+        "spelling into the verb that parses it, so the scan sees it and it needs "
+        "a case. If operator_cli only hands it on, import the function that uses "
+        "it rather than the value.")
 
 
 def test_the_import_check_looks_wherever_an_option_can_sit():
     """The test above passes only when it finds nothing. These show what it
-    would find: an option deep in a collection, on a class or its base, on an
-    object, or on a function, and an attribute that getattr reads by a literal
-    name. It does not search a module, or read a name built when code runs."""
+    would find: an option deep in a mapping or any other collection, on a class
+    or its base, on an object or in its slots, or on a function, and an
+    attribute that getattr reads by a literal name. It does not search a
+    module or a function's defaults, or read a name built when code runs."""
     class Flags:
         fresh = "--fresh"
 
     class Kept(Flags):
         pass
 
+    class Slotted:
+        __slots__ = ("flag",)
+
+        def __init__(self, flag):
+            self.flag = flag
+
     def parse():
         pass
+
+    def defaulted(flag="--hidden"):
+        return flag
 
     parse.option = "--remote"
     here = sys.modules[__name__]
     assert _options_in({"start": ("--name", ["--attach="])}) == ["--attach=", "--name"]
+    assert _options_in(deque([MappingProxyType({"--queued": "/view"})])) == [
+        "--queued", "/view"]
     assert _options_in(Kept) == _options_in(Kept()) == ["--fresh"]
+    assert _options_in([Slotted("--slotted")]) == ["--slotted"]
     assert _options_in(SimpleNamespace(parse=parse)) == ["--remote"]
-    assert _options_in(here) == []
+    assert _options_in(here) == _options_in(defaulted) == []
     assert "--fresh" in _options_in(CASES)
     reads = [_read(ast.parse(text, mode="eval").body, {"here": here})
              for text in ("here.STAYS", "getattr(here, 'STAYS')",
