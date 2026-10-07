@@ -94,7 +94,7 @@ def multi_select(title, labels, keys, render, status=""):
 
 
 def confirm(lines, keys, render) -> bool:
-    """y is yes. Any other key is no."""
+    """y or Y is yes. Any other key is no."""
     render(lines[0], list(lines[1:]), highlight=None)
     return next(keys) in ("y", "Y")
 
