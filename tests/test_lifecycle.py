@@ -202,7 +202,7 @@ def test_a_name_with_a_space_is_quoted_in_what_it_tells_you_to_type(
 
 
 @pytest.mark.parametrize("name", ["$HOME", 'a"b', "%PATH%", "back`tick", "wow!",
-                                  "dir\\", "\u201csmart\u201d"])
+                                  "dir\\", "\u201csmart\u201d", "\u201elow"])
 def test_a_name_a_shell_would_change_is_typed_as_its_id(
         tmp_path, monkeypatch, capsys, name):
     import supervisor_control
