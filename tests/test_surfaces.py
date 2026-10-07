@@ -744,8 +744,8 @@ PRIMITIVES = ("render", "select", "multi_select", "confirm", "ask_text", "_captu
 WALK_LIMIT = 100
 #: How a path names an operator: by the section of the list it is in, or, when
 #: a box is ticked for it, as a name. In a command, each operator the path
-#: picked is NAME.
-RUNNING, OFFLINE, NAME = "<running>", "<offline>", "<name>"
+#: picked is NAME and any other operator is OTHER.
+RUNNING, OFFLINE, NAME, OTHER = "<running>", "<offline>", "<name>", "<other>"
 COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 #: The verbs whose handlers live in entry.py, by function name.
 VERB_OF = {fn.__name__: verb for verb, fn in cli.HANDLERS.items()
@@ -959,11 +959,13 @@ def _refusing() -> MenuActions:
 
 def _careless() -> MenuActions:
     """The many state, but Stop and Rename act on the first operator of their
-    section, whichever one they were given."""
+    section, whichever one they were given, and Delete deletes this
+    directory's operator."""
     actions = _many()
-    stop, rename = actions.stop, actions.rename
+    stop, rename, delete = actions.stop, actions.rename, actions.delete
     actions.stop = lambda argv: stop([actions.running[0].name])
     actions.rename = lambda argv: rename([actions.offline[0].name, argv[1]])
+    actions.delete = lambda argv: delete([actions.default_name(), *argv[1:]])
     return actions
 
 
@@ -1017,8 +1019,9 @@ def _walk(states=(("idle", MenuActions), ("busy", _busy), ("many", _many),
     It also keeps the menu.py lines that ran, each title, row and status drawn,
     each argv token a fake verb received, each str a screen function returned,
     and (state, path, command) for each path that ran a command. In a command,
-    NAME stands for each operator the path picked and for the name Start an
-    operator offers. Any other operator a command names keeps its name.
+    NAME stands for each operator the path picked, and on a path through Start
+    an operator, for the name its box offers. OTHER stands for any other
+    operator the state has, this directory's included.
     """
     items, ran = set(), set()
     shown, passed, returned, commands = set(), set(), set(), set()
@@ -1065,9 +1068,11 @@ def _walk(states=(("idle", MenuActions), ("busy", _busy), ("many", _many),
                             "recover": actions.recovered, "attach": actions.attached}
                 passed.update(token for calls in received.values() for argv in calls
                               for token in argv)
-                picked = {*(label for label in _labels(path) if label in names),
-                          given.default_name()}
-                command = tuple((verb, *(NAME if token in picked else token
+                picked = {label for label in _labels(path) if label in names}
+                if path[:1] == ("Start an operator",):
+                    picked.add(given.default_name())
+                command = tuple((verb, *(NAME if token in picked
+                                         else OTHER if token in names else token
                                          for token in argv))
                                 for verb, calls in received.items() for argv in calls)
                 if command:
@@ -1279,32 +1284,46 @@ def test_every_menu_item_has_a_case():
                   if not any(path[:len(item)] == item for path in paths)) == []
 
 
+def _misdirected(walk: Walk) -> dict:
+    """Each path that ran different commands in different runs, or a command
+    that names an operator the path did not pick, to the commands it ran."""
+    commands = {}
+    for _, path, command in walk.commands:
+        commands.setdefault(path, set()).add(command)
+    return {path: ran for path, ran in commands.items()
+            if len(ran) > 1 or any(OTHER in call for command in ran for call in command)}
+
+
 def test_a_menu_path_runs_the_same_command_in_every_state():
     """Where the walk took a path in several states, or for several operators
     in one, every run that ran a command ran the same one, once each operator
-    the path picked is NAME. So a choice that acts on an operator other than
-    the one picked fails. A path may run nothing in one state, as Start an
-    operator does when the name is refused."""
-    commands, states = {}, {}
-    for state, path, command in _walk().commands:
-        commands.setdefault(path, set()).add(command)
+    the path picked is NAME, and it named no other operator. So a choice that
+    acts on an operator other than the one picked fails, in any state the walk
+    takes. A path may run nothing in one state, as Start an operator does when
+    the name is refused."""
+    walk = _walk()
+    states = {}
+    for state, path, _ in walk.commands:
         states.setdefault(path, set()).add(state)
     assert states[("List operators", OFFLINE, "Start")] == {"busy", "many"}
     assert states[("Start an operator", ENTER)] == {"idle", "busy", "many"}
-    assert {path: ran for path, ran in commands.items() if len(ran) > 1} == {}
+    assert ("idle", ("Start an operator", ENTER),
+            (("start", "--name", NAME, "--attach"),)) in walk.commands
+    assert _misdirected(walk) == {}
 
 
 def test_the_walk_sees_a_verb_act_on_another_operator():
     """A positive control for the test above. When Stop and Rename act on the
     first operator of their section, whichever one the menu gave them, the
-    walk finds two commands on each of their paths."""
-    commands = {}
-    for _, path, command in _walk((("careless", _careless),)).commands:
-        commands.setdefault(path, set()).add(command)
-    assert commands[("List operators", RUNNING, "Stop")] == {
-        (("stop", NAME),), (("stop", "alpha"),)}
-    assert commands[("List operators", OFFLINE, "Rename", ENTER)] == {
-        (("rename", NAME, NAME),), (("rename", "bravo", NAME),)}
+    walk finds two commands on each of their paths. When Delete deletes this
+    directory's operator, which no row picked, it finds that operator named."""
+    assert _misdirected(_walk((("careless", _careless),))) == {
+        ("List operators", RUNNING, "Stop"): {(("stop", NAME),), (("stop", OTHER),)},
+        ("List operators", OFFLINE, "Rename", ENTER): {
+            (("rename", NAME, NAME),), (("rename", OTHER, NAME),)},
+        ("List operators", OFFLINE, "Delete", Key("y")): {
+            (("delete", OTHER, "--yes"),)},
+    }
 
 
 def test_the_walk_takes_a_row_with_a_count_as_a_choice_of_its_own():
