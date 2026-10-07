@@ -10,24 +10,25 @@ The meta-tests at the bottom fail when a verb, an option or a menu item has no
 case, and when the README tables disagree with the cases. A verb escapes when
 main answers a word that no str literal in operator_cli spells, as when it is
 built from pieces or imported. The meta-tests find menu items by walking the
-menu with fake verbs in four states. A choice none of those
-states shows still escapes when no statement of its own guards it and the walk
-sees its label elsewhere, as when an index computed from data picks it. A key
-or any other branch inside the input loops that menu.py's screens are built
-on escapes too, and so does code outside menu.py. An option escapes when it is
-built from pieces or when code outside operator_cli parses it. One that
-operator_cli imports from another package fails a test of its own when it sits,
-however deep, in a collection, in an object's attributes, or in an attribute or
-slot that a class of ours declares. That test also fails on a spelling that
-operator_cli imports and never parses. It escapes when it exists only once code
-has run, as a property's value does, sits anywhere else, such as in a
-function's defaults or closure, or is reached by a name built when the code
-runs.
+menu with fake verbs in four states. A choice none of those states shows still
+escapes when no statement of its own guards it and the walk sees its label
+elsewhere, as when an index computed from data picks it. A key or any other
+branch inside the input loops that menu.py's screens are built on escapes too,
+and so does code outside menu.py. An option escapes when it is built from
+pieces or when code outside operator_cli parses it. The option scan skips
+NOT_TYPED, whose options no person types, so an option only they spell needs
+no case. One that operator_cli imports from another package fails a test of
+its own when it sits, however deep, in a collection, in an object's attributes,
+or in an attribute or slot that a class of ours declares. That test also fails
+on a spelling that operator_cli imports and never parses. It escapes when it
+exists only once code has run, as a property's value does, sits anywhere else,
+such as in a function's defaults or closure, or is reached by a name built when
+the code runs.
 
 The README tests read the map table, the first column of each one-sided table
 and the bullets under Where they behave differently. A one-sided row must give
-a reason and each bullet must be a case's doc, but no test can tell whether
-either is true. The prose under Verbs is not read.
+a reason and each bullet must be a case's doc or STAYS, word for word, but no
+test can tell whether either is true. The prose under Verbs is not read.
 """
 from __future__ import annotations
 
