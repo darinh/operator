@@ -164,7 +164,8 @@ class Case:
     rather than staying open. ``answer`` "screen" compares the lines shown
     rather than the message. ``menu_expect`` overrides ``expect`` for the
     menu, only where the README documents the difference, and ``doc`` is the
-    README bullet that documents it, word for word.
+    README bullet that documents it, word for word. ``stands`` is the place
+    the user runs operator in.
     """
     id: str
     expect: dict = field(default_factory=dict)
@@ -178,6 +179,7 @@ class Case:
     seated: str = ""
     menu_expect: dict = field(default_factory=dict)
     doc: str = ""
+    stands: str = "here"
 
     def expected(self, surface: str) -> dict:
         want = {
@@ -326,6 +328,10 @@ CASES = [
     Case("start-bad-name", code=2,
          argv=(["start", "--name=-x", "--attach"],),
          menu=("Start an operator", Text("-x")),
+         expect={"said": "a name cannot start with -"}),
+    Case("start-here-bad-name", stands="dashed", code=2,
+         argv=(["start", "--attach"],),
+         menu=("Start an operator", ENTER),
          expect={"said": "a name cannot start with -"}),
     Case("start-taken-elsewhere", given={"bravo": ("there", "offline")},
          argv=(["start", "bravo", "--attach"],),
@@ -494,8 +500,9 @@ class World:
     """A sandbox, with fakes wherever operator would reach the machine.
 
     Places have names so outcomes read the same on every machine. ``here`` is
-    the directory the user stands in, ``there`` is another project, ``home`` is
-    the operator home and ``other-home`` is the one ``--home`` names.
+    the directory the user stands in, ``there`` is another project, ``dashed``
+    is a directory whose name is not a valid operator name, ``home`` is the
+    operator home and ``other-home`` is the one ``--home`` names.
     """
 
     def __init__(self, tmp_path, monkeypatch, capsys, home):
@@ -504,8 +511,9 @@ class World:
         import supervisor_control
         self.monkeypatch, self.capsys = monkeypatch, capsys
         self.places = {"here": tmp_path / "demo", "there": tmp_path / "elsewhere",
+                       "dashed": tmp_path / "-dashed",
                        "other-home": tmp_path / "other-home", "home": home}
-        for name in ("here", "there", "other-home"):
+        for name in ("here", "there", "dashed", "other-home"):
             self.places[name].mkdir()
         monkeypatch.chdir(self.places["here"])
         # argparse wraps recover's help to the terminal's width.
@@ -589,6 +597,7 @@ class World:
                                      encoding="utf-8")
         if case.seated:
             _seat(self.monkeypatch, operators.find(case.seated))
+        self.monkeypatch.chdir(self.places[case.stands])
         self.capsys.readouterr()
 
     def typed(self, argv):
@@ -621,7 +630,7 @@ class World:
             "events": self.events,
             "operators": sorted((record.name, self.place(record.cwd))
                                 for record in operators.all_operators() or []),
-            "registered": sorted(where for where in ("here", "there")
+            "registered": sorted(where for where in ("here", "there", "dashed")
                                  if paths.catalog_guid(self.places[where]).guid),
             "said": self.scrub(said),
             "waited": self.waited_ms / 1000,
