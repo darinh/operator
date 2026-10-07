@@ -14,7 +14,10 @@ sees its label elsewhere, as when an index computed from data picks it. A key
 or any other branch inside the input loops that menu.py's screens are built
 on escapes too, and so does code outside menu.py. An option escapes when it is
 built from pieces or when code outside operator_cli parses it. One that
-operator_cli imports from another package fails a test of its own.
+operator_cli imports from another package fails a test of its own when it sits
+in a collection or an object's attributes, however deep. It escapes when it
+exists only once code has run, sits anywhere else, such as in a closure, or is
+reached by a name built when the code runs.
 
 The README tests read the map table, the first column of each one-sided table
 and the bullets under Where they behave differently. A one-sided row must give
@@ -803,8 +806,8 @@ def _typed_options() -> set:
     That is each option literal, and the help argparse adds to each parser.
     ``--name=`` is a spelling of its own because it has a branch of its own.
     An option built from pieces, or parsed outside operator_cli, escapes this
-    scan. One that operator_cli imports from another package fails
-    test_no_option_comes_from_another_package.
+    scan. test_no_option_comes_from_another_package looks for one that
+    operator_cli imports from another package.
     """
     found = set()
     for path in sorted(CLI.glob("*.py")):
@@ -862,25 +865,51 @@ def _from_import(module: str, name: str):
 
 
 def _read(node, bound):
-    """What an attribute chain such as ``a.b.C`` reads, when every module along
-    it is ours."""
+    """What a name, an attribute chain such as ``a.b.C``, or ``getattr(a, "b")``
+    reads, when every module along it is ours. A name built when the code runs
+    is not read."""
     if isinstance(node, ast.Name):
         return bound.get(node.id)
-    outer = _read(node.value, bound) if isinstance(node, ast.Attribute) else None
+    outer = name = None
+    if isinstance(node, ast.Attribute):
+        outer, name = _read(node.value, bound), node.attr
+    elif (isinstance(node, ast.Call) and getattr(node.func, "id", None) == "getattr"
+          and len(node.args) > 1 and isinstance(node.args[1], ast.Constant)
+          and isinstance(node.args[1].value, str)):
+        outer, name = _read(node.args[0], bound), node.args[1].value
     if isinstance(outer, ModuleType) and _ours(getattr(outer, "__file__", None)):
-        return getattr(outer, node.attr, None)
+        return getattr(outer, name, None)
     return None
 
 
-def _options_in(value) -> list:
-    """The option spellings in a str, or in a collection of them."""
-    if isinstance(value, dict):
-        value = [*value, *value.values()]
+def _options_in(value, seen=None) -> list:
+    """The option spellings anywhere in ``value``.
+
+    A str is one or is not. A dict, a tuple, a list or a set is searched
+    through what it holds. Any other object is searched through the attributes
+    in its ``__dict__``, and in those of its class and the class's bases that
+    are ours. A module is not searched: operator_cli reads only the names it
+    imports from one, and each of those is searched.
+    """
+    seen = set() if seen is None else seen
     if isinstance(value, str):
-        value = [value]
-    if not isinstance(value, (tuple, list, set, frozenset)):
+        return [str(value)] if OPTION.match(value) else []
+    if isinstance(value, ModuleType) or id(value) in seen:
         return []
-    return sorted(item for item in value if isinstance(item, str) and OPTION.match(item))
+    seen.add(id(value))
+    if isinstance(value, dict):
+        held = [*value, *value.values()]
+    elif isinstance(value, (tuple, list, set, frozenset)):
+        held = list(value)
+    else:
+        mro = value.__mro__ if isinstance(value, type) else type(value).__mro__
+        owners = [cls for cls in mro
+                  if _ours(getattr(sys.modules.get(cls.__module__), "__file__", None))]
+        if not isinstance(value, type):
+            owners.append(value)
+        held = [item for owner in owners
+                for item in getattr(owner, "__dict__", {}).values()]
+    return sorted(option for item in held for option in _options_in(item, seen))
 
 
 def _labels(path):
@@ -1126,7 +1155,8 @@ def test_every_option_has_a_case():
 
 def test_no_option_comes_from_another_package():
     """The scan above reads the literals in operator_cli, so an option that
-    operator_cli imports from the kernel would escape it. None may."""
+    operator_cli imports from the kernel would escape it. None may sit in what
+    operator_cli imports, however deep. _options_in says where it looks."""
     found, resolved = [], set()
     for path in sorted(CLI.glob("*.py")):
         if path.name in NOT_TYPED:
@@ -1143,14 +1173,42 @@ def test_no_option_comes_from_another_package():
                     name = alias.name if alias.asname else alias.name.partition(".")[0]
                     bound[alias.asname or name] = _module(name)
         reads = {ast.unparse(node): _read(node, bound) for node in ast.walk(tree)
-                 if isinstance(node, ast.Attribute)}
+                 if isinstance(node, (ast.Attribute, ast.Call))}
         resolved.update(name for name, value in (*bound.items(), *reads.items())
                         if value is not None)
         found += [(path.name, name, option)
                   for name, value in (*bound.items(), *reads.items())
                   for option in _options_in(value)]
-    assert {"at_dashdash", "MUX", "operators", "operators.find"} <= resolved
+    assert {"at_dashdash", "MUX", "operators", "operators.find",
+            "getattr(operator_kernel, '__file__', None)"} <= resolved
     assert sorted(found) == []
+
+
+def test_the_import_check_looks_wherever_an_option_can_sit():
+    """The test above passes only when it finds nothing. These show what it
+    would find: an option deep in a collection, on a class or its base, on an
+    object, or on a function, and an attribute that getattr reads by a literal
+    name. It does not search a module, or read a name built when code runs."""
+    class Flags:
+        fresh = "--fresh"
+
+    class Kept(Flags):
+        pass
+
+    def parse():
+        pass
+
+    parse.option = "--remote"
+    here = sys.modules[__name__]
+    assert _options_in({"start": ("--name", ["--attach="])}) == ["--attach=", "--name"]
+    assert _options_in(Kept) == _options_in(Kept()) == ["--fresh"]
+    assert _options_in(SimpleNamespace(parse=parse)) == ["--remote"]
+    assert _options_in(here) == []
+    assert "--fresh" in _options_in(CASES)
+    reads = [_read(ast.parse(text, mode="eval").body, {"here": here})
+             for text in ("here.STAYS", "getattr(here, 'STAYS')",
+                          "getattr(here, 'STAY' + 'S')")]
+    assert reads == [STAYS, STAYS, None]
 
 
 def test_no_parser_takes_an_abbreviation():
