@@ -25,6 +25,7 @@ import sys
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass, field
 from functools import cache
+from itertools import takewhile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -989,16 +990,28 @@ def test_the_menu_calls_the_typed_handlers():
 
 
 def _readme(heading: str) -> str:
-    """The text under ``heading``, up to the next heading of any level."""
-    text = README.read_text(encoding="utf-8")
+    """The text under ``heading`` as GitHub shows it, up to the next heading of
+    any level. GitHub hides an HTML comment, and an unclosed one hides the rest."""
+    text = re.sub(r"<!--.*?(?:-->|\Z)", "", README.read_text(encoding="utf-8"),
+                  flags=re.S)
     assert f"\n{heading}\n" in text, f"README.md has no {heading!r} heading"
     return re.split(r"\n#+ ", text.split(f"\n{heading}\n", 1)[1], maxsplit=1)[0]
 
 
+def _body(text: str) -> list:
+    """The body rows of the one table in ``text``: each line after its separator
+    up to a blank line, which GitHub draws as a row with or without a leading |."""
+    lines = text.splitlines()
+    separators = [i for i, line in enumerate(lines)
+                  if re.fullmatch(r"\|?( *:?-+:? *\|)+ *:?-*:? *", line)]
+    assert len(separators) == 1, separators
+    return list(takewhile(str.strip, lines[separators[0] + 1:]))
+
+
 def _rows(text: str) -> list:
     """The stripped cells of each body row of the table in ``text``."""
-    rows = [line for line in text.splitlines() if line.startswith("|")]
-    return [[cell.strip() for cell in row.split("|")[1:-1]] for row in rows[2:]]
+    return [[cell.strip() for cell in row.strip().strip("|").split("|")]
+            for row in _body(text)]
 
 
 def _first_cells(text: str) -> list:
@@ -1033,11 +1046,11 @@ def _map_row(case: Case) -> str:
 
 def test_the_readme_maps_each_menu_choice_to_its_command():
     agree = [case for case in CASES if _two_sided(case) and not case.menu_expect]
-    table = {line for line in _readme("## Menu and command line").splitlines()
-             if line.startswith("| ") and "`operator " in line}
-    assert table == {_map_row(case) for case in agree if case.code == 0}
+    section = _readme("## Menu and command line")
+    assert sorted(_body(section)) == sorted(
+        {_map_row(case) for case in agree if case.code == 0})
     items = _walk().items
-    cells = _first_cells(_readme("## Menu and command line"))
+    cells = _first_cells(section)
     mapped = {part for cell in cells for part in cell.split(" > ") if part in items}
     assert mapped == items & {label for case in agree for label in _labels(case.menu)}
 
@@ -1063,7 +1076,9 @@ def test_the_readme_names_what_only_the_menu_can_do():
 def test_each_thing_one_way_has_gives_a_reason(heading):
     rows = _rows(_readme(heading))
     assert rows
-    assert [cells for cells in rows if len(cells) != 2 or not cells[1]] == []
+    shown = [re.sub(r"<[^>]*>|&#?\w+;", "", cells[-1]) for cells in rows]
+    assert [cells for cells, reason in zip(rows, shown)
+            if len(cells) != 2 or not re.search(r"\w", reason)] == []
 
 
 def test_the_readme_explains_every_difference():
