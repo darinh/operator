@@ -798,6 +798,12 @@ def _front_words() -> set:
     return set(cli.HANDLERS) | {word for word in cli.HELP_WORDS if not OPTION.match(word)}
 
 
+def _typed_sources() -> list:
+    """Each Python file in operator_cli and its subpackages, less NOT_TYPED."""
+    return sorted(path for path in CLI.rglob("*.py")
+                  if path.relative_to(CLI).as_posix() not in NOT_TYPED)
+
+
 def _node_name(node) -> "str | None":
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
         return node.name
@@ -816,14 +822,15 @@ def _owner(path: Path, node, spelling: str) -> "str | None":
     """The verb that parses an option, or None for the front door."""
     if _peeled(spelling):
         return None
-    if path.name == "entry.py":
+    module = path.relative_to(CLI).with_suffix("").as_posix()
+    if module == "entry":
         return VERB_OF.get(_node_name(node))
     if _node_name(node) in cli.HANDLERS:
         return _node_name(node)
-    assert path.stem in cli.HANDLERS, (
-        f"{path.name} has an option literal outside any verb. Move it into the "
+    assert module in cli.HANDLERS, (
+        f"{module}.py has an option literal outside any verb. Move it into the "
         f"verb that parses it, or add the file to NOT_TYPED with a reason.")
-    return path.stem
+    return module
 
 
 def _is_parser(call) -> bool:
@@ -850,9 +857,7 @@ def _typed_options() -> set:
     operator_cli imports from another package.
     """
     found = set()
-    for path in sorted(CLI.glob("*.py")):
-        if path.name in NOT_TYPED:
-            continue
+    for path in _typed_sources():
         for node in ast.parse(path.read_text(encoding="utf-8")).body:
             for inner in ast.walk(node):
                 spellings = _parser_help(inner)
@@ -1233,9 +1238,7 @@ def test_no_option_comes_from_another_package():
     operator_cli imports from the kernel would escape it. None may sit in what
     operator_cli imports, however deep. _options_in says where it looks."""
     found, resolved = [], set()
-    for path in sorted(CLI.glob("*.py")):
-        if path.name in NOT_TYPED:
-            continue
+    for path in _typed_sources():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         bound = {}
         for node in ast.walk(tree):
@@ -1251,7 +1254,7 @@ def test_no_option_comes_from_another_package():
                  if isinstance(node, (ast.Attribute, ast.Call))}
         resolved.update(name for name, value in (*bound.items(), *reads.items())
                         if value is not None)
-        found += [(path.name, name, option)
+        found += [(path.relative_to(CLI).as_posix(), name, option)
                   for name, value in (*bound.items(), *reads.items())
                   for option in _options_in(value)]
     assert {"at_dashdash", "MUX", "operators", "operators.find",
@@ -1288,10 +1291,10 @@ def test_the_import_check_looks_wherever_an_option_can_sit():
 
 def test_no_parser_takes_an_abbreviation():
     """argparse reads --al as --all unless told not to, and no case types --al."""
-    parsers = [(path.name, any(word.arg == "allow_abbrev"
-                               and getattr(word.value, "value", True) is False
-                               for word in call.keywords))
-               for path in sorted(CLI.glob("*.py")) if path.name not in NOT_TYPED
+    parsers = [(path.relative_to(CLI).as_posix(), any(
+                    word.arg == "allow_abbrev" and getattr(word.value, "value", True) is False
+                    for word in call.keywords))
+               for path in _typed_sources()
                for call in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
                if _is_parser(call)]
     assert parsers and all(refuses for _, refuses in parsers), parsers
