@@ -149,12 +149,15 @@ def _list_rows(running, offline):
 def _main(keys, render, actions, status):
     while True:
         count = actions.recoverable_count()
-        recover = (f"Recover operator sessions ({count})" if count
-                   else "No operators need recovery.")
+        recover = "No operators need recovery."
+        if count:
+            recover = f"Recover operator sessions ({count})"
         labels = ["Start an operator", "List operators", recover, "Quit"]
         picked = select("operator", [Row(label) for label in labels],
                         keys, render, status=status)
-        if picked is None or labels[picked] == "Quit":
+        if picked is None:
+            return None
+        if labels[picked] == "Quit":
             return None
         if labels[picked] == "No operators need recovery.":
             continue

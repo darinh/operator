@@ -7,7 +7,11 @@ user was told. Where the menu differs on purpose, the case says how and quotes
 the README line that documents it.
 
 The meta-tests at the bottom fail when a verb, an option or a menu item has no
-case, and when the README tables disagree with the cases.
+case, and when the README tables disagree with the cases. They find menu items
+by walking the menu with fake verbs in four states. A choice none of those
+states shows escapes only when it has no statement and no string of its own, as
+when an index computed from data picks a label the walk draws elsewhere. Code
+outside menu.py escapes too.
 
 The README tests read the map table, the first column of each one-sided table
 and the bullets under Where they behave differently. A one-sided row must give
@@ -684,6 +688,10 @@ DATA_ROW = re.compile(r"^(?:\[[ x]\] )?\d+\. (.+?)(?:  \(.*)?$")
 #: menu.py's input loops. tests/test_menu.py drives their keys; the walk need
 #: not run every line of them, only every line of the screens built on them.
 PRIMITIVES = ("render", "select", "multi_select", "confirm", "ask_text", "_captured")
+#: How a path names an operator: by the section of the list it is in, or, when
+#: a box is ticked for it, as a name. A command names every operator NAME.
+RUNNING, OFFLINE, NAME = "<running>", "<offline>", "<name>"
+COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 #: The verbs whose handlers live in entry.py, by function name.
 VERB_OF = {fn.__name__: verb for verb, fn in cli.HANDLERS.items()
            if fn.__module__ == cli.__name__}
@@ -792,11 +800,25 @@ def _labels(path):
             yield step.label
 
 
+def _op(name: str, running: bool) -> menu.Op:
+    where = "C:\\" + name[0]
+    return menu.Op(name, where, f"{name}  ({where})", running)
+
+
 def _busy() -> MenuActions:
     actions = MenuActions()
-    actions.running = [menu.Op("alpha", r"C:\a", r"alpha  (C:\a)", True)]
-    actions.offline = [menu.Op("bravo", r"C:\b", r"bravo  (C:\b)", False)]
+    actions.running, actions.offline = [_op("alpha", True)], [_op("bravo", False)]
     actions.recoverable = ["charlie"]
+    return actions
+
+
+def _many() -> MenuActions:
+    """Two of each kind, so a choice that needs more than one shows, and a path
+    runs for two operators in one state."""
+    actions = MenuActions()
+    actions.running = [_op("alpha", True), _op("delta", True)]
+    actions.offline = [_op("bravo", False), _op("echo", False)]
+    actions.recoverable = ["charlie", "foxtrot"]
     return actions
 
 
@@ -813,25 +835,33 @@ class Walk:
     shown: frozenset
     passed: frozenset
     returned: frozenset
+    commands: frozenset
+
+    @property
+    def labels(self) -> frozenset:
+        return frozenset(item[-1] for item in self.items)
 
 
 @cache
 def _walk() -> Walk:
-    """Every choice the menu offers, and what the walk saw on the way.
+    """Every choice the menu offers, as the path that reaches it, and what the
+    walk saw on the way.
 
-    The walk drives fake verbs in three states and enters every row of every
-    screen it reaches. It surveys a screen by pressing Down until the highlight
-    has visited every row. A numbered row is an operator, so the walk enters it
-    but does not count it as an item, and it also ticks a row with a box and
-    presses Enter. A count such as ``(1)`` is dropped. On a screen with no
-    highlight, a text box or a question, it presses Enter and, separately, y.
-    When the menu leaves, the walk runs what it left to run.
+    The walk drives fake verbs in four states: no operators, one of each kind,
+    two of each kind, and a start that refuses the name. It enters every row of
+    every screen it reaches. It surveys a screen by pressing Down until the
+    highlight has visited every row. A numbered row is an operator, so the walk
+    enters it but does not count it as an item, and it also ticks a row with a
+    box and presses Enter. A count such as ``(1)`` is dropped. On a screen with
+    no highlight, a text box or a question, it presses Enter and, separately,
+    y. When the menu leaves, the walk runs what it left to run.
 
-    It also keeps the menu.py lines that ran, each line drawn on a screen, each
-    argv token a fake verb received, and each str a screen function returned.
+    It also keeps the menu.py lines that ran, each title, row and status drawn,
+    each argv token a fake verb received, each str a screen function returned,
+    and (state, path, command) for each path that ran a command.
     """
     items, seen, ran = set(), set(), set()
-    shown, passed, returned = set(), set(), set()
+    shown, passed, returned, commands = set(), set(), set(), set()
 
     def lines(frame, event, arg):
         if event == "line":
@@ -849,30 +879,40 @@ def _walk() -> Walk:
     previous = sys.gettrace()
     sys.settrace(calls)
     try:
-        for kind, make in (("idle", MenuActions), ("busy", _busy),
+        for kind, make in (("idle", MenuActions), ("busy", _busy), ("many", _many),
                            ("refusing", _refusing)):
-            todo = [()]
+            given = make()
+            section = {op.name: RUNNING for op in given.running}
+            section.update({op.name: OFFLINE for op in given.offline})
+            names = {*section, *given.recoverable, given.default_name()}
+            todo = [((), ())]
             while todo:
-                path = todo.pop()
+                path, named = todo.pop()
                 robot = Robot(path, then=["down"] * 12)
                 actions = make()
                 left = menu.run(robot.keys(), robot.render, actions)
                 if isinstance(left, menu.Leave):
                     with redirect_stdout(io.StringIO()):
                         left.call()
-                shown.update(line for frame in robot.frames
-                             for text in (frame.title, *frame.rows, frame.status)
-                             for line in text.split("\n"))
-                received = (actions.started, actions.stopped, actions.renamed,
-                            actions.deleted, actions.recovered, actions.attached)
-                passed.update(token for calls in received for argv in calls
+                shown.update(text for frame in robot.frames
+                             for text in (frame.title, *frame.rows, frame.status))
+                received = {"start": actions.started, "stop": actions.stopped,
+                            "rename": actions.renamed, "delete": actions.deleted,
+                            "recover": actions.recovered, "attach": actions.attached}
+                passed.update(token for calls in received.values() for argv in calls
                               for token in argv)
+                command = tuple((verb, *(NAME if token in names else token
+                                         for token in argv))
+                                for verb, calls in received.items() for argv in calls)
+                if command:
+                    commands.add((kind, named, command))
                 landed = robot.landed
                 if landed is None or (kind, landed.title) in seen:
                     continue
                 seen.add((kind, landed.title))
                 if landed.highlight is None:
-                    todo += [path + (ENTER,), path + (Key("y"),)]
+                    todo += [(path + (ENTER,), named + (ENTER,)),
+                             (path + (Key("y"),), named + (Key("y"),))]
                     continue
                 survey = robot.frames[robot.landed_at:robot.landed_at + 13]
                 labels = dict.fromkeys(frame.rows[frame.highlight] for frame in survey
@@ -880,16 +920,36 @@ def _walk() -> Walk:
                                        and frame.highlight is not None)
                 for label in labels:
                     data = DATA_ROW.match(label)
-                    step = data.group(1) if data else re.sub(r" \(\d+\)$", "", label)
-                    if not data:
-                        items.add(step)
-                    todo.append(path + (step,))
-                    if label.startswith(("[ ] ", "[x] ")):
-                        todo.append(path + (Toggle(step), ENTER))
+                    boxed = label.startswith(("[ ] ", "[x] "))
+                    if data:
+                        step = data.group(1)
+                        as_named = NAME if boxed else section[step]
+                    else:
+                        step = as_named = re.sub(r" \(\d+\)$", "", label)
+                        items.add(named + (step,))
+                    todo.append((path + (step,), named + (as_named,)))
+                    if boxed:
+                        todo.append((path + (Toggle(step), ENTER),
+                                     named + (Toggle(NAME), ENTER)))
     finally:
         sys.settrace(previous)
     return Walk(frozenset(items), frozenset(ran), frozenset(shown),
-                frozenset(passed), frozenset(returned))
+                frozenset(passed), frozenset(returned), frozenset(commands))
+
+
+def _named(case: Case) -> tuple:
+    """The case's menu path, naming each operator the way the walk does."""
+    kinds = {name: OFFLINE if state == "offline" else RUNNING
+             for name, (_, state) in case.given.items()}
+    return tuple(Toggle(NAME) if isinstance(step, Toggle) else kinds.get(step, step)
+                 for step in case.menu)
+
+
+def _outside_primitives() -> list:
+    """The top-level statements of menu.py, less the primitives' definitions."""
+    tree = ast.parse(Path(menu.__file__).read_text(encoding="utf-8"))
+    return [node for node in tree.body
+            if not (isinstance(node, ast.FunctionDef) and node.name in PRIMITIVES)]
 
 
 def _screens() -> list:
@@ -897,11 +957,9 @@ def _screens() -> list:
 
     A docstring is not one of the statements.
     """
-    tree = ast.parse(Path(menu.__file__).read_text(encoding="utf-8"))
     return [(node.name, node.body[1:] if ast.get_docstring(node) is not None
              else node.body)
-            for node in tree.body
-            if isinstance(node, ast.FunctionDef) and node.name not in PRIMITIVES]
+            for node in _outside_primitives() if isinstance(node, ast.FunctionDef)]
 
 
 def _screen_statements() -> dict:
@@ -910,15 +968,27 @@ def _screen_statements() -> dict:
             for inner in ast.walk(statement) if isinstance(inner, ast.stmt)}
 
 
-def _screen_strings() -> dict:
-    """Each line of each str literal in those statements, to its function.
+def _menu_strings() -> dict:
+    """A pattern for each str literal in menu.py outside the primitives, to its line.
 
-    An f-string counts by its fixed parts. Blank lines are dropped.
+    A str that is a statement by itself, such as a docstring, is not one, and
+    neither is a blank one. An f-string is one pattern whose fields match any
+    text.
     """
-    return {part: name for name, body in _screens() for statement in body
-            for inner in ast.walk(statement)
-            if isinstance(inner, ast.Constant) and isinstance(inner.value, str)
-            for part in (piece.strip() for piece in inner.value.split("\n")) if part}
+    found, todo = {}, _outside_primitives()
+    while todo:
+        node = todo.pop()
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+            continue
+        if isinstance(node, ast.JoinedStr):
+            found["".join(re.escape(part.value) if isinstance(part, ast.Constant)
+                          else "(?s:.*)" for part in node.values)] = node.lineno
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if node.value.strip():
+                found[re.escape(node.value)] = node.lineno
+        else:
+            todo += ast.iter_child_nodes(node)
+    return found
 
 
 def _two_sided(case: Case) -> bool:
@@ -954,11 +1024,45 @@ def test_no_parser_takes_an_abbreviation():
 
 
 def test_every_menu_item_has_a_case():
+    """Each choice the walk found, on the path it took there, begins a case's
+    menu path. Attach for a running operator does not cover Attach for a
+    stopped one."""
     items = _walk().items
-    assert {"Start an operator", "List operators", "Quit", "Attach",
-            "Delete"} <= items
-    on_paths = {label for case in CASES for label in _labels(case.menu)}
-    assert sorted(items - on_paths) == []
+    assert {("Start an operator",), ("Quit",), ("Recover operator sessions",),
+            ("List operators", RUNNING, "Attach"),
+            ("List operators", OFFLINE, "Delete")} <= items
+    paths = {_named(case) for case in CASES if case.menu is not None}
+    assert sorted(item for item in items
+                  if not any(path[:len(item)] == item for path in paths)) == []
+
+
+def test_a_menu_path_runs_the_same_command_in_every_state():
+    """Where the walk took a path in several states, or for several operators
+    in one, every run that ran a command ran the same one, once each operator's
+    name is NAME. A path may run nothing in one state, as Start an operator
+    does when the name is refused."""
+    commands, states = {}, {}
+    for state, path, command in _walk().commands:
+        commands.setdefault(path, set()).add(command)
+        states.setdefault(path, set()).add(state)
+    assert states[("List operators", OFFLINE, "Start")] == {"busy", "many"}
+    assert states[("Start an operator", ENTER)] == {"idle", "busy", "many"}
+    assert {path: ran for path, ran in commands.items() if len(ran) > 1} == {}
+
+
+def test_the_screens_branch_only_in_statements():
+    """The walk sees which lines ran, so a line that can go two ways hides the
+    way it never went. Outside the primitives, menu.py has no conditional
+    expression, no and or or, no comprehension that filters, and no line that
+    starts two statements."""
+    nodes = [inner for node in _outside_primitives() for inner in ast.walk(node)]
+    inline = sorted(node.lineno for node in nodes
+                    if isinstance(node, (ast.IfExp, ast.BoolOp))
+                    or isinstance(node, COMPREHENSIONS)
+                    and any(loop.ifs for loop in node.generators))
+    starts = [node.lineno for node in nodes if isinstance(node, ast.stmt)]
+    assert inline == []
+    assert sorted({line for line in starts if starts.count(line) > 1}) == []
 
 
 def test_the_walk_runs_every_statement_of_the_screens():
@@ -969,20 +1073,21 @@ def test_the_walk_runs_every_statement_of_the_screens():
     assert missing == {}
 
 
-def test_every_string_in_the_screens_is_shown_passed_or_returned():
-    """A choice or an option behind a condition inside one statement escapes the
-    walk's items and the statement trace, but its string has nowhere to go.
+def test_every_string_in_the_menu_is_drawn_passed_or_returned_whole():
+    """A choice or an option the walk never reached still has its string.
 
-    Each line of each str literal in the screens must be part of a line the walk
-    saw drawn, be an argv token a fake verb received, or be a str a screen
-    function returned. A label computed from data, or a branch that changes
-    what a verb receives without a string of its own, still escapes.
+    Each str literal in menu.py outside the primitives, module constants
+    included, must be the whole of a title, row or status the walk saw drawn,
+    an argv token a fake verb received, or a str a screen function returned.
+    So a piece of a text fails, such as a separator to join with. Build that
+    text with an f-string. A label computed from data escapes.
     """
-    walk, strings = _walk(), _screen_strings()
-    assert {"Delete? [y/N]", "--attach", "list"} <= set(strings)
-    unused = {part: fn for part, fn in strings.items()
-              if part not in walk.passed and part not in walk.returned
-              and not any(part in line for line in walk.shown)}
+    walk, strings = _walk(), _menu_strings()
+    assert {re.escape(text) for text in ("Delete? [y/N]", "--attach", "list")} <= set(strings)
+    assert any("(?s:.*)" in pattern for pattern in strings)
+    texts = walk.shown | walk.passed | walk.returned
+    unused = {pattern: line for pattern, line in strings.items()
+              if not any(re.fullmatch(pattern, text) for text in texts)}
     assert unused == {}
 
 
@@ -1061,7 +1166,7 @@ def test_the_readme_maps_each_menu_choice_to_its_command():
     section = _readme("## Menu and command line")
     assert sorted(_body(section)) == sorted(
         {_map_row(case) for case in agree if case.code == 0})
-    items = _walk().items
+    items = _walk().labels
     cells = _first_cells(section)
     mapped = {part for cell in cells for part in cell.split(" > ") if part in items}
     assert mapped == items & {label for case in agree for label in _labels(case.menu)}
@@ -1080,7 +1185,7 @@ def test_the_readme_names_what_only_the_command_line_can_do():
 def test_the_readme_names_what_only_the_menu_can_do():
     both = {label for case in CASES if _two_sided(case) for label in _labels(case.menu)}
     cells = _first_cells(_readme("### Only in the menu"))
-    assert set(cells) == _walk().items - both
+    assert set(cells) == _walk().labels - both
 
 
 @pytest.mark.parametrize("heading", ["### Only on the command line",
