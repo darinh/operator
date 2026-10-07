@@ -38,6 +38,7 @@ class Actions:
         self.recovered = []
         self.attached = []
         self.problems = {}
+        self.unreadable = []
 
     def start_problem(self, name):
         return self.problems.get(name)
@@ -55,7 +56,7 @@ class Actions:
         return self.name
 
     def sections(self):
-        return list(self.running), list(self.offline)
+        return list(self.running), list(self.offline), list(self.unreadable)
 
     def start(self, argv):
         self.started.append(list(argv))

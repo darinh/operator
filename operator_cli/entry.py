@@ -91,12 +91,13 @@ class _Actions:
         return f"{record.name} already works in {record.cwd}. Choose another name."
 
     def sections(self):
-        import operators
-        from .listing import sections
+        from .listing import load, sections
         from .menu import Op
-        running, offline = sections(operators.all_operators() or [])
+        records, problems = load()
+        running, offline = sections(records or [])
         return ([Op(op.name, op.cwd, label, True) for op, label in running],
-                [Op(op.name, op.cwd, label, False) for op, label in offline])
+                [Op(op.name, op.cwd, label, False) for op, label in offline],
+                problems)
 
     start = staticmethod(_start)
     attach = staticmethod(_attach)
