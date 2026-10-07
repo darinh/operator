@@ -35,7 +35,7 @@ def list_instances() -> int:
         print(line, file=sys.stderr)
     if records is None:
         return 1
-    if not records:
+    if not records and not problems:
         print("No operators yet. Start one with: operator start")
         return 0
     running, offline = sections(records)
