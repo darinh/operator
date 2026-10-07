@@ -42,11 +42,12 @@ def test_the_menu_splits_operators_the_way_list_does(tmp_path, monkeypatch):
                         lambda inst: 11 if inst.id == running.id else None)
     monkeypatch.setattr(supervisor_control, "active_instances",
                         lambda: [running.instance()])
-    on, off = _Actions().sections()
+    on, off, problems = _Actions().sections()
     assert [(o.name, o.label, o.running) for o in on] == [
         ("alpha", f"alpha  ({work.resolve()})  pid 11", True)]
     assert [(o.name, o.label, o.running) for o in off] == [
         ("bravo", f"bravo  ({work.resolve()})", False)]
+    assert problems == []
 
 
 def test_an_empty_heading_says_none(tmp_path, monkeypatch, capsys):

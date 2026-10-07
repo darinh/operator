@@ -16,18 +16,25 @@ def _section(heading: str, rows: list[str]) -> None:
         print(f"  {index}. {row}")
 
 
+def load() -> tuple:
+    """The operators that loaded, or None when their directory could not be
+    read, and a line for the user about each one that did not load."""
+    import operators
+    records, failed = operators.all_operators(), operators.unreadable()
+    if records is None or failed is None:
+        return None, ["could not read operators"]
+    return records, [f"could not read {path}" for path in failed]
+
+
 def list_instances() -> int:
     """Running operators, then the ones a clean stop left behind."""
-    import operators
     import sys
 
-    records = operators.all_operators()
-    failed = operators.unreadable()
-    if records is None or failed is None:
-        print("could not read operators", file=sys.stderr)
+    records, problems = load()
+    for line in problems:
+        print(line, file=sys.stderr)
+    if records is None:
         return 1
-    for path in failed:
-        print(f"could not read {path}", file=sys.stderr)
     if not records:
         print("No operators yet. Start one with: operator start")
         return 0

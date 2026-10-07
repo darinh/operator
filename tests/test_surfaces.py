@@ -172,11 +172,13 @@ class Case:
 
     ``menu`` None means the command line only, and ``()`` means the main menu
     as it opens. ``leaves`` means the menu hands this terminal over or ends,
-    rather than staying open. ``answer`` "screen" compares the lines shown
-    rather than the message. ``menu_expect`` overrides ``expect`` for the
-    menu, only where the README documents the difference, and ``doc`` is the
-    README bullet that documents it, word for word. ``stands`` is the place
-    the user runs operator in.
+    rather than staying open. ``answer`` "screen" compares all that a way
+    shows rather than the message: a typed command's output and then its
+    errors, or a screen's rows and then its status. ``menu_expect`` overrides
+    ``expect`` for the menu, only where the README documents the difference,
+    and ``doc`` is the README bullet that documents it, word for word.
+    ``stands`` is the place the user runs operator in, and ``unreadable``
+    puts a file where the operators directory goes.
     """
     id: str
     expect: dict = field(default_factory=dict)
@@ -191,11 +193,13 @@ class Case:
     menu_expect: dict = field(default_factory=dict)
     doc: str = ""
     stands: str = "here"
+    unreadable: bool = False
 
     def expected(self, surface: str) -> dict:
         want = {
             "events": [],
-            "operators": sorted((name, where) for name, (where, _) in self.given.items()),
+            "operators": sorted((name, where) for name, (where, state)
+                                in self.given.items() if state != "corrupt"),
             "registered": sorted({where for where, _ in self.given.values()}),
             "said": "",
             "waited": 0.0,
@@ -260,6 +264,9 @@ SEVERAL = ("With several operators in this directory, Start an operator leaves "
 LIST_EMPTY = ("`operator list` with no operators says \"No operators yet. Start one "
               "with: operator start\". List operators shows `(none)` under both "
               "headings.")
+LIST_UNREADABLE = ("When it cannot read the operators directory, `operator list` says "
+                   "\"could not read operators\" and exits 1. List operators says so "
+                   "above `(none)` under both headings.")
 RECOVER_LISTS = ("`operator recover` with no names lists the operators that need "
                  "recovering, or says none do. The menu shows how many on its main "
                  "menu row.")
@@ -375,6 +382,18 @@ CASES = [
          expect={"said": "No operators yet. Start one with: operator start"},
          menu_expect={"said": "Running:\n(none)\nOffline:\n(none)"},
          doc=LIST_EMPTY),
+    Case("list-corrupt", given={**BUSY, "zulu": ("here", "corrupt")}, answer="screen",
+         argv=(["list"],),
+         menu=("List operators",),
+         expect={"said": "Running:\n1. alpha  (<here>)\nOffline:\n1. bravo  (<there>)\n"
+                         "could not read <home>/operators/zulu.json"}),
+    Case("list-unreadable", unreadable=True, code=1, answer="screen",
+         argv=(["list"],),
+         menu=("List operators",),
+         expect={"said": "could not read operators"},
+         menu_expect={"said": "Running:\n(none)\nOffline:\n(none)\n"
+                              "could not read operators"},
+         doc=LIST_UNREADABLE),
     Case("attach", given=BUSY,
          argv=(["attach", "alpha"],),
          menu=("List operators", "alpha", "Attach"), leaves=True,
@@ -594,9 +613,16 @@ class World:
         import operators
         from operator_cli import project
         for name, (where, state) in case.given.items():
-            assert state in ("offline", "running", "between", "starting", "slow"), state
+            assert state in ("offline", "running", "between", "starting", "slow",
+                             "corrupt"), state
             directory = self.places[where]
             assert project.ensure_registered(str(directory))[0] == 0
+            if state == "corrupt":
+                # A record file that no longer holds a record.
+                operators.records_dir().mkdir(parents=True, exist_ok=True)
+                (operators.records_dir() / f"{name}.json").write_text(
+                    "{not json", encoding="utf-8")
+                continue
             record = operators.create(name, directory)
             if state == "running":
                 self._run(record.id, directory)
@@ -614,6 +640,9 @@ class World:
                                      encoding="utf-8")
         if case.seated:
             _seat(self.monkeypatch, operators.find(case.seated))
+        if case.unreadable:
+            operators.records_dir().parent.mkdir(parents=True, exist_ok=True)
+            operators.records_dir().write_text("", encoding="utf-8")
         self.monkeypatch.chdir(self.places[case.stands])
         self.capsys.readouterr()
 
@@ -712,7 +741,9 @@ def test_every_way_leaves_its_cases_outcome(world, case, argv):
             # The menu stayed open, so there is no exit code to compare. STAYS.
             assert text == ""
             landed = robot.landed
-            said = "\n".join(landed.rows) if case.answer == "screen" else landed.status
+            said = landed.status
+            if case.answer == "screen":
+                said = "\n".join([*landed.rows, landed.status]).strip()
     assert world.outcome(said) == case.expected(surface)
 
 

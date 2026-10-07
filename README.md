@@ -66,6 +66,7 @@ Each menu choice that runs a command calls the same handler as the typed command
 - With several operators in this directory, Start an operator leaves the name empty and asks for one. `operator start` with no name lists them and exits 2.
 - The list screen offers Attach and Stop for a running operator, and Start, Start and attach, Rename and Delete for a stopped one. For a running operator, `operator rename` renames it, `operator start NAME --attach` attaches, and `operator start NAME` and `operator delete` refuse. For a stopped operator, `operator attach` refuses and `operator stop` prints "stop requested for NAME" with nothing to stop.
 - `operator list` with no operators says "No operators yet. Start one with: operator start". List operators shows `(none)` under both headings.
+- When it cannot read the operators directory, `operator list` says "could not read operators" and exits 1. List operators says so above `(none)` under both headings.
 - `operator recover` with no names lists the operators that need recovering, or says none do. The menu shows how many on its main menu row.
 - A choice that keeps the menu open shows the command's message on the screen and has no exit code. The typed command prints the message and exits non-zero when it fails.
 

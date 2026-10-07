@@ -221,8 +221,10 @@ def action_screen(item, keys, render, actions):
 def list_screen(keys, render, actions):
     status = ""
     while True:
-        rows, found = _list_rows(*actions.sections())
-        picked = select("Operators", rows, keys, render, status=status)
+        running, offline, problems = actions.sections()
+        rows, found = _list_rows(running, offline)
+        picked = select("Operators", rows, keys, render,
+                        status="\n".join([*problems, status]))
         if picked is None:
             return ""
         done = action_screen(found[picked], keys, render, actions)
