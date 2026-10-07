@@ -87,7 +87,7 @@ operator recover --all        bring every one of them back
 operator handoff --status "what you did" [--next "what is next"]
 ```
 
-NAME can also be the operator's id. A command that operator prints for you to type uses the id when a shell would change the name even inside quotes, as it would a name holding `$` or `%`.
+NAME can also be the operator's id. operator ignores spaces around NAME, as it does when it stores a name, so `" alpha "` means `alpha` in every verb. A command that operator prints for you to type uses the id when a shell would change the name even inside quotes, as it would a name holding `$` or `%`.
 
 `operator start` without NAME starts the operator already working in this directory, or creates one named after the directory. When several work here, it lists them and exits 2. `--attach` attaches this terminal once the operator has a session, and exits 1 when none appears within 2 seconds, as between two sessions. When the operator is already running, `--attach` attaches to it. With `--fresh`, a Copilot option or a task, it says the operator is already running and exits 1.
 
