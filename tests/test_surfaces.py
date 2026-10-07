@@ -967,6 +967,16 @@ def _careless() -> MenuActions:
     return actions
 
 
+def _one_screen(*labels):
+    """A menu of one screen showing ``labels``, where only the first row acts."""
+    def run(keys, render, actions):
+        if menu.select("operator", [menu.Row(label) for label in labels],
+                       keys, render) == 0:
+            actions.stop(["alpha"])
+        return 0
+    return run
+
+
 @dataclass(frozen=True)
 class Walk:
     items: frozenset
@@ -983,26 +993,26 @@ class Walk:
 
 @cache
 def _walk(states=(("idle", MenuActions), ("busy", _busy), ("many", _many),
-                  ("refusing", _refusing))) -> Walk:
+                  ("refusing", _refusing)), run=menu.run) -> Walk:
     """Every choice the menu offers, as the state and the path it was found in,
     and what the walk saw on the way.
 
-    By default the walk drives fake verbs in four states: no operators, one of
-    each kind, two of each kind, and a start that refuses the name. It takes
-    shorter paths first. It surveys each screen it lands on by pressing Down
-    until the highlight has visited every row, and it enters every row the
-    first time it lands on that screen in a state. When it lands there again,
-    after a verb ran, it enters only a row it has not entered there before, and
-    that choice counts under the path that reached it this time. A numbered row
-    is an operator, known by its kind: running, stopped, or one in a box. The
-    walk enters it but does not count it as an item, and it also ticks a row
-    with a box and presses Enter. Any other row is a choice by its whole text,
-    less the count on COUNTED, and no two rows on a screen may be one choice.
-    On a screen with no highlight, a text box or a question, it presses Enter
-    and, separately, y, the first time it lands there for the operators its
-    path picked. When the menu leaves, the walk runs what it left to run. A
-    screen whose title differs on every visit would keep the walk going for
-    ever, so it fails after WALK_LIMIT paths in one state.
+    By default the walk drives menu.run over fake verbs in four states: no
+    operators, one of each kind, two of each kind, and a start that refuses the
+    name. It takes shorter paths first. It surveys each screen it lands on by
+    pressing Down until the highlight has visited every row, and it enters
+    every row the first time it lands on that screen in a state. When it lands
+    there again, after a verb ran, it enters only a row it has not entered
+    there before, and that choice counts under the path that reached it this
+    time. A numbered row is an operator, known by its kind: running, stopped,
+    or one in a box. The walk enters it but does not count it as an item, and
+    it also ticks a row with a box and presses Enter. Any other row is a choice
+    by its whole text, less the count on COUNTED, and no two rows on a screen
+    may be one choice. On a screen with no highlight, a text box or a question,
+    it presses Enter and, separately, y, the first time it lands there for the
+    operators its path picked. When the menu leaves, the walk runs what it left
+    to run. A screen whose title differs on every visit would keep the walk
+    going for ever, so it fails after WALK_LIMIT paths in one state.
 
     It also keeps the menu.py lines that ran, each title, row and status drawn,
     each argv token a fake verb received, each str a screen function returned,
@@ -1044,7 +1054,7 @@ def _walk(states=(("idle", MenuActions), ("busy", _busy), ("many", _many),
                 path, named = todo.popleft()
                 robot = Robot(path, then=["down"] * 12)
                 actions = make()
-                left = menu.run(robot.keys(), robot.render, actions)
+                left = run(robot.keys(), robot.render, actions)
                 if isinstance(left, menu.Leave):
                     with redirect_stdout(io.StringIO()):
                         left.call()
@@ -1295,6 +1305,17 @@ def test_the_walk_sees_a_verb_act_on_another_operator():
         (("stop", NAME),), (("stop", "alpha"),)}
     assert commands[("List operators", OFFLINE, "Rename", ENTER)] == {
         (("rename", NAME, NAME),), (("rename", "bravo", NAME),)}
+
+
+def test_the_walk_takes_a_row_with_a_count_as_a_choice_of_its_own():
+    """A positive control for the walk's rows. Where one row is another plus a
+    count, the walk enters both, and finds each by its whole text. Where two
+    rows on a screen are one choice, the walk fails."""
+    walk = _walk((("idle", MenuActions),), run=_one_screen("Quit (1)", "Quit"))
+    assert sorted(path for _, path in walk.items) == [("Quit",), ("Quit (1)",)]
+    assert walk.commands == {("idle", ("Quit (1)",), (("stop", "alpha"),))}
+    with pytest.raises(AssertionError, match="Two rows on 'operator' offer one choice"):
+        _walk((("idle", MenuActions),), run=_one_screen(f"{COUNTED} (2)", f"{COUNTED} (1)"))
 
 
 def test_the_screens_branch_only_in_statements():
