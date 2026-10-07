@@ -10,20 +10,21 @@ The meta-tests at the bottom fail when a verb, an option or a menu item has no
 case, and when the README tables disagree with the cases. A verb escapes when
 main answers a word that no str literal in operator_cli spells, as when it is
 built from pieces or imported. The meta-tests find menu items by walking the
-menu with fake verbs in four states. A choice none of those states shows still
-escapes when no statement of its own guards it and the walk sees its label
-elsewhere, as when an index computed from data picks it. A key or any other
+menu with fake verbs in four states. A choice or a command none of those
+states shows still escapes when no statement of its own guards it and the walk
+sees its label or its arguments elsewhere, as when an index computed from data
+picks it. A key or any other
 branch inside the input loops that menu.py's screens are built on escapes too,
 and so does code outside menu.py. An option escapes when it is built from
 pieces or when code outside operator_cli parses it. The option scan skips
 NOT_TYPED, whose options no person types, so an option only they spell needs
 no case. One that operator_cli imports from another package fails a test of
-its own when it sits, however deep, in a collection, in an object's attributes,
+its own when it sits, however deep, in a collection, in an object's __dict__,
 or in an attribute or slot that a class of ours declares. That test also fails
 on a spelling that operator_cli imports and never parses. It escapes when it
 exists only once code has run, as a property's value does, sits anywhere else,
-such as in a function's defaults or closure, or is reached by a name built when
-the code runs.
+such as in a function's defaults or closure or a functools.partial's
+arguments, or is reached by a name built when the code runs.
 
 The README tests read the map table, the first column of each one-sided table
 and the bullets under Where they behave differently. A one-sided row must give
@@ -288,6 +289,10 @@ LIST_SCREEN = ("The list screen offers Attach and Stop for a running operator, a
                "`operator stop` prints \"stop requested for NAME\" with nothing to stop.")
 RUNNING_ROWS = "Attach\nStop"
 STOPPED_ROWS = "Start\nStart and attach\nRename\nDelete"
+DELETE_ASKS = ("Delete on the list screen asks \"Delete? [y/N]\" and deletes on the "
+               "key y or Y. `operator delete NAME` without `--yes` asks the same in "
+               "a terminal and deletes on y or yes, in any case, then Enter. Without "
+               "a terminal it exits 2 and says to pass `--yes`.")
 
 CASES = [
     Case("start-here-new",
@@ -360,6 +365,9 @@ CASES = [
          argv=(["start", "--name"], ["start", "--name=", "--attach"],
                ["start", "--name", " ", "--attach"]),
          expect={"said": "operator start --name needs a value"}),
+    Case("start-agent-needs-value", code=2,
+         argv=(["start", "--agent"], ["start", "--agent", " ", "fix"]),
+         expect={"said": "operator start --agent needs a value"}),
     Case("start-bad-name", code=2,
          argv=(["start", "--name=-x", "--attach"],),
          menu=("Start an operator", Text("-x")),
@@ -407,6 +415,11 @@ CASES = [
          menu=("List operators",),
          expect={"said": "Running:\n1. alpha  (<here>)\nOffline:\n1. bravo  (<there>)\n"
                          "could not read <home>/operators/zulu.json"}),
+    Case("list-only-corrupt", given={"zulu": ("here", "corrupt")}, answer="screen",
+         argv=(["list"],),
+         menu=("List operators",),
+         expect={"said": "Running:\n(none)\nOffline:\n(none)\n"
+                         "could not read <home>/operators/zulu.json"}),
     Case("list-unreadable", unreadable=True, code=1, answer="screen",
          argv=(["list"],),
          menu=("List operators",),
@@ -442,6 +455,12 @@ CASES = [
          menu=("List operators", "bravo", "Delete", Key("y")),
          expect={"operators": [("alpha", "here")], "registered": ["here"],
                  "said": "deleted bravo"}),
+    Case("delete-declined", given=BUSY, code=2,
+         argv=(["delete", "bravo"],),
+         menu=("List operators", "bravo", "Delete", Key("n")),
+         expect={"said": "pass --yes to delete without a terminal"},
+         menu_expect={"said": ""},
+         doc=DELETE_ASKS),
     Case("rename-running", given=BUSY, answer="screen",
          argv=(["rename", "alpha", "zed"],),
          menu=("List operators", "alpha"),
@@ -517,6 +536,9 @@ CASES = [
     Case("delete-help",
          argv=(["delete", "--help"], ["delete", "-h"]),
          expect={"said": DELETE_USAGE}),
+    Case("delete-unknown-option", given=BUSY, code=2,
+         argv=(["delete", "bravo", "--force"],),
+         expect={"said": "unknown option: --force"}),
     Case("help",
          argv=(["--help"], ["-h"], ["help"]),
          expect={"said": HELP}),
@@ -525,6 +547,9 @@ CASES = [
                ["--home=<other-home>", "start", "alpha"]),
          expect={"events": [spawned("alpha", home="other-home")],
                  "said": "started alpha (pid 41)"}),
+    Case("home-needs-value", code=2,
+         argv=(["--home"], ["list", "--home"]),
+         expect={"said": "operator --home needs a directory"}),
     Case("recover-all", given=IDLE_HERE, recoverable=("alpha",),
          argv=(["recover", "--all"],),
          expect={"events": [spawned("alpha")],
@@ -803,15 +828,23 @@ VERB_OF = {fn.__name__: verb for verb, fn in cli.HANDLERS.items()
            if fn.__module__ == cli.__name__}
 
 
+def _rest(argv) -> list:
+    """What main hands the front door once --home is gone. Nothing when main
+    refuses a --home with no directory."""
+    try:
+        return cli._peel_home(list(argv))[1]
+    except SystemExit:
+        return []
+
+
 def _verb(argv) -> "str | None":
-    rest = cli._peel_home(list(argv))[1]
+    rest = _rest(argv)
     return rest[0] if rest and rest[0] in cli.HANDLERS else None
 
 
 def _words(cases) -> set:
     """The first word each argv hands the front door once --home is gone."""
-    return {word for case in cases for argv in case.argv
-            for word in cli._peel_home(list(argv))[1][:1]}
+    return {word for case in cases for argv in case.argv for word in _rest(argv)[:1]}
 
 
 def _front_words() -> set:

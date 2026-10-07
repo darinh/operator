@@ -56,7 +56,7 @@ def _load(path: Path) -> Operator | None:
     if not all(isinstance(value, str) and value
                for value in (op_id, name, cwd, created)):
         return None
-    if path.stem != op_id:
+    if path.stem != op_id or name != name.strip():
         return None
     return Operator(op_id, name, cwd, created)
 

@@ -69,3 +69,16 @@ def test_all_operators_skips_a_corrupt_file_and_names_it(tmp_path):
     broken.write_text("{not json", encoding="utf-8")
     assert operators.all_operators() == [kept]
     assert operators.unreadable() == [broken]
+
+
+def test_a_record_whose_name_has_spaces_around_it_is_unreadable(tmp_path):
+    """create and rename never store one, and find strips what it is given, so
+    no verb could reach it by the name the list would show."""
+    kept = operators.create("alpha", tmp_path)
+    padded = operators.records_dir() / "op-padded1.json"
+    padded.write_text(json.dumps({"id": "op-padded1", "name": " alpha ",
+                                  "cwd": str(tmp_path), "created": "2026-10-07"}),
+                      encoding="utf-8")
+    assert operators.all_operators() == [kept]
+    assert operators.unreadable() == [padded]
+    assert operators.find(" alpha ") == kept

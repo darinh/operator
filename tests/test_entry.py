@@ -253,10 +253,10 @@ def test_a_menu_started_operator_exports_the_home_its_child_reads(
     assert seen == {"home": str(tmp_path / ".operator")}
 
 
-def test_dispatch_settles_the_home_for_every_typed_verb(monkeypatch):
-    """Each handler records the home it finds. The loop reads `HANDLERS`, so a
-    verb added later is checked too. The menu settles in `_interactive`, which
-    the test above covers.
+def test_dispatch_settles_the_home_for_every_typed_verb(monkeypatch, tmp_path):
+    """Each handler records the home it finds, first with no --home and then
+    with one. The loops read `HANDLERS`, so a verb added later is checked too.
+    The menu settles in `_interactive`, which the test above covers.
     """
     seen = {}
 
@@ -271,6 +271,10 @@ def test_dispatch_settles_the_home_for_every_typed_verb(monkeypatch):
         monkeypatch.delenv("COPILOT_OPERATOR_HOME", raising=False)
         assert cli.dispatch([verb]) == 0
     assert seen == dict.fromkeys(cli.HANDLERS, str(Path.home() / ".operator"))
+    for verb in cli.HANDLERS:
+        monkeypatch.delenv("COPILOT_OPERATOR_HOME", raising=False)
+        assert cli.dispatch([verb], home=str(tmp_path)) == 0
+    assert seen == dict.fromkeys(cli.HANDLERS, str(tmp_path))
 
 
 def test_a_typed_home_still_reaches_the_child(monkeypatch, tmp_path):
@@ -589,6 +593,21 @@ def test_delete_without_yes_and_no_tty_refuses(tmp_path, capsys):
     assert cli.main(["delete", "alpha"]) == 2
     assert "pass --yes to delete without a terminal" in capsys.readouterr().err
     assert operators.find("alpha") is not None
+
+
+def test_delete_in_a_terminal_deletes_only_on_y_or_yes(tmp_path, monkeypatch, capsys):
+    import builtins
+    import operators
+    from operator_cli import argv as _argv
+    monkeypatch.setattr(_argv, "isatty", lambda stream: True)
+    for answer, deleted in (("n", False), ("", False), ("no", False), ("yep", False),
+                            ("y", True), ("Y", True), ("yes", True), (" YES ", True)):
+        operators.create("alpha", tmp_path)
+        monkeypatch.setattr(builtins, "input", lambda prompt: answer)
+        assert cli.main(["delete", "alpha"]) == (0 if deleted else 1), answer
+        assert (operators.find("alpha") is None) == deleted, answer
+        if not deleted:
+            operators.remove(operators.find("alpha"))
 
 
 def test_delete_yes_removes_record_state_and_handoff(tmp_path, monkeypatch, capsys):
