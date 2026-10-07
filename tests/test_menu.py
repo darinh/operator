@@ -126,7 +126,7 @@ def test_select_skips_headings_and_esc_returns_none():
     assert board.frames[1]["highlight"] == 1
 
 
-def test_confirm_takes_only_y_as_yes():
+def test_only_y_or_Y_confirms():
     for key, said in (("y", True), ("Y", True), ("n", False), ("enter", False),
                       ("esc", False), ("q", False)):
         assert confirm(["Delete? [y/N]"], iter([key]), Board()) is said, key

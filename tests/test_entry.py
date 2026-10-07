@@ -254,15 +254,23 @@ def test_a_menu_started_operator_exports_the_home_its_child_reads(
 
 
 def test_dispatch_settles_the_home_for_every_typed_verb(monkeypatch):
-    """Every typed verb reaches its handler through `dispatch`, so settling
-    there covers verbs added later too. The menu settles in `_interactive`,
-    which the test above covers.
+    """Each handler records the home it finds. The loop reads `HANDLERS`, so a
+    verb added later is checked too. The menu settles in `_interactive`, which
+    the test above covers.
     """
-    import supervisor_control
-    monkeypatch.setattr(supervisor_control, "active_instances", lambda: [])
-    monkeypatch.delenv("COPILOT_OPERATOR_HOME", raising=False)
-    assert cli.dispatch(["list"]) == 0
-    assert os.environ["COPILOT_OPERATOR_HOME"] == str(Path.home() / ".operator")
+    seen = {}
+
+    def recorder(verb):
+        def handler(rest):
+            seen[verb] = os.environ.get("COPILOT_OPERATOR_HOME")
+            return 0
+        return handler
+
+    for verb in list(cli.HANDLERS):
+        monkeypatch.setitem(cli.HANDLERS, verb, recorder(verb))
+        monkeypatch.delenv("COPILOT_OPERATOR_HOME", raising=False)
+        assert cli.dispatch([verb]) == 0
+    assert seen == dict.fromkeys(cli.HANDLERS, str(Path.home() / ".operator"))
 
 
 def test_a_typed_home_still_reaches_the_child(monkeypatch, tmp_path):
