@@ -259,7 +259,7 @@ CASES = [
          menu=("Start an operator", ENTER), leaves=True,
          expect={"events": [spawned("demo"), attached("demo")],
                  "operators": [("demo", "here")], "registered": ["here"],
-                 "said": REGISTERED + "\nstarted demo (pid 41)"}),
+                 "said": REGISTERED + "\nstarted demo (pid 41)", "waited": 0.05}),
     Case("start-typed-name",
          argv=(["start", "--name", "new", "--attach"],
                ["start", "new", "--attach"],
@@ -267,12 +267,12 @@ CASES = [
          menu=("Start an operator", Text("new")), leaves=True,
          expect={"events": [spawned("new"), attached("new")],
                  "operators": [("new", "here")], "registered": ["here"],
-                 "said": REGISTERED + "\nstarted new (pid 41)"}),
+                 "said": REGISTERED + "\nstarted new (pid 41)", "waited": 0.05}),
     Case("start-here-existing", given=IDLE_HERE,
          argv=(["start", "--attach"],),
          menu=("Start an operator", ENTER), leaves=True,
          expect={"events": [spawned("alpha"), attached("alpha")],
-                 "said": "started alpha (pid 41)"}),
+                 "said": "started alpha (pid 41)", "waited": 0.05}),
     Case("start-here-running", given={"alpha": ("here", "running")},
          argv=(["start", "--attach"], ["start", "alpha", "--attach"]),
          menu=("Start an operator", ENTER), leaves=True,
@@ -294,6 +294,13 @@ CASES = [
          menu=("Start an operator", ENTER), leaves=True,
          expect={"events": [attached("alpha")],
                  "said": "alpha is already running", "waited": 0.05}),
+    Case("start-here-slow", given={"alpha": ("here", "slow")}, code=1,
+         argv=(["start", "--attach"],),
+         menu=("Start an operator", ENTER), leaves=True,
+         expect={"events": [spawned("alpha")],
+                 "said": "started alpha (pid 41)\nalpha has no session to "
+                         "attach to yet. Try again: operator attach alpha",
+                 "waited": 2.0}),
     Case("start-several-here", code=2,
          given={"alpha": ("here", "offline"), "bravo": ("here", "running")},
          argv=(["start", "--attach"], ["start"]),
@@ -318,8 +325,8 @@ CASES = [
          argv=(["start", "bravo", "--attach"],),
          menu=("Start an operator", Text("bravo")),
          expect={"events": [spawned("bravo", "there"), attached("bravo")],
-                 "said": "started bravo (pid 41)"},
-         menu_expect={"events": [],
+                 "said": "started bravo (pid 41)", "waited": 0.05},
+         menu_expect={"events": [], "waited": 0.0,
                       "said": "bravo already works in <there>. Choose another name."},
          doc=TAKEN),
     Case("start-here-taken-elsewhere", given={"demo": ("there", "offline")}, code=2,
@@ -356,7 +363,7 @@ CASES = [
          argv=(["start", "bravo", "--attach"],),
          menu=("List operators", "bravo", "Start and attach"), leaves=True,
          expect={"events": [spawned("bravo", "there"), attached("bravo")],
-                 "said": "started bravo (pid 41)"}),
+                 "said": "started bravo (pid 41)", "waited": 0.05}),
     Case("rename", given=BUSY,
          argv=(["rename", "bravo", "charlie"],),
          menu=("List operators", "bravo", "Rename", Text("charlie")),
@@ -497,6 +504,7 @@ class World:
         self.recoverable: tuple = ()
         self.between: set = set()
         self.starting: list = []
+        self.slow: set = set()
         self.waited_ms = 0
 
         def sleep(seconds):
@@ -508,7 +516,10 @@ class World:
             self.events.append(spawned(
                 instance.display_name, self.place(cwd), copilot_args, is_fresh,
                 self.place(os.environ["COPILOT_OPERATOR_HOME"])))
-            self._run(instance.session, cwd)
+            # A real supervisor publishes its pid before it opens its session.
+            self.between.add(instance.id)
+            if instance.id not in self.slow:
+                self.starting.append((instance.session, cwd))
             return 41
 
         def stop(instance, *_):
@@ -529,7 +540,8 @@ class World:
         monkeypatch.setattr(supervisor_control, "launch_status",
                             lambda inst, pid, **k: ("ready", pid))
         # A supervisor between sessions is alive and has no session. A starting
-        # one gets its session the first time the clock moves.
+        # one, or one start spawns, gets its session the first time the clock
+        # moves, unless its operator is slow.
         monkeypatch.setattr(supervisor_control, "_running_loop_pid", lambda inst: (
             43 if inst.id in self.between else loop_pid(inst)))
         # The session wait runs whole on a clock that only sleeping moves, so a
@@ -553,7 +565,7 @@ class World:
         import operators
         from operator_cli import project
         for name, (where, state) in case.given.items():
-            assert state in ("offline", "running", "between", "starting"), state
+            assert state in ("offline", "running", "between", "starting", "slow"), state
             directory = self.places[where]
             assert project.ensure_registered(str(directory))[0] == 0
             record = operators.create(name, directory)
@@ -563,6 +575,8 @@ class World:
                 self.between.add(record.id)
             if state == "starting":
                 self.starting.append((record.id, directory))
+            elif state == "slow":
+                self.slow.add(record.id)
         self.recoverable = case.recoverable
         if case.seated:
             _seat(self.monkeypatch, operators.find(case.seated))
@@ -673,7 +687,8 @@ def test_start_an_operator_in_a_new_directory_starts_attaches_and_lists_it(
     robot, code, _ = world.drive(("Start an operator", ENTER))
     assert robot.landed is None
     assert code == 0
-    assert [event[0] for event in world.events] == ["spawn", "attach"]
+    assert world.events == [spawned("demo"), attached("demo")]
+    assert world.waited_ms == 50
     assert cli.main(["list"]) == 0
     assert world.scrub(capsys.readouterr().out) == (
         "Running:\n  1. demo  (<here>)\nOffline:\n  (none)\n")
