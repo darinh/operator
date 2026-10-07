@@ -201,6 +201,36 @@ def test_a_name_with_a_space_is_quoted_in_what_it_tells_you_to_type(
     ]
 
 
+@pytest.mark.parametrize("name", ["$HOME", 'a"b', "%PATH%", "back`tick", "wow!",
+                                  "dir\\", "\u201csmart\u201d"])
+def test_a_name_a_shell_would_change_is_typed_as_its_id(
+        tmp_path, monkeypatch, capsys, name):
+    import supervisor_control
+    record = operators.create(name, tmp_path)
+    monkeypatch.setattr(supervisor_control, "active_instances",
+                        lambda: [record.instance()])
+    monkeypatch.setattr(supervisor_control, "wait_for_session", lambda instance: False)
+    assert lifecycle.start([name, "--attach"]) == 1
+    assert lifecycle.delete([name, "--yes"]) == 1
+    assert capsys.readouterr().err.splitlines() == [
+        f"{name} has no session to attach to yet. "
+        f"Try again: operator attach {record.id}",
+        f"stop it first: operator stop {record.id}",
+    ]
+
+
+def test_the_operators_here_show_a_name_beside_the_id_to_type(
+        tmp_path, monkeypatch, capsys):
+    home = operators.create("$HOME", tmp_path)
+    operators.create("bravo", tmp_path)
+    monkeypatch.chdir(tmp_path)
+    assert lifecycle.start([]) == 2
+    assert capsys.readouterr().err.splitlines() == [
+        f"2 operators work here: {home.id} ($HOME), bravo",
+        "pass a name: operator start NAME",
+    ]
+
+
 def test_delete_keeps_the_project_when_a_sibling_record_will_not_load(
         tmp_path, monkeypatch):
     import paths

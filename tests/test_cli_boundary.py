@@ -40,8 +40,11 @@ CLI = REPO / "operator_cli"
 # Raised to 1279/1634 when the commands operator prints quote a name that is
 # not one plain word, so a name with a space pastes back as one argument. Both
 # are the measured sizes.
-MAX_CLI_CODE_LINES = 1279
-MAX_CLI_TOTAL_LINES = 1634
+# Raised to 1284/1643 when those commands type an operator by its id if a shell
+# would change its name even inside quotes, and the list of operators in one
+# directory shows the name beside that id. Both are the measured sizes.
+MAX_CLI_CODE_LINES = 1284
+MAX_CLI_TOTAL_LINES = 1643
 
 
 def cli_modules() -> list[Path]:

@@ -23,19 +23,19 @@ def _same_cwd(recorded: str, current) -> bool:
     return _cwd_match(recorded, current) is True
 
 
-def _here() -> "list[str]":
+def _here() -> list:
     import operators
     here = Path.cwd()
-    return [record.name for record in operators.all_operators() or []
+    return [record for record in operators.all_operators() or []
             if _same_cwd(record.cwd, here)]
 
 
 def default_name() -> str:
     """The operator working here, or else this directory's name. Empty if several."""
-    names = _here()
-    if len(names) > 1:
+    here = _here()
+    if len(here) > 1:
         return ""
-    return names[0] if names else Path.cwd().name
+    return here[0].name if here else Path.cwd().name
 
 
 def _named(rest: list[str]) -> str:
@@ -45,9 +45,18 @@ def _named(rest: list[str]) -> str:
     return ""
 
 
-def _typed(name: str) -> str:
-    """``name`` as a command takes it. Quoted unless it is one plain word."""
-    return name if re.fullmatch(r"[\w.-]+", name) else f'"{name}"'
+def _typed(record) -> str:
+    """How to type ``record`` in a command: its id when a shell would change
+    the name even inside quotes, else the name, quoted unless one plain word."""
+    if re.search('["$%!\\\\`\u201c\u201d\u201e]', record.name):
+        return record.id
+    return record.name if re.fullmatch(r"[\w.-]+", record.name) else f'"{record.name}"'
+
+
+def _listed(record) -> str:
+    """``record`` in a list of what to type, with its name beside an id."""
+    typed = _typed(record)
+    return f"{typed} ({record.name})" if typed == record.id else typed
 
 
 def start(rest: list[str]) -> int:
@@ -102,7 +111,7 @@ def start(rest: list[str]) -> int:
     if not explicit:
         here = _here()
         if len(here) > 1:
-            print(f"{len(here)} operators work here: {', '.join(map(_typed, here))}",
+            print(f"{len(here)} operators work here: {', '.join(map(_listed, here))}",
                   file=sys.stderr)
             print("pass a name: operator start NAME", file=sys.stderr)
             return 2
@@ -160,7 +169,7 @@ def _attach_when_up(record) -> int:
     from supervisor_control import wait_for_session
     if not wait_for_session(record.instance()):
         print(f"{record.name} has no session to attach to yet. "
-              f"Try again: operator attach {_typed(record.name)}", file=sys.stderr)
+              f"Try again: operator attach {_typed(record)}", file=sys.stderr)
         return 1
     return attach([record.name])
 
@@ -262,7 +271,7 @@ def delete(rest: list[str]) -> int:
     inst = record.instance()
     if (any(item.id == record.id for item in active_instances())
             or _supervisor_present(inst) is not None):
-        print(f"stop it first: operator stop {_typed(record.name)}", file=sys.stderr)
+        print(f"stop it first: operator stop {_typed(record)}", file=sys.stderr)
         return 1
     if not yes:
         from . import argv as _argv
