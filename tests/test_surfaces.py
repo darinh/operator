@@ -702,7 +702,8 @@ def test_start_an_operator_in_a_new_directory_starts_attaches_and_lists_it(
 
 # ── nothing left behind ─────────────────────────────────────────
 
-OPTION = re.compile(r"^-{1,2}[A-Za-z][\w-]*=?$")
+#: -h, --name=, -? and /? are options. -, -- and /dev/null are not.
+OPTION = re.compile(r"^(?:--?|/)(?!-)[^\s=/]+=?$")
 #: Their option literals are not typed by a person. menu.py builds argv for the
 #: verbs, and supervise.py parses what `operator start` hands its child.
 NOT_TYPED = ("supervise.py", "menu.py")
@@ -733,7 +734,7 @@ def _words(cases) -> set:
 
 
 def _front_words() -> set:
-    return set(cli.HANDLERS) | {word for word in cli.HELP_WORDS if word[0] != "-"}
+    return set(cli.HANDLERS) | {word for word in cli.HELP_WORDS if not OPTION.match(word)}
 
 
 def _node_name(node) -> "str | None":
@@ -810,8 +811,8 @@ def _typed_by_cases(cases) -> set:
             for token in argv:
                 if token == "--":
                     break
-                if token.startswith("-"):
-                    spelling = token[:token.index("=") + 1] if "=" in token else token
+                spelling = token[:token.index("=") + 1] if "=" in token else token
+                if OPTION.match(spelling):
                     pairs.add((None if _peeled(spelling) else verb, spelling))
     return pairs
 
