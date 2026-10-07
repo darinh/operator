@@ -94,12 +94,20 @@ class Frame:
 
 
 _MARKS = re.compile(r"^(\[[ x]\] )?(\d+\. )?")
+#: The one row whose text carries a count. It is one choice whatever the count.
+COUNTED = "Recover operator sessions"
+
+
+def _choice(label: str) -> str:
+    """The choice a row offers: its whole text, less the count on COUNTED."""
+    stem = re.sub(r" \(\d+\)$", "", label)
+    return stem if stem == COUNTED else label
 
 
 def _shows(row: str, label: str) -> bool:
     """Whether ``row`` is the row for ``label``, ignoring its number and details."""
     bare = _MARKS.sub("", row, count=1)
-    return bare == label or bare.startswith((label + " (", label + "  ("))
+    return _choice(bare) == label or bare.startswith(label + "  (")
 
 
 class Robot:
@@ -732,10 +740,11 @@ DATA_ROW = re.compile(r"^(?:\[[ x]\] )?\d+\. (.+?)(?:  \(.*)?$")
 #: menu.py's input loops. tests/test_menu.py drives their keys; the walk need
 #: not run every line of them, only every line of the screens built on them.
 PRIMITIVES = ("render", "select", "multi_select", "confirm", "ask_text", "_captured")
-#: The most paths the walk may take in one state. The many state takes 33.
+#: The most paths the walk may take in one state. The many state takes 35.
 WALK_LIMIT = 100
 #: How a path names an operator: by the section of the list it is in, or, when
-#: a box is ticked for it, as a name. A command names every operator NAME.
+#: a box is ticked for it, as a name. In a command, each operator the path
+#: picked is NAME.
 RUNNING, OFFLINE, NAME = "<running>", "<offline>", "<name>"
 COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 #: The verbs whose handlers live in entry.py, by function name.
@@ -948,6 +957,16 @@ def _refusing() -> MenuActions:
     return actions
 
 
+def _careless() -> MenuActions:
+    """The many state, but Stop and Rename act on the first operator of their
+    section, whichever one they were given."""
+    actions = _many()
+    stop, rename = actions.stop, actions.rename
+    actions.stop = lambda argv: stop([actions.running[0].name])
+    actions.rename = lambda argv: rename([actions.offline[0].name, argv[1]])
+    return actions
+
+
 @dataclass(frozen=True)
 class Walk:
     items: frozenset
@@ -963,28 +982,33 @@ class Walk:
 
 
 @cache
-def _walk() -> Walk:
+def _walk(states=(("idle", MenuActions), ("busy", _busy), ("many", _many),
+                  ("refusing", _refusing))) -> Walk:
     """Every choice the menu offers, as the state and the path it was found in,
     and what the walk saw on the way.
 
-    The walk drives fake verbs in four states: no operators, one of each kind,
-    two of each kind, and a start that refuses the name. It takes shorter paths
-    first. It surveys each screen it lands on by pressing Down until the
-    highlight has visited every row, and it enters every row the first time it
-    lands on that screen in a state. When it lands there again, after a verb
-    ran, it enters only a row it has not entered there before, and that choice
-    counts under the path that reached it this time. A numbered row is an
-    operator, known by its kind: running, stopped, or one in a box. The walk
-    enters it but does not count it as an item, and it also ticks a row with a
-    box and presses Enter. A count such as ``(1)`` is dropped. On a screen with
-    no highlight, a text box or a question, it presses Enter and, separately,
-    y, the first time it lands there. When the menu leaves, the walk runs what
-    it left to run. A screen whose title differs on every visit would keep the
-    walk going for ever, so it fails after WALK_LIMIT paths in one state.
+    By default the walk drives fake verbs in four states: no operators, one of
+    each kind, two of each kind, and a start that refuses the name. It takes
+    shorter paths first. It surveys each screen it lands on by pressing Down
+    until the highlight has visited every row, and it enters every row the
+    first time it lands on that screen in a state. When it lands there again,
+    after a verb ran, it enters only a row it has not entered there before, and
+    that choice counts under the path that reached it this time. A numbered row
+    is an operator, known by its kind: running, stopped, or one in a box. The
+    walk enters it but does not count it as an item, and it also ticks a row
+    with a box and presses Enter. Any other row is a choice by its whole text,
+    less the count on COUNTED, and no two rows on a screen may be one choice.
+    On a screen with no highlight, a text box or a question, it presses Enter
+    and, separately, y, the first time it lands there for the operators its
+    path picked. When the menu leaves, the walk runs what it left to run. A
+    screen whose title differs on every visit would keep the walk going for
+    ever, so it fails after WALK_LIMIT paths in one state.
 
     It also keeps the menu.py lines that ran, each title, row and status drawn,
     each argv token a fake verb received, each str a screen function returned,
-    and (state, path, command) for each path that ran a command.
+    and (state, path, command) for each path that ran a command. In a command,
+    NAME stands for each operator the path picked and for the name Start an
+    operator offers. Any other operator a command names keeps its name.
     """
     items, ran = set(), set()
     shown, passed, returned, commands = set(), set(), set(), set()
@@ -1005,12 +1029,11 @@ def _walk() -> Walk:
     previous = sys.gettrace()
     sys.settrace(calls)
     try:
-        for kind, make in (("idle", MenuActions), ("busy", _busy), ("many", _many),
-                           ("refusing", _refusing)):
+        for kind, make in states:
             given = make()
             names = {op.name for op in (*given.running, *given.offline)}
             names |= {*given.recoverable, given.default_name()}
-            todo, seen, taken = deque([((), ())]), {}, 0
+            todo, seen, boxes, taken = deque([((), ())]), {}, set(), 0
             while todo:
                 taken += 1
                 assert taken <= WALK_LIMIT, (
@@ -1032,7 +1055,9 @@ def _walk() -> Walk:
                             "recover": actions.recovered, "attach": actions.attached}
                 passed.update(token for calls in received.values() for argv in calls
                               for token in argv)
-                command = tuple((verb, *(NAME if token in names else token
+                picked = {*(label for label in _labels(path) if label in names),
+                          given.default_name()}
+                command = tuple((verb, *(NAME if token in picked else token
                                          for token in argv))
                                 for verb, calls in received.items() for argv in calls)
                 if command:
@@ -1042,17 +1067,21 @@ def _walk() -> Walk:
                     continue
                 section = {op.name: RUNNING for op in actions.running}
                 section.update({op.name: OFFLINE for op in actions.offline})
-                fresh = landed.title not in seen
-                known = seen.setdefault(landed.title, set())
                 if landed.highlight is None:
-                    if fresh:
+                    box = (landed.title, *sorted(picked))
+                    if box not in boxes:
+                        boxes.add(box)
                         todo += [(path + (ENTER,), named + (ENTER,)),
                                  (path + (Key("y"),), named + (Key("y"),))]
                     continue
+                known = seen.setdefault(landed.title, set())
                 survey = robot.frames[robot.landed_at:robot.landed_at + 13]
-                labels = dict.fromkeys(frame.rows[frame.highlight] for frame in survey
-                                       if frame.title == landed.title
-                                       and frame.highlight is not None)
+                labels = list({frame.highlight: frame.rows[frame.highlight]
+                               for frame in survey if frame.title == landed.title
+                               and frame.highlight is not None}.values())
+                choices = [_choice(label) for label in labels if not DATA_ROW.match(label)]
+                assert len(choices) == len(set(choices)), (
+                    f"Two rows on {landed.title!r} offer one choice: {choices}")
                 found = set()
                 for label in labels:
                     data = DATA_ROW.match(label)
@@ -1061,7 +1090,7 @@ def _walk() -> Walk:
                         step = data.group(1)
                         as_named = NAME if boxed else section[step]
                     else:
-                        step = as_named = re.sub(r" \(\d+\)$", "", label)
+                        step = as_named = _choice(label)
                     if as_named in known:
                         continue
                     found.add(as_named)
@@ -1242,9 +1271,10 @@ def test_every_menu_item_has_a_case():
 
 def test_a_menu_path_runs_the_same_command_in_every_state():
     """Where the walk took a path in several states, or for several operators
-    in one, every run that ran a command ran the same one, once each operator's
-    name is NAME. A path may run nothing in one state, as Start an operator
-    does when the name is refused."""
+    in one, every run that ran a command ran the same one, once each operator
+    the path picked is NAME. So a choice that acts on an operator other than
+    the one picked fails. A path may run nothing in one state, as Start an
+    operator does when the name is refused."""
     commands, states = {}, {}
     for state, path, command in _walk().commands:
         commands.setdefault(path, set()).add(command)
@@ -1252,6 +1282,19 @@ def test_a_menu_path_runs_the_same_command_in_every_state():
     assert states[("List operators", OFFLINE, "Start")] == {"busy", "many"}
     assert states[("Start an operator", ENTER)] == {"idle", "busy", "many"}
     assert {path: ran for path, ran in commands.items() if len(ran) > 1} == {}
+
+
+def test_the_walk_sees_a_verb_act_on_another_operator():
+    """A positive control for the test above. When Stop and Rename act on the
+    first operator of their section, whichever one the menu gave them, the
+    walk finds two commands on each of their paths."""
+    commands = {}
+    for _, path, command in _walk((("careless", _careless),)).commands:
+        commands.setdefault(path, set()).add(command)
+    assert commands[("List operators", RUNNING, "Stop")] == {
+        (("stop", NAME),), (("stop", "alpha"),)}
+    assert commands[("List operators", OFFLINE, "Rename", ENTER)] == {
+        (("rename", NAME, NAME),), (("rename", "bravo", NAME),)}
 
 
 def test_the_screens_branch_only_in_statements():
