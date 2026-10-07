@@ -7,8 +7,10 @@ user was told. Where the menu differs on purpose, the case says how and quotes
 the README line that documents it.
 
 The meta-tests at the bottom fail when a verb, an option or a menu item has no
-case, and when the README tables disagree with the cases. They find menu items
-by walking the menu with fake verbs in four states. A choice none of those
+case, and when the README tables disagree with the cases. A verb escapes when
+main answers a word that no str literal in operator_cli spells, as when it is
+built from pieces or imported. The meta-tests find menu items by walking the
+menu with fake verbs in four states. A choice none of those
 states shows still escapes when no statement of its own guards it and the walk
 sees its label elsewhere, as when an index computed from data picks it. A key
 or any other branch inside the input loops that menu.py's screens are built
@@ -1219,6 +1221,28 @@ def _two_sided(case: Case) -> bool:
 def test_every_verb_has_a_case():
     assert "help" in _front_words()
     assert _front_words() - _words(CASES) == set()
+
+
+def _cli_words() -> set:
+    """Each str literal in operator_cli that is not blank and not an option."""
+    return {node.value for path in CLI.rglob("*.py")
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+            and node.value.strip() and not node.value.startswith("-")}
+
+
+def test_no_other_word_is_a_command(world):
+    """The test above takes the commands from HANDLERS and HELP_WORDS, so a
+    word that main or dispatch answered some other way would escape it. Typed
+    as a command, every other word operator_cli spells is unknown."""
+    words = _cli_words()
+    assert {"doctor", "Quit", "List operators"} <= words
+    answered = {}
+    for word in sorted(words - _front_words()):
+        code, text = world.typed([word])
+        if code != 2 or not text.startswith(f"unknown command: {word}\n"):
+            answered[word] = (code, text[:80])
+    assert answered == {}
 
 
 def test_every_option_has_a_case():
