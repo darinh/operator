@@ -710,6 +710,8 @@ DATA_ROW = re.compile(r"^(?:\[[ x]\] )?\d+\. (.+?)(?:  \(.*)?$")
 #: menu.py's input loops. tests/test_menu.py drives their keys; the walk need
 #: not run every line of them, only every line of the screens built on them.
 PRIMITIVES = ("render", "select", "multi_select", "confirm", "ask_text", "_captured")
+#: The most paths the walk may take in one state. The many state takes 33.
+WALK_LIMIT = 100
 #: How a path names an operator: by the section of the list it is in, or, when
 #: a box is ticked for it, as a name. A command names every operator NAME.
 RUNNING, OFFLINE, NAME = "<running>", "<offline>", "<name>"
@@ -881,7 +883,8 @@ def _walk() -> Walk:
     box and presses Enter. A count such as ``(1)`` is dropped. On a screen with
     no highlight, a text box or a question, it presses Enter and, separately,
     y, the first time it lands there. When the menu leaves, the walk runs what
-    it left to run.
+    it left to run. A screen whose title differs on every visit would keep the
+    walk going for ever, so it fails after WALK_LIMIT paths in one state.
 
     It also keeps the menu.py lines that ran, each title, row and status drawn,
     each argv token a fake verb received, each str a screen function returned,
@@ -911,8 +914,14 @@ def _walk() -> Walk:
             given = make()
             names = {op.name for op in (*given.running, *given.offline)}
             names |= {*given.recoverable, given.default_name()}
-            todo, seen = deque([((), ())]), {}
+            todo, seen, taken = deque([((), ())]), {}, 0
             while todo:
+                taken += 1
+                assert taken <= WALK_LIMIT, (
+                    f"The walk took {WALK_LIMIT} paths in the {kind} state and had "
+                    f"more to take. A screen whose title changes on every visit, "
+                    f"such as one that counts, is new each time the walk lands "
+                    f"on it. Raise WALK_LIMIT only if the menu grew.")
                 path, named = todo.popleft()
                 robot = Robot(path, then=["down"] * 12)
                 actions = make()
