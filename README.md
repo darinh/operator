@@ -64,6 +64,7 @@ Each menu choice that runs a command calls the same handler as the typed command
 
 - Start an operator refuses a name that an operator in another directory has, and asks again. `operator start NAME` starts that operator in its own directory. `operator start` with no name exits 2 and asks for a name when that operator has this directory's name.
 - With several operators in this directory, Start an operator leaves the name empty and asks for one. `operator start` with no name lists them and exits 2.
+- Start an operator refuses a name that starts with `-` and asks again. `operator start -x` takes `-x` as a Copilot option and starts this directory's operator. `operator start --name=-x` refuses it as the menu does.
 - The list screen offers Attach and Stop for a running operator, and Start, Start and attach, Rename and Delete for a stopped one. For a running operator, `operator rename` renames it, `operator start NAME --attach` attaches, and `operator start NAME` and `operator delete` refuse. For a stopped operator, `operator attach` refuses and `operator stop` prints "stop requested for NAME" with nothing to stop.
 - `operator list` with no operators says "No operators yet. Start one with: operator start". List operators shows `(none)` under both headings.
 - When it cannot read the operators directory, `operator list` says "could not read operators" and exits 1. List operators says so above `(none)` under both headings.
