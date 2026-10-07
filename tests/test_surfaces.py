@@ -267,6 +267,9 @@ TAKEN = ("Start an operator refuses a name that an operator in another directory
 SEVERAL = ("With several operators in this directory, Start an operator leaves "
            "the name empty and asks for one. `operator start` with no name lists "
            "them and exits 2.")
+DASH = ("Start an operator refuses a name that starts with `-` and asks again. "
+        "`operator start -x` takes `-x` as a Copilot option and starts this "
+        "directory's operator. `operator start --name=-x` refuses it as the menu does.")
 LIST_EMPTY = ("`operator list` with no operators says \"No operators yet. Start one "
               "with: operator start\". List operators shows `(none)` under both "
               "headings.")
@@ -360,6 +363,15 @@ CASES = [
          argv=(["start", "--name=-x", "--attach"],),
          menu=("Start an operator", Text("-x")),
          expect={"said": "a name cannot start with -"}),
+    Case("start-dash-word",
+         argv=(["start", "-x", "--attach"],),
+         menu=("Start an operator", Text("-x")),
+         expect={"events": [spawned("demo", args=["-x"]), attached("demo")],
+                 "operators": [("demo", "here")], "registered": ["here"],
+                 "said": REGISTERED + "\nstarted demo (pid 41)", "waited": 0.05},
+         menu_expect={"events": [], "operators": [], "registered": [],
+                      "said": "a name cannot start with -", "waited": 0.0},
+         doc=DASH),
     Case("start-here-bad-name", stands="dashed", code=2,
          argv=(["start", "--attach"],),
          menu=("Start an operator", ENTER),
