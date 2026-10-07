@@ -93,6 +93,7 @@ class Actions:
 
     def recover(self, names):
         self.recovered.append(list(names))
+        self.recoverable = [name for name in self.recoverable if name not in names]
         print("recovered " + " ".join(names))
         return 0
 
