@@ -63,12 +63,15 @@ def cap_problem(who, new: bool) -> "str | None":
     import operators
     from custody import Agent
     from supervisor_control import active_instances
+    from supervisor_records import _supervisor_present
     if not isinstance(who, Agent):
         return None
     agent = who
     records = operators.all_operators() or []
     live = {inst.id for inst in active_instances()}
-    running = [op for op in lineage.children(agent.record.id, records) if op.id in live]
+    # A supervisor still starting has not published its pid, but it will.
+    running = [op for op in lineage.children(agent.record.id, records)
+               if op.id in live or _supervisor_present(op.instance()) is not None]
     if len(running) >= config.max_children():
         return (f"{agent.record.name} already runs {len(running)} children, and "
                 f"OPERATOR_MAX_CHILDREN allows {config.max_children()}. Stop one first.")

@@ -100,6 +100,28 @@ def test_a_claim_is_as_old_as_its_taking_not_its_posting():
     assert mail.waiting(BOX) == 1
 
 
+def test_a_claim_reads_as_fresh_the_moment_it_is_made(monkeypatch):
+    """Another inbox may look between the claiming rename and anything after
+    it. Were the claim of an old message stamped only then, that inbox would
+    put it back and take it again, and both would print it."""
+    import time
+    mail.post(BOX, _message("old"))
+    posted, = (mail.box(BOX) / mail.PENDING).iterdir()
+    then = time.time() - 3600
+    os.utime(posted, (then, then))
+    rename, looked = os.rename, []
+
+    def rename_then_another_inbox_looks(src, dst):
+        rename(src, dst)
+        if not looked:
+            looked.append(dst)
+            mail.requeue_stale(BOX, older_than=60)
+    monkeypatch.setattr(mail.os, "rename", rename_then_another_inbox_looks)
+    path, message = mail.take(BOX)
+    assert looked and message["text"] == "old"
+    assert mail.waiting(BOX) == 0 and path.exists()
+
+
 def test_delivery_types_each_message_as_one_line_and_files_it():
     op.MUX.sessions[BOX] = {"cwd": "", "argv": [], "remain_on_exit": False, "dead": False}
     mail.post(BOX, _message("first\nsecond"))

@@ -50,7 +50,7 @@ def list_instances() -> int:
 
 
 def _an_operator_asks() -> bool:
-    """An operator's `inbox` reads its own box, never the person's."""
+    """Whether an operator's agent ran this list. The person's mail is not its business."""
     import os
 
     from custody import Agent, caller
