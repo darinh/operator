@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def test_a_child_process_sees_this_process_in_its_ancestry():
     """The check handoff depends on. A mock of `ancestry` cannot catch a
@@ -58,3 +60,28 @@ def test_a_windows_parent_that_is_gone_ends_the_chain(monkeypatch):
     monkeypatch.setattr(process_tree, "_win_parents", lambda: table)
     monkeypatch.setattr(process_tree, "_win_created", born.get)
     assert process_tree.ancestry(10) == [20]
+
+
+NAMES = {20: (30, "python.exe"), 30: (40, "Operator.EXE"), 40: (50, "pwsh.exe"),
+         35: (40, "python.exe"), 45: (50, "python3.12.exe")}
+
+
+@pytest.mark.parametrize("windows, argv0, chain, ran", [
+    (True, r"C:\venv\Scripts\operator", [20, 30, 40], 40),
+    (True, r"C:\venv\Scripts\operator.exe", [45, 30, 35], 35),
+    (True, r"C:\repo\operator_cli\__main__.py", [35, 40], 35),
+    (True, r"C:\venv\Scripts\operator", [40, 50], 40),
+    (True, r"C:\venv\Scripts\operator", [40, 30, 35], 40),
+    (True, r"C:\venv\Scripts\operator", [20, 30], 20),
+    (False, "/venv/bin/operator", [20, 30, 40], 20),
+    (True, r"C:\venv\Scripts\operator", [], 0),
+])
+def test_what_ran_the_command_is_past_its_own_launcher(monkeypatch, windows, argv0,
+                                                         chain, ran):
+    """A launcher and the Pythons it starts end with the command. A Python
+    that ran operator.exe, or ran us with -m, is what started it."""
+    import process_tree
+    monkeypatch.setattr(process_tree, "IS_WINDOWS", windows)
+    monkeypatch.setattr(process_tree, "_win_table", lambda: NAMES)
+    monkeypatch.setattr(sys, "argv", [argv0])
+    assert process_tree.shell(chain) == ran

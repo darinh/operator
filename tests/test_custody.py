@@ -81,6 +81,18 @@ def test_caller_is_a_person_when_the_recorded_pid_was_reused(tmp_path, monkeypat
     assert custody.caller(os_pid()) == custody.Human(77)
 
 
+def test_a_person_is_named_by_what_ran_operator_exe_not_by_the_launcher(
+        tmp_path, monkeypatch):
+    import sys
+    _session(tmp_path, monkeypatch, "alpha", 424242)
+    monkeypatch.setattr(process_tree, "ancestry", lambda pid: [61, 62, 63, 1])
+    monkeypatch.setattr(process_tree, "IS_WINDOWS", True)
+    monkeypatch.setattr(process_tree, "_win_table", lambda: {
+        61: (62, "python.exe"), 62: (63, "operator.exe"), 63: (1, "pwsh.exe")})
+    monkeypatch.setattr(sys, "argv", [r"C:\venv\Scripts\operator"])
+    assert custody.caller(os_pid()) == custody.Human(63)
+
+
 def test_two_sessions_in_one_ancestry_is_a_refusal(tmp_path, monkeypatch):
     _session(tmp_path, monkeypatch, "outer", 500)
     _session(tmp_path, monkeypatch, "inner", 600)

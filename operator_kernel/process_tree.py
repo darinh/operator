@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -30,6 +31,12 @@ _UNREADABLE = object()
 
 def _win_parents() -> "dict[int, int] | None":
     """``{pid: ppid}`` from one ToolHelp snapshot, or ``None`` if it failed."""
+    table = _win_table()
+    return None if table is None else {pid: row[0] for pid, row in table.items()}
+
+
+def _win_table() -> "dict[int, tuple[int, str]] | None":
+    """``{pid: (ppid, image name)}`` from one ToolHelp snapshot, or ``None``."""
     try:
         import ctypes
         from ctypes import wintypes
@@ -72,10 +79,11 @@ def _win_parents() -> "dict[int, int] | None":
         try:
             entry = PROCESSENTRY32W()
             entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
-            table: dict[int, int] = {}
+            table: dict[int, tuple[int, str]] = {}
             ok = kernel32.Process32FirstW(snap, ctypes.byref(entry))
             while ok:
-                table[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
+                table[int(entry.th32ProcessID)] = (int(entry.th32ParentProcessID),
+                                                   entry.szExeFile)
                 ok = kernel32.Process32NextW(snap, ctypes.byref(entry))
             return table
         finally:
@@ -182,3 +190,24 @@ def ancestry(pid: int) -> "list[int] | None":
             break
         current = parent
     return chain
+
+
+def shell(chain: "list[int]") -> int:
+    """Which process ran this command, given this process's ``ancestry``.
+
+    pip installs ``operator`` on Windows as ``operator.exe``, which runs
+    Python as a child, and a venv's ``python.exe`` adds another. Both end
+    with the command, so the nearest parent is not what ran it. Elsewhere a
+    shebang runs Python in place, and the nearest parent is the answer.
+    """
+    if not chain:
+        return 0
+    table = (_win_table() or {}) if IS_WINDOWS else {}
+    launcher = Path(sys.argv[0]).stem.lower() + ".exe"
+    for at, pid in enumerate(chain[:-1]):
+        name = table.get(pid, (0, ""))[1].lower()
+        if name == launcher:
+            return chain[at + 1]
+        if not name.startswith("python"):
+            break
+    return chain[0]
