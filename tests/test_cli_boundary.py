@@ -66,8 +66,13 @@ CLI = REPO / "operator_cli"
 # counts toward the cap; when the catalog's lock became a file lock any verb
 # can hold; and when list stopped telling an operator about the person's mail.
 # Both are the measured sizes.
-MAX_CLI_CODE_LINES = 1531
-MAX_CLI_TOTAL_LINES = 1966
+# Raised to 1628/2093 when the menu learned messaging: a Messaging row with the
+# person's count, Inbox and Send a message on the same handlers as `operator
+# inbox` and `operator send`, a Message Log of every message in the home, and
+# lists and text that scroll when longer than the terminal. Both are the
+# measured sizes.
+MAX_CLI_CODE_LINES = 1628
+MAX_CLI_TOTAL_LINES = 2093
 
 
 def cli_modules() -> list[Path]:
