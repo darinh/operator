@@ -190,6 +190,26 @@ def test_a_session_runs_its_script_as_operator_and_logs_it(run, monkeypatch):
     assert "exit 0 after " in log, "a slow verb is invisible without its duration"
 
 
+def test_a_step_that_fails_is_logged_and_the_session_carries_on(run, monkeypatch):
+    """A real agent whose command fails keeps going. A fake that dies instead
+    closes its pane, and the run reads as a Copilot crash."""
+    _script(run, "scout", [{"cd": str(run / "nowhere")}, {"op": ["list"]},
+                           {"op": ["inbox"]}])
+
+    def operator(argv, **kwargs):
+        if argv[-1] == "list":
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(fake.shutil, "which", lambda name: f"/venv/{name}")
+    monkeypatch.setattr(fake.subprocess, "run", operator)
+    _session(monkeypatch, ["-i", PREAMBLE])
+    log = (run / "artifacts" / "agents" / "scout" / "commands.log").read_text("utf-8")
+    assert "cd failed" in log
+    assert f"$ operator list\ntimed out after {fake.OP_TIMEOUT}s" in log
+    assert "$ operator inbox\nexit 0" in log
+
+
 def test_a_typed_exit_ends_the_session_as_copilot_does(run, monkeypatch):
     """Stop and handoff type `/exit`. A fake that ignores it makes every stop
     wait out the kernel's grace period and take the kill path instead."""

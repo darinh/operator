@@ -37,6 +37,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 BANNER = "fake copilot for verify-operator"
+OP_TIMEOUT = 180
 
 #: Every step is a JSON object with exactly one of these keys.
 STEPS = {
@@ -140,7 +141,12 @@ class Agent:
         elif "sleep" in step:
             time.sleep(step["sleep"])
         elif "cd" in step:
-            os.chdir(step["cd"])
+            try:
+                os.chdir(step["cd"])
+            except OSError as exc:
+                self.log("commands.log", f"[{_now()}] cd failed: {exc}")
+                self.say(f"cd failed: {exc}")
+                return
             self.log("commands.log", f"[{_now()}] cd {os.getcwd()}")
         elif "on" in step:
             self.handlers.append((step["on"], step.get("do", [])))
@@ -155,15 +161,20 @@ class Agent:
             self.log("commands.log", f"[{_now()}] $ operator {args!r}\noperator not on PATH")
             return
         started, clock = _now(), time.monotonic()
-        # NUL on purpose. Copilot's shell hands a command NUL on Windows, which
-        # isatty() calls a terminal and which reads empty. An agent meets that.
-        proc = subprocess.run([exe, *args], capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", timeout=180,
-                              stdin=subprocess.DEVNULL)
+        heading = f"[{started}] cwd={os.getcwd()}\n$ operator {' '.join(args)}\n"
+        try:
+            # NUL on purpose. Copilot's shell hands a command NUL on Windows, which
+            # isatty() calls a terminal and which reads empty. An agent meets that.
+            proc = subprocess.run([exe, *args], capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace", timeout=OP_TIMEOUT,
+                                  stdin=subprocess.DEVNULL)
+        except subprocess.TimeoutExpired:
+            self.log("commands.log", f"{heading}timed out after {OP_TIMEOUT}s\n")
+            self.say(f"timed out after {OP_TIMEOUT}s")
+            return
         took = time.monotonic() - clock
         out = (proc.stdout + proc.stderr).rstrip()
-        self.log("commands.log", f"[{started}] cwd={os.getcwd()}\n$ operator "
-                 f"{' '.join(args)}\nexit {proc.returncode} after {took:.1f}s\n{out}\n")
+        self.log("commands.log", f"{heading}exit {proc.returncode} after {took:.1f}s\n{out}\n")
         self.say(f"{out}\nexit {proc.returncode}" if out else f"exit {proc.returncode}")
 
     def listen(self) -> None:
