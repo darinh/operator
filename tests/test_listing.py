@@ -74,6 +74,27 @@ def test_list_names_each_unreadable_record(tmp_path, capsys):
     assert "kept" in captured.out
 
 
+def test_list_shows_each_child_under_its_parent(tmp_path, monkeypatch, capsys):
+    import supervisor_control
+    work = tmp_path / "repo"
+    work.mkdir()
+    top = operators.create("alpha", work)
+    child = operators.create("bravo", work, parent=top.id)
+    operators.create("charlie", work, parent=child.id)
+    operators.create("delta", work, parent="op-gone0000")
+    monkeypatch.setattr(supervisor_control, "active_instances", lambda: [])
+    assert listing.list_instances() == 0
+    assert capsys.readouterr().out == (
+        "Running:\n"
+        "  (none)\n"
+        "Offline:\n"
+        f"  1. alpha  ({work.resolve()})\n"
+        f"  2.   bravo  ({work.resolve()})  child of alpha\n"
+        f"  3.     charlie  ({work.resolve()})  child of bravo\n"
+        f"  4. delta  ({work.resolve()})\n"
+    )
+
+
 def test_list_with_no_records_says_how_to_start(capsys):
     assert listing.list_instances() == 0
     assert capsys.readouterr().out == (

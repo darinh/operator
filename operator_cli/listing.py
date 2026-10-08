@@ -45,14 +45,21 @@ def list_instances() -> int:
 
 
 def sections(records):
-    """(running, offline) as (record, label) pairs, in record order."""
+    """(running, offline) as (record, label) pairs, each child after its parent.
+
+    A child is indented one step per generation and names its parent, which
+    may sit in the other section.
+    """
+    import lineage
     running_ids = {inst.id for inst in supervisor_control.active_instances()}
+    names, up = {op.id: op.name for op in records}, lineage.parents(records)
     running, offline = [], []
-    for op in records:
-        label = f"{op.name}  ({op.cwd})"
+    for op, level in lineage.tree(records):
+        label = f"{'  ' * (level - 1)}{op.name}  ({op.cwd})"
         if op.id in running_ids:
             pid = _running_loop_pid(op.instance())
-            running.append((op, f"{label}  pid {pid}" if pid else label))
-        else:
-            offline.append((op, label))
+            label = f"{label}  pid {pid}" if pid else label
+        if level > 1:
+            label += f"  child of {names[up[op.id]]}"
+        (running if op.id in running_ids else offline).append((op, label))
     return running, offline

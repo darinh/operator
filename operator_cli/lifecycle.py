@@ -59,6 +59,26 @@ def _listed(record) -> str:
     return f"{typed} ({record.name})" if typed == record.id else typed
 
 
+def _caller(verb: str):
+    """The agent or person running this command, or None after saying why not."""
+    import os
+    from custody import caller
+    who = caller(os.getpid())
+    if isinstance(who, str):
+        print(f"operator {verb}: {who}", file=sys.stderr)
+        return None
+    return who
+
+
+def _lineage(who) -> tuple:
+    """(parent, started_by_pid) for an operator ``who`` is starting."""
+    import operators
+    from custody import Agent
+    if isinstance(who, Agent):
+        return who.record.id, who.copilot_pid
+    return operators.HUMAN, who.shell_pid
+
+
 def start(rest: list[str]) -> int:
     from .entry import _bootstrap
     _bootstrap()
@@ -134,13 +154,18 @@ def start(rest: list[str]) -> int:
         if problem:
             print(problem, file=sys.stderr)
             return 2
+        who = _caller("start")
+        if who is None:
+            return 1
+        parent, started_by = _lineage(who)
         rc, guid, created = project.ensure_registered()
         if rc:
             return rc
         if created:
             print(f"registered this directory as a project ({guid})")
         try:
-            record = operators.create(name, Path.cwd())
+            record = operators.create(name, Path.cwd(), parent=parent,
+                                      started_by_pid=started_by)
         except operators.BadName as exc:
             print(str(exc), file=sys.stderr)
             return 2

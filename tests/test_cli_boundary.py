@@ -53,8 +53,10 @@ CLI = REPO / "operator_cli"
 # any checkout of it, comparing primary checkouts rather than raw directories,
 # and keeps it while a remaining operator's checkout is gone and cannot say
 # which project it was. Both are the measured sizes.
-MAX_CLI_CODE_LINES = 1298
-MAX_CLI_TOTAL_LINES = 1662
+# Raised to 1320/1694 when start records who asked for an operator and list
+# draws each child under its parent. Both are the measured sizes.
+MAX_CLI_CODE_LINES = 1320
+MAX_CLI_TOTAL_LINES = 1694
 
 
 def cli_modules() -> list[Path]:

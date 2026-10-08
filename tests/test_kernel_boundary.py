@@ -143,7 +143,12 @@ MAX_MODULE_LINES = 603
 #: Lowered from 2568 to 2559 when `start_session` folded the start task into
 #: the prompt and the unused imports in `launch.py` were deleted. 2559 is the
 #: measured size.
-MAX_KERNEL_CODE_LINES = 2559
+#:
+#: Raised from 2559 to 2621 when records learned who started them. `custody`
+#: tells an agent from a person, `operators` stores the parent, and the new
+#: `lineage.py` reads the tree from records with no I/O. 2621 is the measured
+#: size.
+MAX_KERNEL_CODE_LINES = 2621
 
 #: Per-module code ceiling, the same split applied one file down.
 #: Raised from 325 when the runner records custody beside the pid file.

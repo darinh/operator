@@ -11,7 +11,7 @@ import os
 import secrets
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from instance import Instance
@@ -28,9 +28,18 @@ class Operator:
     name: str
     cwd: str
     created: str
+    #: The operator id of the agent that started this one, or HUMAN.
+    parent: str = "human"
+    #: The parent agent's copilot pid, or the pid that ran a person's start.
+    started_by_pid: int = 0
 
     def instance(self) -> Instance:
         return Instance(self.id, self.name)
+
+
+#: The parent of an operator a person started, and the name mail to a person
+#: is sent to. No operator may take it.
+HUMAN = "human"
 
 
 def records_dir() -> Path:
@@ -58,7 +67,14 @@ def _load(path: Path) -> Operator | None:
         return None
     if path.stem != op_id or name != name.strip():
         return None
-    return Operator(op_id, name, cwd, created)
+    # Records written before lineage have neither key, and mean a person.
+    parent = payload.get("parent")
+    if not isinstance(parent, str) or not parent:
+        parent = HUMAN
+    started_by = payload.get("started_by_pid")
+    if isinstance(started_by, bool) or not isinstance(started_by, int) or started_by < 0:
+        started_by = 0
+    return Operator(op_id, name, cwd, created, parent, started_by)
 
 
 def _write(op: Operator) -> None:
@@ -66,7 +82,8 @@ def _write(op: Operator) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     dest = _path(op.id)
     tmp = dest.with_name(f"{dest.name}.{os.getpid()}.tmp")
-    payload = {"id": op.id, "name": op.name, "cwd": op.cwd, "created": op.created}
+    payload = {"id": op.id, "name": op.name, "cwd": op.cwd, "created": op.created,
+               "parent": op.parent, "started_by_pid": op.started_by_pid}
     tmp.write_text(json.dumps(payload), encoding="utf-8")
     os.replace(tmp, dest)
 
@@ -112,6 +129,8 @@ def name_problem(name: str, *, ignore_id: str = "") -> str | None:
         return "a name cannot start with -"
     if any(ord(ch) < 32 or ord(ch) == 127 for ch in cleaned):
         return "a name cannot contain control characters"
+    if cleaned.casefold() == HUMAN:
+        return f"{HUMAN!r} is reserved for the person who starts operators"
     others = all_operators()
     if others is None:
         return "could not read operators"
@@ -170,12 +189,14 @@ def _records_lock():
             pass
 
 
-def create(name: str, cwd: Path) -> Operator:
+def create(name: str, cwd: Path, *, parent: str = HUMAN,
+           started_by_pid: int = 0) -> Operator:
     with _records_lock():
         problem = name_problem(name)
         if problem:
             raise BadName(problem)
-        op = Operator(_new_id(), name.strip(), str(Path(cwd).resolve()), utcnow())
+        op = Operator(_new_id(), name.strip(), str(Path(cwd).resolve()), utcnow(),
+                      parent, started_by_pid)
         _write(op)
         return op
 
@@ -199,7 +220,7 @@ def rename(op: Operator, new_name: str) -> Operator:
         problem = name_problem(new_name, ignore_id=op.id)
         if problem:
             raise BadName(problem)
-        updated = Operator(op.id, new_name.strip(), op.cwd, op.created)
+        updated = replace(op, name=new_name.strip())
         _write(updated)
         return updated
 
