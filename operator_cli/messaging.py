@@ -16,12 +16,12 @@ INBOX_USAGE = "Usage: operator inbox"
 
 def send(rest: list[str]) -> int:
     from .entry import _bootstrap
+    _bootstrap()
     import lineage
     import mail
     from custody import Agent
     from operators import HUMAN, all_operators, find
     from probes import utcnow
-    _bootstrap()
     if rest[:1] in (["-h"], ["--help"]):
         print(SEND_USAGE)
         return 0
@@ -61,10 +61,10 @@ def send(rest: list[str]) -> int:
 
 def inbox(rest: list[str]) -> int:
     from .entry import _bootstrap
+    _bootstrap()
     import mail
     from custody import Agent
     from operators import HUMAN
-    _bootstrap()
     for arg in rest:
         if arg in ("-h", "--help"):
             print(INBOX_USAGE)
