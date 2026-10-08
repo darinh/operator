@@ -104,9 +104,9 @@ is the point.
 13. Does a branch depend on whether stdin is a terminal? Give it the stdin its real caller gets.
     On Windows `subprocess.DEVNULL` is NUL, which `isatty()` calls a terminal and which reads
     empty. That is what Copilot's shell hands an agent's command, and it is not what a person's
-    script gets. The verify-operator harness used DEVNULL for a person and saw delete prompt.
-    The fake agent uses it on purpose, and that is how #50 was found: an agent's
-    `operator delete` asks `Delete? [y/N]` it cannot answer.
+    script gets. The verify-operator harness once gave a person's command DEVNULL, so delete
+    prompted where a script's would not. The fake agent uses it on purpose, and that is how #50
+    was found: an agent's `operator delete` asks `Delete? [y/N]` it cannot answer.
 
 ## Merging
 
