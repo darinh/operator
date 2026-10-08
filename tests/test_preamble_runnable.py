@@ -323,23 +323,27 @@ def test_every_command_for_children_the_preamble_advertises_runs(monkeypatch, tm
 
 
 def test_every_mail_command_the_preamble_advertises_runs(monkeypatch, tmp_path):
-    """Seated as alpha, mail the person and a child, read the inbox, then
-    seated as the child, mail alpha with the command the child is shown."""
+    """Seated as alpha, mail a child and read the inbox, then seated as the
+    child, mail alpha with the command the child is shown.
+
+    Mail up to a person is deliberately not advertised, so `operator send
+    human` must not appear here even though the verb accepts it.
+    """
     import mail
     import operators
     import preamble as P
     from test_handoff import _seat
     found = [c for c in _commands(_launch_preamble(monkeypatch, tmp_path))
              if re.match(r"operator (send|inbox)\b", c)]
-    assert sorted(found) == ['operator inbox', 'operator send NAME "..."',
-                             'operator send human "..."'], found
+    assert sorted(found) == ['operator inbox',
+                             'operator send NAME "..."'], found
     alpha = operators.find(OPERATOR)
     scout = operators.create("scout", tmp_path, parent=alpha.id)
     _seat(monkeypatch, alpha, pid=424242)
     for template in found:
         assert _run(template.replace("NAME", "scout")) == 0, (
             f"the preamble advertises `{template}`")
-    assert mail.waiting(operators.HUMAN) == 1 and mail.waiting(scout.id) == 1
+    assert mail.waiting(operators.HUMAN) == 0 and mail.waiting(scout.id) == 1
     told = [c for c in _commands(P.build_preamble(scout.instance()))
             if c.startswith("operator send ") and "NAME" not in c]
     assert told == [f'operator send {alpha.id} "..."'], told
