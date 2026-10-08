@@ -183,7 +183,8 @@ def test_a_session_runs_its_script_as_operator_and_logs_it(run, monkeypatch):
     _session(monkeypatch, ["-i", PREAMBLE])
 
     assert [argv for argv, _ in calls] == [["/venv/operator", "list"]]
-    assert calls[0][1]["stdin"] is fake.subprocess.DEVNULL
+    assert calls[0][1]["stdin"] is fake.subprocess.DEVNULL, \
+        "real Copilot gives a shell command NUL, and the harness's empty pipe is a person's"
     log = (run / "artifacts" / "agents" / "scout" / "commands.log").read_text("utf-8")
     assert "$ operator list" in log and "1. scout" in log
     assert "exit 0 after " in log, "a slow verb is invisible without its duration"

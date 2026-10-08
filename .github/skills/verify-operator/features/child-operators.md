@@ -55,3 +55,4 @@ Preconditions:
 - **A child starts in the parent's recorded directory**, not wherever the agent's shell is. A `cd` step before `start` does not move the child. A relative `--dir` is resolved against the agent's own working directory.
 - **A person has no cap**, and the harness is always a person. Caps and scope are only visible through agent steps.
 - **Mail drives the retry.** A person's `send` to a top-level operator is the only way to make an already running fake act again. Give it an `on` handler.
+- **An agent's delete needs `--yes`.** Its stdin looks like a terminal on Windows, so `{"op":["delete","scout"]}` prints `Delete? [y/N]`, reads nothing and exits 1. It never sees the `pass --yes` line a person's script gets. #50 holds the evidence.

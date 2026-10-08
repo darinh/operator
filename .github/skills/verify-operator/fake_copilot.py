@@ -155,6 +155,8 @@ class Agent:
             self.log("commands.log", f"[{_now()}] $ operator {args!r}\noperator not on PATH")
             return
         started, clock = _now(), time.monotonic()
+        # NUL on purpose. Copilot's shell hands a command NUL on Windows, which
+        # isatty() calls a terminal and which reads empty. An agent meets that.
         proc = subprocess.run([exe, *args], capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=180,
                               stdin=subprocess.DEVNULL)

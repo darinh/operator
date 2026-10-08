@@ -73,7 +73,7 @@ Write the script before the operator starts. The fake finds it by the name in it
 
 | Step | Effect |
 | --- | --- |
-| `{"op": ["start", "scout", "role=scout"]}` | Run `operator` with these arguments, as a descendant of the session. That makes it an agent caller. |
+| `{"op": ["start", "scout", "role=scout"]}` | Run `operator` with these arguments, as a descendant of the session. That makes it an agent caller. Its stdin is NUL, which is what Copilot's shell gives a command on Windows: `isatty()` says True and a read is empty. |
 | `{"sleep": 2}` | Wait. |
 | `{"cd": "sub"}` | Change directory. |
 | `{"on": "ping", "do": [STEP...]}` | From now on, run these steps whenever a typed line contains `ping`. |
