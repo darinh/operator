@@ -80,8 +80,10 @@ class Key:
 
 @dataclass(frozen=True)
 class Text:
-    """Clear the text box, type ``value`` and press Enter."""
+    """Clear the text box, type ``value`` and press Enter. ``word`` is how the
+    README names what was typed when it is not an operator's name."""
     value: str
+    word: str = ""
 
 
 @dataclass(frozen=True)
@@ -102,14 +104,14 @@ class Frame:
 
 
 _MARKS = re.compile(r"^(\[[ x]\] )?(\d+\. )?")
-#: The one row whose text carries a count. It is one choice whatever the count.
-COUNTED = "Recover operator sessions"
+#: The rows whose text carries a count. Each is one choice whatever the count.
+COUNTED = ("Recover operator sessions", "Messaging")
 
 
 def _choice(label: str) -> str:
-    """The choice a row offers: its whole text, less the count on COUNTED."""
+    """The choice a row offers: its whole text, less the count on a COUNTED row."""
     stem = re.sub(r" \(\d+\)$", "", label)
-    return stem if stem == COUNTED else label
+    return stem if stem in COUNTED else label
 
 
 def _shows(row: str, label: str) -> bool:
@@ -186,8 +188,10 @@ class Case:
     ``expect`` for the menu, only where the README documents the difference,
     and ``doc`` is the README bullet that documents it, word for word.
     ``stands`` is the place the user runs operator in, and ``unreadable``
-    puts a file where the operators directory goes. ``mail`` is (operator,
-    text) for each message waiting for the person. ``env`` is set for the run.
+    puts a file where the operators directory goes. ``mail`` is (sender,
+    recipient, text) for each message waiting, where "human" is the person.
+    ``parents`` names the parent of each given operator another one started,
+    and the parent comes first in ``given``. ``env`` is set for the run.
     """
     id: str
     expect: dict = field(default_factory=dict)
@@ -205,6 +209,7 @@ class Case:
     unreadable: bool = False
     mail: tuple = ()
     env: dict = field(default_factory=dict)
+    parents: dict = field(default_factory=dict)
 
     def expected(self, surface: str) -> dict:
         want = {
@@ -300,11 +305,19 @@ DELETE_ASKS = ("Delete on the list screen asks \"Delete? [y/N]\" and deletes on 
                "a terminal and deletes on y or yes, in any case, then Enter. Without "
                "a terminal it exits 2 and says to pass `--yes`.")
 LIST_MAIL = ("`operator list` ends by saying how many messages wait for you, when "
-             "some do. List operators does not say. Read them with `operator inbox`.")
+             "some do. List operators does not say. The main menu shows how many on "
+             "its Messaging row.")
+INBOX_WRAPS = ("Inbox wraps a long message to the width of the terminal. "
+               "`operator inbox` prints each message on one line.")
+PICKER = ("Send a message lists only the operators a person started, because mail "
+          "goes only between a parent and its child. `operator send` refuses any other.")
 SEND_USAGE = 'Usage: operator send NAME "message"'
 NOT_FAMILY = ("operator send: bravo is not your parent or your child, and mail goes "
               "only between those two.")
 LISTED = "Running:\n1. alpha  (<here>)\nOffline:\n1. bravo  (<there>)"
+#: alpha, which the person started, and scout, which alpha started.
+FAMILY = {"alpha": ("here", "offline"), "scout": ("there", "offline")}
+SENT = "2026-01-02T03:04:05Z"
 
 CASES = [
     Case("start-here-new",
@@ -423,7 +436,8 @@ CASES = [
          argv=(["list"],),
          menu=("List operators",),
          expect={"said": LISTED}),
-    Case("list-mail", given=BUSY, mail=(("alpha", "done"), ("bravo", "stuck")),
+    Case("list-mail", given=BUSY, mail=(("alpha", "human", "done"),
+                                        ("bravo", "human", "stuck")),
          answer="screen",
          argv=(["list"],),
          menu=("List operators",),
@@ -531,7 +545,7 @@ CASES = [
          argv=(["recover"],),
          menu=("No operators need recovery.",),
          expect={"said": "No operators need recovering."},
-         menu_expect={"said": "Start an operator\nList operators\n"
+         menu_expect={"said": "Start an operator\nList operators\nMessaging (0)\n"
                               "No operators need recovery.\nQuit"},
          doc=RECOVER_LISTS),
     Case("recover-listing", given=IDLE_HERE, recoverable=("alpha",), answer="screen",
@@ -541,10 +555,38 @@ CASES = [
                          "alpha\n\n"
                          "Bring them all back with: operator recover --all\n"
                          "Or one at a time with:    operator recover <name>"},
-         menu_expect={"said": "Start an operator\nList operators\n"
+         menu_expect={"said": "Start an operator\nList operators\nMessaging (0)\n"
                               "Recover operator sessions (1)\nQuit"},
          doc=RECOVER_LISTS),
     Case("quit", menu=("Quit",), leaves=True),
+    Case("messaging-count", given=BUSY, answer="screen",
+         mail=(("alpha", "human", "done"), ("bravo", "human", "stuck")),
+         menu=(),
+         expect={"said": "Start an operator\nList operators\nMessaging (2)\n"
+                         "No operators need recovery.\nQuit"}),
+    Case("send-cancelled", given=IDLE_HERE,
+         menu=("Messaging", "Send a message", "alpha", Key("esc"))),
+    Case("message-log", given=FAMILY, parents={"scout": "alpha"}, answer="screen",
+         mail=(("alpha", "human", "done"), ("alpha", "scout", "look around"),
+               ("scout", "alpha", "found it"), ("human", "alpha", "carry on")),
+         menu=("Messaging", "Message Log"),
+         expect={"said": f"1. {SENT}  alpha -> human  waiting  done\n"
+                         f"2. {SENT}  alpha -> scout  waiting  look around\n"
+                         f"3. {SENT}  scout -> alpha  waiting  found it\n"
+                         f"4. {SENT}  human -> alpha  waiting  carry on"}),
+    Case("message-log-empty", answer="screen",
+         menu=("Messaging", "Message Log"),
+         expect={"said": "(none)"}),
+    Case("message-log-after-inbox", given=IDLE_HERE, answer="screen",
+         mail=(("alpha", "human", "done"),),
+         menu=("Messaging", "Inbox", ENTER, "Message Log"),
+         expect={"said": f"1. {SENT}  alpha -> human  delivered  done"}),
+    Case("message-log-open", given=FAMILY, parents={"scout": "alpha"}, answer="screen",
+         mail=(("alpha", "scout", "look around\nthen report"),),
+         menu=("Messaging", "Message Log", f"{SENT}  alpha -> scout  waiting  "
+                                          "look around then report"),
+         expect={"said": f"From: alpha\nTo: scout\nSent: {SENT}\nStatus: waiting\n\n"
+                         "look around\nthen report"}),
     Case("start-fresh", given=IDLE_HERE,
          argv=(["start", "--fresh"], ["start", "alpha", "--fresh"]),
          expect={"events": [spawned("alpha", fresh=True)],
@@ -602,13 +644,27 @@ CASES = [
                ["send", " HUMAN ", "--", "done for now"]),
          expect={"said": "sent to human"}),
     Case("send-to-child", given=IDLE_HERE,
-         argv=(["send", "alpha", "carry", "on"],),
+         argv=(["send", "alpha", "carry on"], ["send", "alpha", "carry", "on"]),
+         menu=("Messaging", "Send a message", "alpha", Text("carry on", "TEXT")),
          expect={"said": "sent to alpha"}),
+    Case("send-to-an-operators-child", given=FAMILY, parents={"scout": "alpha"},
+         code=2, answer="screen",
+         argv=(["send", "scout", "hello"],),
+         menu=("Messaging", "Send a message"),
+         expect={"said": "operator send: scout is not your parent or your child, "
+                         "and mail goes only between those two."},
+         menu_expect={"said": "Running:\n(none)\nOffline:\n1. alpha  (<here>)"},
+         doc=PICKER),
     Case("send-not-family", given=BUSY, seated="alpha", code=2,
          argv=(["send", "bravo", "hello"],),
          expect={"said": NOT_FAMILY}),
     Case("send-too-long", code=2,
          argv=(["send", "human", "x" * 4001],),
+         expect={"said": "operator send: a message may hold 4000 characters, "
+                         "and this one holds 4001."}),
+    Case("send-too-long-to-an-operator", given=IDLE_HERE, code=2,
+         argv=(["send", "alpha", "x" * 4001],),
+         menu=("Messaging", "Send a message", "alpha", Text("x" * 4001, "TEXT")),
          expect={"said": "operator send: a message may hold 4000 characters, "
                          "and this one holds 4001."}),
     Case("send-unknown", code=1,
@@ -620,12 +676,17 @@ CASES = [
     Case("send-help",
          argv=(["send", "--help"], ["send", "-h"]),
          expect={"said": SEND_USAGE}),
-    Case("inbox", given=BUSY, mail=(("alpha", "done"),),
+    Case("inbox", given=BUSY, mail=(("alpha", "human", "done"),), answer="screen",
          argv=(["inbox"],),
-         expect={"said": "2026-01-02T03:04:05Z  [operator message from alpha (<id>), "
-                         "an operator you started] done"}),
-    Case("inbox-empty",
+         menu=("Messaging", "Inbox"),
+         expect={"said": f"{SENT}  [operator message from alpha (<id>), "
+                         "an operator you started] done"},
+         menu_expect={"said": f"{SENT}  [operator message from alpha (<id>), "
+                              "an operator\nyou started] done"},
+         doc=INBOX_WRAPS),
+    Case("inbox-empty", answer="screen",
          argv=(["inbox"],),
+         menu=("Messaging", "Inbox"),
          expect={"said": "No messages."}),
     Case("inbox-help",
          argv=(["inbox", "--help"], ["inbox", "-h"]),
@@ -633,7 +694,8 @@ CASES = [
     Case("inbox-extra", code=2,
          argv=(["inbox", "now"],),
          expect={"said": "Usage: operator inbox"}),
-    Case("list-mail-to-an-operator", given=BUSY, seated="alpha", mail=(("alpha", "done"),),
+    Case("list-mail-to-an-operator", given=BUSY, seated="alpha",
+         mail=(("alpha", "human", "done"),),
          answer="screen",
          argv=(["list"],),
          expect={"said": LISTED}),
@@ -690,8 +752,10 @@ class World:
         for name in ("here", "there", "dashed", "other-home"):
             self.places[name].mkdir()
         monkeypatch.chdir(self.places["here"])
-        # argparse wraps recover's help to the terminal's width.
+        # argparse wraps recover's help to the terminal's width, and the menu
+        # fits its screens to the terminal.
         monkeypatch.setenv("COLUMNS", "80")
+        monkeypatch.setenv("LINES", "24")
         self.events: list = []
         self.between: set = set()
         self.starting: list = []
@@ -762,7 +826,9 @@ class World:
                 (operators.records_dir() / f"{name}.json").write_text(
                     "{not json", encoding="utf-8")
                 continue
-            record = operators.create(name, directory)
+            record = operators.create(name, directory, parent=(
+                operators.find(case.parents[name]).id if name in case.parents
+                else operators.HUMAN))
             if state == "running":
                 self._run(record.id, directory)
             elif state in ("between", "starting"):
@@ -779,12 +845,15 @@ class World:
                                      encoding="utf-8")
         if case.seated:
             _seat(self.monkeypatch, operators.find(case.seated))
-        for name, text in case.mail:
-            sender = operators.find(name)
-            mail.post(operators.HUMAN, {
-                "from": sender.id, "from_name": sender.name, "to": operators.HUMAN,
-                "relation": "an operator you started", "text": text,
-                "sent": "2026-01-02T03:04:05Z"})
+        ids = {record.name: record.id for record in operators.all_operators() or []}
+        ids[operators.HUMAN] = operators.HUMAN
+        # Mail sorts by when it was posted, which a coarse clock can make a tie.
+        clock = iter(range(1, 10**9))
+        self.monkeypatch.setattr(mail, "time_ns", lambda: next(clock))
+        for sender, recipient, text in case.mail:
+            mail.post(ids[recipient], {
+                "from": ids[sender], "from_name": sender, "to": ids[recipient],
+                "relation": "an operator you started", "text": text, "sent": SENT})
         if case.unreadable:
             operators.records_dir().parent.mkdir(parents=True, exist_ok=True)
             operators.records_dir().write_text("", encoding="utf-8")
@@ -917,13 +986,16 @@ NOT_TYPED = ("supervise.py", "menu.py")
 DATA_ROW = re.compile(r"^(?:\[[ x]\] )?\d+\. (.+?)(?:  \(.*)?$")
 #: menu.py's input loops. tests/test_menu.py drives their keys; the walk need
 #: not run every line of them, only every line of the screens built on them.
-PRIMITIVES = ("render", "select", "multi_select", "confirm", "ask_text", "_captured")
+PRIMITIVES = ("render", "select", "multi_select", "confirm", "ask_text", "_captured",
+              "page", "_room")
 #: The most paths the walk may take in one state. The many state takes 35.
 WALK_LIMIT = 100
 #: How a path names an operator: by the section of the list it is in, or, when
 #: a box is ticked for it, as a name. In a command, each operator the path
-#: picked is NAME and any other operator is OTHER.
+#: picked is NAME and any other operator is OTHER. A numbered row that names no
+#: operator is a MESSAGE in the log.
 RUNNING, OFFLINE, NAME, OTHER = "<running>", "<offline>", "<name>", "<other>"
+MESSAGE = "<message>"
 COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 #: The verbs whose handlers live in entry.py, by function name.
 VERB_OF = {fn.__name__: verb for verb, fn in cli.HANDLERS.items()
@@ -1127,10 +1199,17 @@ def _op(name: str, running: bool) -> menu.Op:
     return menu.Op(name, where, f"{name}  ({where})", running)
 
 
+#: The person's mail in the fake states, as inbox prints it and as the log lists it.
+FAKE_MAIL = f"{SENT}  [operator message from alpha (op-1), an operator you started] done"
+FAKE_LOG = (f"{SENT}  alpha -> human  waiting  done",
+            f"From: alpha\nTo: human\nSent: {SENT}\nStatus: waiting\n\ndone")
+
+
 def _busy() -> MenuActions:
     actions = MenuActions()
     actions.running, actions.offline = [_op("alpha", True)], [_op("bravo", False)]
     actions.recoverable = ["charlie"]
+    actions.mail, actions.log = [FAKE_MAIL], [FAKE_LOG]
     return actions
 
 
@@ -1143,6 +1222,7 @@ def _many() -> MenuActions:
     actions.running = [_op("alpha", True), _op("delta force one", True)]
     actions.offline = [_op("bravo", False), _op("echo base two", False)]
     actions.recoverable = ["charlie", "foxtrot unit three"]
+    actions.mail, actions.log = [FAKE_MAIL, FAKE_MAIL], [FAKE_LOG, FAKE_LOG]
     return actions
 
 
@@ -1235,6 +1315,10 @@ def _walk(states=(("idle", MenuActions), ("busy", _busy), ("many", _many),
         return None
 
     previous = sys.gettrace()
+    # The screens fit themselves to the terminal, so the walk fixes its size.
+    terminal = pytest.MonkeyPatch()
+    terminal.setenv("COLUMNS", "80")
+    terminal.setenv("LINES", "24")
     sys.settrace(calls)
     try:
         for kind, make in states:
@@ -1260,7 +1344,8 @@ def _walk(states=(("idle", MenuActions), ("busy", _busy), ("many", _many),
                              for text in (frame.title, *frame.rows, frame.status))
                 received = {"start": actions.started, "stop": actions.stopped,
                             "rename": actions.renamed, "delete": actions.deleted,
-                            "recover": actions.recovered, "attach": actions.attached}
+                            "recover": actions.recovered, "attach": actions.attached,
+                            "send": actions.sent, "inbox": actions.inboxed}
                 passed.update(token for calls in received.values() for argv in calls
                               for token in argv)
                 picked = {label for label in _labels(path) if label in names}
@@ -1298,7 +1383,7 @@ def _walk(states=(("idle", MenuActions), ("busy", _busy), ("many", _many),
                     boxed = label.startswith(("[ ] ", "[x] "))
                     if data:
                         step = data.group(1)
-                        as_named = NAME if boxed else section[step]
+                        as_named = NAME if boxed else section.get(step, MESSAGE)
                     else:
                         step = as_named = _choice(label)
                     if as_named in known:
@@ -1313,6 +1398,7 @@ def _walk(states=(("idle", MenuActions), ("busy", _busy), ("many", _many),
                 known |= found
     finally:
         sys.settrace(previous)
+        terminal.undo()
     return Walk(frozenset(items), frozenset(ran), frozenset(shown),
                 frozenset(passed), frozenset(returned), frozenset(commands))
 
@@ -1569,7 +1655,8 @@ def test_the_walk_takes_a_row_with_a_count_as_a_choice_of_its_own():
     assert sorted(path for _, path in walk.items) == [("Quit",), ("Quit (1)",)]
     assert walk.commands == {("idle", ("Quit (1)",), (("stop", "alpha"),))}
     with pytest.raises(AssertionError, match="Two rows on 'operator' offer one choice"):
-        _walk((("idle", MenuActions),), run=_one_screen(f"{COUNTED} (2)", f"{COUNTED} (1)"))
+        _walk((("idle", MenuActions),),
+              run=_one_screen(f"{COUNTED[0]} (2)", f"{COUNTED[0]} (1)"))
 
 
 def test_the_screens_branch_only_in_statements():
@@ -1666,7 +1753,7 @@ def _map_row(case: Case) -> str:
     menu_cells, words = [], {}
     for step in case.menu:
         if isinstance(step, Text):
-            words[step.value] = "NEW" if words else "NAME"
+            words[step.value] = step.word or ("NEW" if words else "NAME")
             menu_cells += [f"type {words[step.value]}", "Enter"]
         elif isinstance(step, Toggle):
             words[step.label] = "NAME ..."

@@ -103,6 +103,21 @@ def waiting(recipient: str) -> int:
     return len(_messages(box(recipient) / PENDING))
 
 
+def history() -> list:
+    """Every readable message in every box as (recipient, state, message),
+    oldest first."""
+    import config
+    try:
+        boxes = sorted((config.OPERATOR_HOME / "mail").iterdir())
+    except OSError:
+        return []
+    found = sorted((path.name, folder.name, state, path) for folder in boxes
+                   for state in (PENDING, DELIVERING, DELIVERED)
+                   for path in _messages(folder / state))
+    return [(recipient, state, message) for _, recipient, state, path in found
+            if (message := _read(path)) is not None]
+
+
 def forget(recipient: str) -> bool:
     """Delete the box. False when some of it is still there."""
     shutil.rmtree(box(recipient), ignore_errors=True)
@@ -117,7 +132,7 @@ def line(message: dict) -> str:
     else:
         sender = (f"{message['from_name'].translate(_UNBRACKETED)} ({message['from']}), "
                   f"{message['relation']}")
-    return f"[operator message from {_flat(sender)}] {_flat(message['text'])}"
+    return f"[operator message from {flat(sender)}] {flat(message['text'])}"
 
 
 def deliver(instance) -> int:
@@ -147,7 +162,7 @@ def deliver(instance) -> int:
     return arrived
 
 
-def _flat(text: str) -> str:
+def flat(text: str) -> str:
     return "".join(ch if ch.isprintable() else " " for ch in text).strip()
 
 

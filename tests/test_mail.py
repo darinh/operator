@@ -36,6 +36,25 @@ def test_mail_comes_out_oldest_first_and_once():
     assert not list(mail.box(BOX).rglob("*.tmp")), "a half-written message was left"
 
 
+def test_history_is_every_message_in_every_box_oldest_first_with_its_state(monkeypatch):
+    clock = iter(range(1, 100))
+    monkeypatch.setattr(mail, "time_ns", lambda: next(clock))
+    for to, text in ((BOX, "one"), (HUMAN, "two"), (BOX, "three")):
+        mail.post(to, _message(text, to=to))
+    mail.filed(mail.take(BOX)[0])
+    mail.take(BOX)
+    (mail.box(HUMAN) / mail.DELIVERED).mkdir()
+    (mail.box(HUMAN) / mail.DELIVERED / "00000000000000000000-0.json").write_text(
+        "{not json", encoding="utf-8")
+    assert [(to, state, message["text"]) for to, state, message in mail.history()] == [
+        (BOX, mail.DELIVERED, "one"), (HUMAN, mail.PENDING, "two"),
+        (BOX, mail.DELIVERING, "three")]
+
+
+def test_history_with_no_mail_is_empty():
+    assert mail.history() == []
+
+
 def test_mail_posted_within_one_clock_tick_keeps_its_order(monkeypatch):
     monkeypatch.setattr(mail, "time_ns", lambda: 1_700_000_000_000_000_000)
     for n in range(10):

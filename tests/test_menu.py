@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from operator_cli.menu import Leave, Op, Row, action_screen, ask_text, confirm
-from operator_cli.menu import list_screen, multi_select, render, run, select
+from operator_cli.menu import list_screen, multi_select, page, render, run, select
 from operator_cli.menu import start_screen
 
 
@@ -39,6 +39,30 @@ class Actions:
         self.attached = []
         self.problems = {}
         self.unreadable = []
+        self.mail = []
+        self.log = []
+        self.sent = []
+        self.inboxed = []
+
+    def waiting_count(self):
+        return len(self.mail)
+
+    def base_operators(self):
+        return list(self.running), list(self.offline)
+
+    def send(self, argv):
+        self.sent.append(list(argv))
+        print(f"sent to {argv[0]}")
+        return 0
+
+    def inbox(self, argv):
+        self.inboxed.append(list(argv))
+        print("\n".join(self.mail) or "No messages.")
+        self.mail = []
+        return 0
+
+    def message_log(self):
+        return list(self.log)
 
     def start_problem(self, name):
         return self.problems.get(name)
@@ -115,6 +139,63 @@ def test_render_clears_and_marks_the_highlighted_row(capsys):
         "> Start an operator\n"
         "  Quit\n"
     )
+
+
+def _terminal(monkeypatch, columns, lines):
+    monkeypatch.setenv("COLUMNS", str(columns))
+    monkeypatch.setenv("LINES", str(lines))
+
+
+def test_render_cuts_a_row_to_the_terminal_width(monkeypatch, capsys):
+    _terminal(monkeypatch, 13, 24)
+    render("t", ["0123456789abc"], highlight=None)
+    assert capsys.readouterr().out.endswith("t\n  0123456789\n")
+
+
+def test_select_scrolls_a_list_longer_than_the_terminal(monkeypatch):
+    _terminal(monkeypatch, 80, 8)
+    board = Board()
+    rows = [Row("Heading:", False), *[Row(f"row {n}") for n in range(20)]]
+    assert select("pick", rows, iter(["down"] * 12 + ["enter"]), board) == 13
+    assert max(len(frame["rows"]) for frame in board.frames) == 6
+    last = board.frames[-1]
+    assert last["rows"][last["highlight"]] == "row 12"
+
+
+def test_select_shows_the_heading_again_when_the_highlight_wraps_to_the_top(monkeypatch):
+    _terminal(monkeypatch, 80, 8)
+    board = Board()
+    rows = [Row("Heading:", False), *[Row(f"row {n}") for n in range(20)]]
+    select("pick", rows, iter(["up", "down", "enter"]), board)
+    wrapped = board.frames[1]
+    assert wrapped["rows"][wrapped["highlight"]] == "row 19"
+    assert board.frames[2]["rows"][:2] == ["Heading:", "row 0"]
+
+
+def test_select_leaves_room_for_the_status_and_the_title(monkeypatch):
+    _terminal(monkeypatch, 80, 10)
+    board = Board()
+    select("one\ntwo", [Row(str(n)) for n in range(20)], iter(["enter"]), board,
+           status="note")
+    # status, a blank line, two title lines, and the line the cursor rests on
+    assert len(board.frames[0]["rows"]) == 10 - 4 - 1
+
+
+def test_page_wraps_to_the_terminal_and_scrolls_no_further_than_the_end(monkeypatch):
+    _terminal(monkeypatch, 23, 6)
+    board = Board()
+    text = "one two three four five six seven eight nine ten\n\nlast"
+    page("title", text, iter(["up", "down", "down", "down", "down", "esc"]), board)
+    lines = ["one two three four", "five six seven eight", "nine ten", "", "last"]
+    assert [frame["rows"] for frame in board.frames] == [
+        lines[:4], lines[:4], lines[1:], lines[1:], lines[1:], lines[1:]]
+    assert {frame["highlight"] for frame in board.frames} == {None}
+
+
+def test_page_returns_on_enter():
+    board = Board()
+    assert page("title", "text", iter(["enter"]), board) is None
+    assert len(board.frames) == 1
 
 
 def test_select_skips_headings_and_esc_returns_none():
@@ -322,12 +403,12 @@ def test_recover_row_names_the_count_or_says_none_need_it():
     actions.recoverable = ["alpha", "bravo"]
     board = Board()
     assert run(iter(["esc"]), board, actions) == 0
-    assert board.frames[0]["rows"][2] == "Recover operator sessions (2)"
+    assert board.frames[0]["rows"][3] == "Recover operator sessions (2)"
 
     actions.recoverable = []
     board = Board()
-    assert run(iter(["down", "down", "enter", "esc"]), board, actions) == 0
-    assert board.frames[0]["rows"][2] == "No operators need recovery."
+    assert run(iter(["down", "down", "down", "enter", "esc"]), board, actions) == 0
+    assert board.frames[0]["rows"][3] == "No operators need recovery."
     assert board.frames[-1]["title"] == "operator"
     assert actions.recovered == []
 
@@ -336,7 +417,7 @@ def test_space_toggles_and_enter_recovers_only_the_toggled_names():
     actions = Actions()
     actions.recoverable = ["alpha", "bravo", "charlie"]
     board = Board()
-    keys = ["down", "down", "enter", "space", "down", "space", "up", "space",
+    keys = ["down", "down", "down", "enter", "space", "down", "space", "up", "space",
             "enter", "esc"]
     assert run(iter(keys), board, actions) == 0
     assert actions.recovered == [["bravo"]]
@@ -356,10 +437,12 @@ def test_enter_with_nothing_toggled_goes_back():
     actions = Actions()
     actions.recoverable = ["alpha"]
     board = Board()
-    assert run(iter(["down", "down", "enter", "enter", "esc"]), board, actions) == 0
+    assert run(iter(["down", "down", "down", "enter", "enter", "esc"]),
+               board, actions) == 0
     assert actions.recovered == []
     assert [frame["title"] for frame in board.frames] == [
-        "operator", "operator", "operator", "Recover operator sessions", "operator"]
+        "operator", "operator", "operator", "operator", "Recover operator sessions",
+        "operator"]
     assert board.frames[-1]["status"] == ""
 
 
@@ -382,16 +465,26 @@ def test_esc_backs_out_of_every_screen():
                   actions.offline[0]) == [
                       "bravo", "bravo", "bravo", "Operator name:", "bravo"]
     assert actions.renamed == []
-    assert titles(["down", "down", "enter", "esc", "esc"]) == [
-        "operator", "operator", "operator", "Recover operator sessions", "operator"]
+    assert titles(["down", "down", "down", "enter", "esc", "esc"]) == [
+        "operator", "operator", "operator", "operator", "Recover operator sessions",
+        "operator"]
     assert actions.recovered == []
+    assert titles(["down", "down", "enter", "esc", "esc"]) == [
+        "operator", "operator", "operator", "Messaging", "operator"]
+    for item, title in (("Inbox", "Inbox."), ("Send a message", "Send a message to"),
+                        ("Message Log", "Message Log,")):
+        screen = ["down"] * ["Inbox", "Send a message", "Message Log"].index(item)
+        shown = titles(["down", "down", "enter", *screen, "enter", "esc", "esc", "esc"])
+        assert shown[-3].startswith(title), (item, shown)
+        assert shown[-2:] == ["Messaging", "operator"], (item, shown)
+    assert actions.sent == []
     assert multi_select("Recover operator sessions", ["alpha"],
                         iter(["esc"]), Board()) is None
 
 
 def test_esc_on_the_main_menu_quits_0():
-    for keys in (["esc"], ["down", "down", "down", "enter"]):
+    for keys in (["esc"], ["down", "down", "down", "down", "enter"]):
         board = Board()
         assert run(iter(keys), board, Actions()) == 0
         assert {frame["title"] for frame in board.frames} == {"operator"}
-        assert board.frames[-1]["highlight"] == (0 if keys == ["esc"] else 3)
+        assert board.frames[-1]["highlight"] == (0 if keys == ["esc"] else 4)
