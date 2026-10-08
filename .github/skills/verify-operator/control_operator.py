@@ -54,6 +54,13 @@ DRIVEN_SCRIPTS = ("operator", "copilot")
 #: The kernel's order, so the harness talks to the multiplexer operator uses.
 MUX_CANDIDATES = ("tmux", "psmux", "pmux")
 
+#: tmux reads a bare `-t vo-demo` as a prefix, so once vo-demo is gone it names
+#: vo-demo2, another run's session. Measured on tmux 3.4: has-session,
+#: capture-pane, send-keys and kill-session all did. A leading `=` makes it
+#: exact. psmux 3.3.7 matches bare names exactly and will not kill `=NAME`.
+#: The split follows the kernel's mux.py: psmux on Windows, tmux elsewhere.
+PREFIX_TARGETS = os.name != "nt"
+
 #: What a pane sets. Inside one, psmux refuses `attach` as a nested session.
 PANE_VARIABLES = ("TMUX", "TMUX_PANE", "PSMUX_SESSION", "PSMUX_TARGET_SESSION")
 
@@ -228,6 +235,13 @@ def _has_session(session: str) -> bool:
     return session in (proc.stdout or "").splitlines()
 
 
+def _target(session: str, pane: bool = False) -> str:
+    """`-t` for SESSION and no other. A tmux pane target needs the trailing colon."""
+    if not PREFIX_TARGETS:
+        return session
+    return f"={session}:" if pane else f"={session}"
+
+
 def _records(run: Path) -> list[dict]:
     found = []
     for path in sorted((_home(run) / "operators").glob("*.json")):
@@ -257,7 +271,7 @@ def _find_session(run: Path, target: str) -> str | None:
 
 
 def _capture(session: str) -> str | None:
-    proc = _mux_run(["capture-pane", "-p", "-t", session])
+    proc = _mux_run(["capture-pane", "-p", "-t", _target(session, pane=True)])
     return proc.stdout if proc.returncode == 0 else None
 
 
@@ -521,7 +535,7 @@ def cmd_menu(args) -> int:
     meta = _meta(run)
     session = meta["menu_session"]
     if _has_session(session):
-        _mux_run(["kill-session", "-t", session])
+        _mux_run(["kill-session", "-t", _target(session)])
         print(f"menu: closed the old {session} first")
     pane = [sys.executable, str(Path(__file__).resolve()), "exec", "--hold",
             "--run", str(run)]
@@ -540,12 +554,11 @@ def cmd_keys(args) -> int:
     """Type into a session: literal text first, then named keys one at a time."""
     run = Path(args.run).expanduser().resolve()
     session = _session(run, args.target)
-    if args.text:
-        _mux_run(["send-keys", "-t", session, "-l", args.text])
-    for key in args.keys:
-        proc = _mux_run(["send-keys", "-t", session, key])
+    sends = [(f"text {args.text!r}", ["-l", args.text])] if args.text else []
+    for label, keys in sends + [(key, [key]) for key in args.keys]:
+        proc = _mux_run(["send-keys", "-t", _target(session, pane=True), *keys])
         if proc.returncode != 0:
-            print(f"keys: {key}: {proc.stderr.strip()}", file=sys.stderr)
+            print(f"keys: {label}: {proc.stderr.strip()}", file=sys.stderr)
             return 1
         time.sleep(0.2)
     _note(run, f"keys to {args.target}: text={args.text!r} keys={' '.join(args.keys)}")
@@ -625,7 +638,8 @@ def cmd_down(args) -> int:
     run = Path(args.run).expanduser().resolve()
     if not (run / "run.json").exists():
         raise SystemExit(f"no run at {run}, so down has nothing to remove. "
-                         "--run takes one run directory that `up` made.")
+                         "--run takes one run directory, the one holding the "
+                         "run.json that `up` wrote.")
     report, failed = [], False
     meta = json.loads((run / "run.json").read_text(encoding="utf-8"))
     records = _records(run)
@@ -642,7 +656,7 @@ def cmd_down(args) -> int:
         sessions = [r["id"] for r in records] + [meta.get("menu_session")]
         for session in filter(None, sessions):
             if _has_session(session):
-                _mux_run(["kill-session", "-t", session])
+                _mux_run(["kill-session", "-t", _target(session)])
                 report.append(f"killed session {session}")
 
     leftovers = []

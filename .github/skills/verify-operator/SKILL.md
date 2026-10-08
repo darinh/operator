@@ -128,11 +128,11 @@ Proof is a command, its exit code and the on-disk state it left. Stdout alone is
 python .github/skills/verify-operator/control_operator.py down --run <run>
 ```
 
-Run it after every run, and after every failed one. It stops every recorded operator, kills the run's psmux sessions and the menu's, takes an `at-down` snapshot, and removes everything but `artifacts/` and `run.json`. It is idempotent, and it refuses a directory `up` did not make. Every verb that drives the run then refuses with `is down`, while `wait --file`, `evidence` and `doctor` still read what is left. Start the next with a new `--run-id`.
+Run it after every run, and after every failed one. It stops every recorded operator, kills the run's psmux sessions and the menu's, takes an `at-down` snapshot, and removes everything but `artifacts/` and `run.json`. It is idempotent, and it refuses a directory with no `run.json`, which only `up` writes. Every verb that drives the run then refuses with `is down`, while `wait --file`, `evidence` and `doctor` still read what is left. Start the next with a new `--run-id`.
 
 It prints `down: clean` and exits 0, or prints `FAILED` and exits 1 when any of these happened:
 
-- A process still named the run 20 seconds after the stops. It kills the process, because a leftover means operator leaked one.
+- A process's command line still named a path in the run, outside `artifacts/`, 20 seconds after the stops. It kills the process, because a leftover means operator leaked one. That includes anything a person started there, such as an editor on a file in `repo/`, so close those first. An editor on `artifacts/` is spared.
 - A runner launched anything but the fake.
 - A directory could not be removed.
 

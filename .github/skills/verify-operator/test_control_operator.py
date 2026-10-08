@@ -270,6 +270,52 @@ def test_a_session_is_found_by_its_exact_name(monkeypatch, listed, code, expecte
     assert control._has_session("vo-test") is expected
 
 
+def _targets_named(run, monkeypatch) -> list[tuple[str, str]]:
+    """Drive every verb that names a session and return each `-t` it passed."""
+    _record_operator(run, "op-11111111", "lead")
+    live, targets = {"vo-test", "op-11111111"}, []
+
+    def mux(args, env=None, cwd=None):
+        if "-t" in args:
+            targets.append((args[0], args[args.index("-t") + 1]))
+        return SimpleNamespace(returncode=0, stdout="screen", stderr="")
+
+    monkeypatch.setattr(control, "_mux", lambda: "mux")
+    monkeypatch.setattr(control, "_has_session", lambda s: s in live)
+    monkeypatch.setattr(control, "_mux_run", mux)
+    control.main(["menu", "--run", str(run)])
+    control.main(["keys", "--run", str(run), "--text", "hi", "Enter"])
+    control.main(["screen", "--run", str(run), "--target", "lead", "--label", "x"])
+    control.cmd_down(SimpleNamespace(run=str(run)))
+    return targets
+
+
+def test_on_tmux_every_target_is_exact(run, monkeypatch):
+    """Measured on tmux 3.4 with only vo-pfx2 alive: a bare `-t vo-pfx` read
+    vo-pfx2's pane, typed into it, and killed it."""
+    monkeypatch.setattr(control, "PREFIX_TARGETS", True)
+    assert _targets_named(run, monkeypatch) == [
+        ("kill-session", "=vo-test"), ("send-keys", "=vo-test:"),
+        ("send-keys", "=vo-test:"), ("capture-pane", "=op-11111111:"),
+        ("kill-session", "=op-11111111"), ("kill-session", "=vo-test")]
+
+
+def test_on_psmux_every_target_is_bare(run, monkeypatch):
+    """psmux 3.3.7 matches a bare name exactly and will not kill `=NAME`."""
+    monkeypatch.setattr(control, "PREFIX_TARGETS", False)
+    assert _targets_named(run, monkeypatch) == [
+        ("kill-session", "vo-test"), ("send-keys", "vo-test"), ("send-keys", "vo-test"),
+        ("capture-pane", "op-11111111"), ("kill-session", "op-11111111"),
+        ("kill-session", "vo-test")]
+
+
+def test_keys_fails_when_its_text_does_not_arrive(run, monkeypatch, capsys):
+    monkeypatch.setattr(control, "_mux_run", lambda args, env=None, cwd=None:
+                        SimpleNamespace(returncode=1, stdout="", stderr="no session"))
+    assert control.main(["keys", "--run", str(run), "--text", "hi"]) == 1
+    assert "no session" in capsys.readouterr().err
+
+
 def test_a_target_is_the_menu_or_an_operator_by_name_or_id(run):
     _record_operator(run, "op-11111111", "lead")
     assert control._session(run, "menu") == "vo-test"
@@ -484,20 +530,22 @@ def test_teardown_spares_the_caller_and_its_ancestors(run):
 
 def test_teardown_claims_only_its_own_run_directory(run):
     """Run ids share prefixes. This skill's own proof used demo and demo-menu2.
-    A person reading the kept proof in an editor is not the run's either."""
+    A person reading the kept proof in an editor is not the run's either, but
+    one editing the scratch repo holds what down is about to delete."""
     sibling = run.parent / (run.name + "-menu2")
     processes = [
         {"pid": 20, "ppid": 5, "text": f"{run / 'venv' / 'python.exe'} -m runner"},
         {"pid": 21, "ppid": 5, "text": f'python control_operator.py exec --run "{run}"'},
         {"pid": 22, "ppid": 5, "text": f"python control_operator.py exec --run {run}"},
+        {"pid": 23, "ppid": 5, "text": f"code {run / 'repo' / 'notes.md'}"},
         {"pid": 30, "ppid": 5, "text": f"{sibling / 'venv' / 'python.exe'} -m runner"},
         {"pid": 31, "ppid": 5, "text": f"python x.py {run}2"},
         {"pid": 40, "ppid": 5, "text": f"code {run / 'artifacts' / 'transcript.md'}"},
     ]
-    assert [p["pid"] for p in control._ours(processes, run, 99)] == [20, 21, 22]
+    assert [p["pid"] for p in control._ours(processes, run, 99)] == [20, 21, 22, 23]
 
 
-def test_down_refuses_a_directory_up_did_not_make(tmp_path, monkeypatch):
+def test_down_refuses_a_directory_without_the_run_json_up_writes(tmp_path, monkeypatch):
     """`down --run .` from the checkout would otherwise kill whatever names it
     and remove its venv."""
     (tmp_path / "venv").mkdir()
