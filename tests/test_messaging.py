@@ -16,11 +16,13 @@ from test_handoff import _seat
 
 
 @pytest.mark.parametrize("verb", sorted(cli.HANDLERS))
-def test_every_verb_answers_help_from_a_fresh_interpreter(tmp_path, verb):
-    """This checks only what a verb runs before it reads --help. `send` and
-    `inbox` once imported the kernel there, before putting it on the path, and
-    crashed when installed. The suite missed it, because its conftest already
-    has the kernel on the path."""
+def test_no_verb_crashes_in_a_fresh_interpreter(tmp_path, verb):
+    """Each verb runs with --help in a fresh interpreter, against an empty
+    home, and must not print a traceback. Most stop at their usage line. A
+    verb that does not read --help runs in full. `send` and `inbox` once
+    imported the kernel before putting it on the path, and crashed when
+    installed. The suite missed it, because its conftest already has the
+    kernel on the path."""
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     env.update(COPILOT_OPERATOR_HOME=str(tmp_path), COPILOT_LOG_DIR=str(tmp_path / "logs"))
     result = subprocess.run(

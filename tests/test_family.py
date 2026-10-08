@@ -114,6 +114,24 @@ def test_the_fifth_running_child_waits_until_one_stops_or_the_cap_rises(
     assert family.cap_problem(_agent(lead), new=True) is None
 
 
+def test_a_child_whose_supervisor_is_still_starting_takes_its_place(tmp_path, monkeypatch):
+    """A launch that has not published its pid can still come up, so the next
+    start counts it, or a slow supervisor lets one child past the cap."""
+    import os
+
+    import supervisor_control
+    from supervisor_records import _record_supervisor_starting
+    [lead] = _line(tmp_path, "lead")
+    kids = [operators.create(f"kid{n}", tmp_path, parent=lead.id) for n in range(4)]
+    monkeypatch.setattr(supervisor_control, "active_instances",
+                        lambda: [kid.instance() for kid in kids[:3]])
+    assert family.cap_problem(_agent(lead), new=True) is None
+    _record_supervisor_starting(kids[3].instance(), os.getpid())
+    assert family.cap_problem(_agent(lead), new=True) == (
+        "lead already runs 4 children, and OPERATOR_MAX_CHILDREN allows 4. "
+        "Stop one first.")
+
+
 def test_a_fourth_level_is_refused_until_the_depth_rises(tmp_path):
     a, b, c = _line(tmp_path, "a", "b", "c")
     assert family.cap_problem(_agent(b), new=True) is None

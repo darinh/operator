@@ -58,14 +58,12 @@ def take(recipient: str) -> "tuple[Path, dict] | None":
     for path in _messages(box(recipient) / PENDING):
         try:
             held.mkdir(exist_ok=True)
+            # A rename keeps the file's time, and requeue_stale reads a claim's
+            # age from it. Stamped first, a claim is fresh the moment it exists.
+            os.utime(path)
             os.rename(path, held / path.name)
         except OSError:
             continue
-        try:
-            # A rename keeps the time it was posted. requeue_stale needs the claim's.
-            os.utime(held / path.name)
-        except OSError:
-            pass
         message = _read(held / path.name)
         if message is not None:
             return held / path.name, message

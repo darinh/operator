@@ -61,12 +61,13 @@ CLI = REPO / "operator_cli"
 # Raised to 1511/1926 when the new messaging.py added `operator send` and
 # `operator inbox`, and list learned to say when mail waits for the person.
 # Both are the measured sizes.
-# Raised to 1529/1963 when two operators starting children at once had to take
-# turns, so both cannot take a parent's last place; when the catalog's lock
-# became a file lock any verb can hold; and when list stopped telling an
-# operator about the person's mail. Both are the measured sizes.
-MAX_CLI_CODE_LINES = 1529
-MAX_CLI_TOTAL_LINES = 1963
+# Raised to 1531/1966 when two operators starting children at once had to take
+# turns, so both cannot take a parent's last place, and a child still starting
+# counts toward the cap; when the catalog's lock became a file lock any verb
+# can hold; and when list stopped telling an operator about the person's mail.
+# Both are the measured sizes.
+MAX_CLI_CODE_LINES = 1531
+MAX_CLI_TOTAL_LINES = 1966
 
 
 def cli_modules() -> list[Path]:

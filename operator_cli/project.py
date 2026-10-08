@@ -63,8 +63,8 @@ class Locked(OSError):
 
 @contextmanager
 def file_lock(lock: Path, what: str, wait: float = 30.0):
-    """Hold ``lock`` against every other operator command. The system lets go
-    when a holder dies, so a crash never leaves it held."""
+    """Hold ``lock`` against any other command holding the same file. The
+    system lets go when a holder dies, so a crash never leaves it held."""
     lock.parent.mkdir(parents=True, exist_ok=True)
     fh = open(lock, "a+b")
     try:
