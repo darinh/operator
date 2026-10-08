@@ -89,6 +89,39 @@ def test_no_task_is_just_the_preamble(launched):
     assert "Task:" not in prompt
 
 
+def test_a_person_starting_an_operator_is_recorded_as_its_parent(launched, monkeypatch):
+    import process_tree
+    monkeypatch.setattr(process_tree, "ancestry", lambda pid: [4321, 1])
+    assert lifecycle.start(["alpha"]) == 0
+    record = operators.find("alpha")
+    assert (record.parent, record.started_by_pid) == (operators.HUMAN, 4321)
+
+
+def test_an_agent_starting_an_operator_is_recorded_as_its_parent(
+        launched, monkeypatch, tmp_path):
+    import json
+    import op
+    import process_identity
+    import process_tree
+    lead = operators.create("lead", tmp_path)
+    op.Instance(lead.id).custody_file.write_text(
+        json.dumps({"pid": 500, "start": "win:1", "session": 2}), encoding="utf-8")
+    monkeypatch.setattr(process_tree, "ancestry", lambda pid: [77, 500, 1])
+    monkeypatch.setattr(process_identity, "process_start_token", lambda pid: "win:1")
+    assert lifecycle.start(["scout", "look around"]) == 0
+    record = operators.find("scout")
+    assert (record.parent, record.started_by_pid) == (lead.id, 500)
+
+
+def test_start_refuses_when_it_cannot_tell_who_is_asking(launched, monkeypatch, capsys):
+    import process_tree
+    monkeypatch.setattr(process_tree, "ancestry", lambda pid: None)
+    assert lifecycle.start(["alpha"]) == 1
+    assert capsys.readouterr().err == (
+        "operator start: could not read the process table\n")
+    assert operators.find("alpha") is None
+
+
 def test_rename_prints_the_old_and_new_names(tmp_path, capsys):
     record = operators.create("alpha", tmp_path)
     assert lifecycle.rename(["alpha", "bravo"]) == 0

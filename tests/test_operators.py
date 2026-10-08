@@ -33,6 +33,35 @@ def test_a_name_equal_to_another_records_id_is_refused(tmp_path):
         operators.create(first.id, tmp_path)
 
 
+def test_lineage_is_stored_and_survives_a_rename(tmp_path):
+    parent = operators.create("Alpha", tmp_path)
+    child = operators.create("Bravo", tmp_path, parent=parent.id, started_by_pid=4242)
+    assert operators.find("bravo") == child
+    assert (child.parent, child.started_by_pid) == (parent.id, 4242)
+    renamed = operators.rename(child, "Charlie")
+    assert (renamed.parent, renamed.started_by_pid) == (parent.id, 4242)
+    assert operators.find("charlie") == renamed
+
+
+def test_a_record_from_before_lineage_reads_as_started_by_a_person(tmp_path):
+    directory = operators.records_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "op-0ld00001.json").write_text(json.dumps(
+        {"id": "op-0ld00001", "name": "old", "cwd": str(tmp_path),
+         "created": "2026-01-01T00:00:00Z"}), encoding="utf-8")
+    found = operators.find("old")
+    assert (found.parent, found.started_by_pid) == (operators.HUMAN, 0)
+    assert operators.unreadable() == []
+
+
+def test_human_is_not_a_name_an_operator_can_take(tmp_path):
+    for name in ("human", "Human", " HUMAN "):
+        assert "reserved" in operators.name_problem(name)
+    first = operators.create("Alpha", tmp_path)
+    with pytest.raises(operators.BadName, match="reserved"):
+        operators.rename(first, "human")
+
+
 def test_rename_keeps_the_id_and_the_files(tmp_path):
     from config import RESTART_DIR
     created = operators.create("Alpha", tmp_path)

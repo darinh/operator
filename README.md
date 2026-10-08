@@ -98,6 +98,8 @@ Handoff is for the agent inside the session, not the menu. It writes a handoff f
 
 `operator handoff` identifies the calling session by walking its process ancestry and matching the custody record the runner wrote at launch. It refuses if it cannot find exactly one operator. `--instance` is an optional cross-check, not the address. This is a check against a caller confused about which session it is in. It is not a security boundary against other code running as the same user. Sessions launched before this check existed have no custody record, so stop and restart those operators after upgrading.
 
+`operator start` uses the same walk to record who asked. When it runs inside an operator's session, the new operator is that operator's child. Otherwise a person started it. `operator list` draws each child indented under its parent. A child whose parent was deleted lists at the top. Records written before operators had parents read as started by a person. Because the walk stops at a process whose parent has exited, a command an agent launches detached reads as a person's.
+
 ## Tests
 
 `python -m pytest -q` runs the suite. CI is Windows and Linux on Python 3.10 and 3.12.

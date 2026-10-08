@@ -24,6 +24,20 @@ class Custody:
     session: int
 
 
+@dataclass(frozen=True)
+class Agent:
+    """A process inside an operator's session."""
+    record: object
+    session: int
+    copilot_pid: int
+
+
+@dataclass(frozen=True)
+class Human:
+    """A process inside no operator's session. ``shell_pid`` is its parent."""
+    shell_pid: int
+
+
 def file_in(directory: Path, op_id: str) -> Path:
     return Path(directory) / f"{op_id}.custody.json"
 
@@ -65,11 +79,10 @@ def read(path: Path) -> "Custody | None":
     return Custody(pid, start, session)
 
 
-def identify(pid: int) -> "tuple | str":
-    """The one operator this process is inside, or a one-line refusal.
+def caller(pid: int) -> "Agent | Human | str":
+    """Who is running ``pid``: an operator's agent, a person, or why that is unknown.
 
-    The tuple is ``(operator, session)``. A string is the refusal, and the
-    caller must write nothing.
+    A string is the reason, worded to follow ``operator VERB:``.
     """
     import operators
     import process_identity
@@ -77,10 +90,10 @@ def identify(pid: int) -> "tuple | str":
 
     chain = process_tree.ancestry(pid)
     if chain is None:
-        return "operator handoff: could not read the process table"
+        return "could not read the process table"
     records = operators.all_operators()
     if records is None:
-        return "operator handoff: could not read operators"
+        return "could not read operators"
     matches = []
     for record in records:
         custody = read(file_in(RESTART_DIR, record.id))
@@ -89,9 +102,23 @@ def identify(pid: int) -> "tuple | str":
         live = process_identity.process_start_token(custody.pid)
         if process_identity.same_start_token(custody.start, live) is not True:
             continue
-        matches.append((record, custody.session))
+        matches.append(Agent(record, custody.session, custody.pid))
     if not matches:
-        return "operator handoff: this process is not inside an operator session"
+        return Human(chain[0] if chain else 0)
     if len(matches) > 1:
-        return "operator handoff: more than one operator matches this process"
+        return "more than one operator matches this process"
     return matches[0]
+
+
+def identify(pid: int) -> "tuple | str":
+    """The one operator this process is inside, or a one-line refusal.
+
+    The tuple is ``(operator, session)``. A string is the refusal, and the
+    caller must write nothing.
+    """
+    found = caller(pid)
+    if isinstance(found, Human):
+        found = "this process is not inside an operator session"
+    if isinstance(found, str):
+        return f"operator handoff: {found}"
+    return found.record, found.session

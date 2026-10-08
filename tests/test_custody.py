@@ -47,3 +47,70 @@ def test_identify_returns_the_one_operator_whose_token_matches(
 def os_pid() -> int:
     import os
     return os.getpid()
+
+
+def _session(tmp_path, monkeypatch, name, pid, session=1, token="win:111"):
+    import operators
+    monkeypatch.chdir(tmp_path)
+    record = operators.create(name, tmp_path)
+    op.Instance(record.id).custody_file.write_text(
+        json.dumps({"pid": pid, "start": token, "session": session}),
+        encoding="utf-8")
+    return record
+
+
+def test_caller_is_the_agent_whose_copilot_is_an_ancestor(tmp_path, monkeypatch):
+    record = _session(tmp_path, monkeypatch, "alpha", 424242, session=3)
+    monkeypatch.setattr(process_tree, "ancestry", lambda pid: [77, 424242, 1])
+    monkeypatch.setattr(process_identity, "process_start_token", lambda pid: "win:111")
+    who = custody.caller(os_pid())
+    assert who == custody.Agent(record, 3, 424242)
+
+
+def test_caller_is_a_person_when_no_session_is_an_ancestor(tmp_path, monkeypatch):
+    _session(tmp_path, monkeypatch, "alpha", 424242)
+    monkeypatch.setattr(process_tree, "ancestry", lambda pid: [77, 1])
+    monkeypatch.setattr(process_identity, "process_start_token", lambda pid: "win:111")
+    assert custody.caller(os_pid()) == custody.Human(77)
+
+
+def test_caller_is_a_person_when_the_recorded_pid_was_reused(tmp_path, monkeypatch):
+    _session(tmp_path, monkeypatch, "alpha", 424242)
+    monkeypatch.setattr(process_tree, "ancestry", lambda pid: [77, 424242])
+    monkeypatch.setattr(process_identity, "process_start_token", lambda pid: "win:999")
+    assert custody.caller(os_pid()) == custody.Human(77)
+
+
+def test_two_sessions_in_one_ancestry_is_a_refusal(tmp_path, monkeypatch):
+    _session(tmp_path, monkeypatch, "outer", 500)
+    _session(tmp_path, monkeypatch, "inner", 600)
+    monkeypatch.setattr(process_tree, "ancestry", lambda pid: [77, 600, 90, 500])
+    monkeypatch.setattr(process_identity, "process_start_token", lambda pid: "win:111")
+    assert custody.caller(os_pid()) == "more than one operator matches this process"
+
+
+def test_two_operators_claiming_one_process_is_a_refusal(tmp_path, monkeypatch):
+    _session(tmp_path, monkeypatch, "alpha", 500)
+    _session(tmp_path, monkeypatch, "bravo", 500)
+    monkeypatch.setattr(process_tree, "ancestry", lambda pid: [77, 500])
+    monkeypatch.setattr(process_identity, "process_start_token", lambda pid: "win:111")
+    assert custody.caller(os_pid()) == "more than one operator matches this process"
+
+
+def test_handoff_refusals_read_as_they_did_before_callers_had_kinds(
+        tmp_path, monkeypatch):
+    import operators
+    monkeypatch.setattr(process_identity, "process_start_token", lambda pid: "win:111")
+    monkeypatch.setattr(process_tree, "ancestry", lambda pid: None)
+    assert custody.identify(1) == "operator handoff: could not read the process table"
+    monkeypatch.setattr(process_tree, "ancestry", lambda pid: [500])
+    readable = operators.all_operators
+    monkeypatch.setattr(operators, "all_operators", lambda: None)
+    assert custody.identify(1) == "operator handoff: could not read operators"
+    monkeypatch.setattr(operators, "all_operators", readable)
+    assert custody.identify(1) == (
+        "operator handoff: this process is not inside an operator session")
+    _session(tmp_path, monkeypatch, "alpha", 500)
+    _session(tmp_path, monkeypatch, "bravo", 500)
+    assert custody.identify(1) == (
+        "operator handoff: more than one operator matches this process")
