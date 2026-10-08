@@ -175,7 +175,12 @@ MAX_MODULE_LINES = 603
 #: Raised from 2822 to 2833 so the menu's Message Log can list every message in
 #: the home. `mail.history` reads each box's pending, delivering and delivered
 #: files, oldest first, skipping one it cannot read. 2833 is the measured size.
-MAX_KERNEL_CODE_LINES = 2833
+#:
+#: Raised from 2833 to 2840 so that order holds across boxes. `mail._stamp`
+#: keeps one last stamp for the home; the per-box scan it replaced let two
+#: messages sent in one coarse Windows tick to different boxes swap places.
+#: 2840 is the measured size.
+MAX_KERNEL_CODE_LINES = 2840
 
 #: Per-module code ceiling, the same split applied one file down.
 #: Raised from 325 when the runner records custody beside the pid file.

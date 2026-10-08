@@ -51,6 +51,18 @@ def test_history_is_every_message_in_every_box_oldest_first_with_its_state(monke
         (BOX, mail.DELIVERING, "three")]
 
 
+def test_history_keeps_the_order_of_mail_sent_within_one_clock_tick(monkeypatch):
+    monkeypatch.setattr(mail, "time_ns", lambda: 1_700_000_000_000_000_000)
+    # Each later post draws a smaller suffix, so only the stamp can order them.
+    suffixes = iter(f"{n:08x}" for n in range(99, 0, -1))
+    monkeypatch.setattr(mail, "secrets", SimpleNamespace(token_hex=lambda _: next(suffixes)))
+    mail.post(BOX, _message("one"))
+    mail.filed(mail.take(BOX)[0])
+    mail.post(BOX, _message("two"))
+    mail.post(HUMAN, _message("three", to=HUMAN))
+    assert [message["text"] for _, _, message in mail.history()] == ["one", "two", "three"]
+
+
 def test_history_with_no_mail_is_empty():
     assert mail.history() == []
 
