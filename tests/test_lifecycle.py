@@ -252,6 +252,38 @@ def test_delete_keeps_the_project_when_a_sibling_record_will_not_load(
     assert operators.find("alpha") is None
 
 
+def _repo_with_worktree(tmp_path):
+    import subprocess
+    primary, linked = tmp_path / "primary", tmp_path / "linked"
+    primary.mkdir()
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t",
+           "-c", "commit.gpgsign=false"]
+    for args in (["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "x"],
+                 ["worktree", "add", "-q", str(linked)]):
+        subprocess.run(git + args, cwd=primary, check=True)
+    return primary, linked
+
+
+def test_delete_keeps_the_project_while_another_checkout_of_it_has_an_operator(
+        tmp_path, monkeypatch):
+    import paths
+    from operator_cli import project
+    primary, linked = _repo_with_worktree(tmp_path)
+    monkeypatch.chdir(primary)
+    assert project.ensure_registered()[0] == 0
+    guid = paths.catalog_guid(primary).guid
+    assert paths.catalog_guid(linked).guid == guid
+    operators.create("main-seat", primary)
+    operators.create("tree-seat", linked)
+    kept = paths.project_dir(guid) / "kept.md"
+    kept.write_text("still here", encoding="utf-8")
+    assert lifecycle.delete(["tree-seat", "--yes"]) == 0
+    assert paths.catalog_guid(primary).guid == guid
+    assert kept.read_text(encoding="utf-8") == "still here"
+    assert lifecycle.delete(["main-seat", "--yes"]) == 0
+    assert not paths.catalog_guid(primary).guid
+
+
 def test_delete_keeps_the_record_when_a_file_cannot_be_removed(
         tmp_path, monkeypatch, capsys):
     import instance as instance_mod

@@ -291,12 +291,14 @@ def delete(rest: list[str]) -> int:
 
 def _must_keep_project(cwd: str) -> bool:
     import operators
+    import paths
     others = operators.all_operators()
     failed = operators.unreadable()
     if others is None or failed is None or failed:
         return True
+    root = paths.primary_repo_root(Path(cwd))
     for other in others:
-        same = _cwd_match(other.cwd, Path(cwd))
+        same = _cwd_match(str(paths.primary_repo_root(Path(other.cwd))), root)
         if same is None or same:
             return True
     return False
