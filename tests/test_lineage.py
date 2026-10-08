@@ -35,3 +35,12 @@ def test_a_loop_in_hand_edited_records_loses_nobody():
     assert sorted(op_id for op_id, _ in rows) == ["a", "x", "y"]
     assert lineage.depth("x", records) == 2
     assert [op.id for op in lineage.subtree("x", records)] == ["y"]
+
+
+def test_a_person_manages_anyone_and_an_operator_only_its_own_children():
+    records = [_op("a"), _op("b", "a"), _op("c", "b"), _op("d", "a"), _op("e"),
+               _op("f", "gone")]
+    managed = {(actor, target.id) for actor in [HUMAN, *"abcdef"] for target in records
+               if lineage.may_manage(actor, target.id, records)}
+    assert managed == {*((HUMAN, op_id) for op_id in "abcdef"),
+                       ("a", "b"), ("a", "d"), ("b", "c")}

@@ -229,8 +229,8 @@ def attached(name):
 BUSY = {"alpha": ("here", "running"), "bravo": ("there", "offline")}
 IDLE_HERE = {"alpha": ("here", "offline")}
 REGISTERED = "registered this directory as a project (<guid>)"
-START_USAGE = ("Usage: operator start [NAME] [--name NAME] [--agent AGENT] "
-               "[--attach] [--fresh] [task...]")
+START_USAGE = ("Usage: operator start [NAME] [--name NAME] [--dir DIR] "
+               "[--agent AGENT] [--attach] [--fresh] [task...]")
 DELETE_USAGE = "Usage: operator delete NAME [--yes]"
 HANDOFF_USAGE = ("Usage: operator handoff --status TEXT [--next TEXT] "
                  "[--context TEXT] [--instance NAME] [--no-restart]")
@@ -365,6 +365,13 @@ CASES = [
          argv=(["start", "--name"], ["start", "--name=", "--attach"],
                ["start", "--name", " ", "--attach"]),
          expect={"said": "operator start --name needs a value"}),
+    Case("start-dir-needs-value", code=2,
+         argv=(["start", "beta", "--dir"], ["start", "beta", "--dir="]),
+         expect={"said": "operator start --dir needs a value"}),
+    Case("start-dir-outside-git", code=2,
+         argv=(["start", "beta", "--dir", "<there>"], ["start", "beta", "--dir=<there>"]),
+         expect={"said": "operator start: <here> is not in a git repository, "
+                         "so it has no worktrees to start in."}),
     Case("start-agent-needs-value", code=2,
          argv=(["start", "--agent"], ["start", "--agent", " ", "fix"]),
          expect={"said": "operator start --agent needs a value"}),
@@ -692,7 +699,7 @@ class World:
         self.capsys.readouterr()
 
     def typed(self, argv):
-        filled = [token.replace("<other-home>", str(self.places["other-home"]))
+        filled = [re.sub(r"<([\w-]+)>", lambda m: str(self.places.get(m[1], m[0])), token)
                   for token in argv]
         code = cli.main(filled)
         seen = self.capsys.readouterr()

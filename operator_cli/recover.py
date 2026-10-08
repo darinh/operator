@@ -26,6 +26,11 @@ def _recover(args) -> int:
     if names and args.all:
         print("pass names or --all, not both", file=sys.stderr)
         return 2
+    if names or args.all:
+        from .family import person_only
+        refused = person_only("recover")
+        if refused:
+            return refused
     if names:
         failed = 0
         for name in names:

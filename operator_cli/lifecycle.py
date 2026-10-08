@@ -7,7 +7,7 @@ from pathlib import Path
 
 from operator_kernel.argtail import at_dashdash
 
-from . import project
+from . import family, project
 
 
 def _cwd_match(recorded: str, current) -> "bool | None":
@@ -23,19 +23,19 @@ def _same_cwd(recorded: str, current) -> bool:
     return _cwd_match(recorded, current) is True
 
 
-def _here() -> list:
+def _here(place=None) -> list:
     import operators
-    here = Path.cwd()
+    here = place or Path.cwd()
     return [record for record in operators.all_operators() or []
             if _same_cwd(record.cwd, here)]
 
 
-def default_name() -> str:
+def default_name(place=None) -> str:
     """The operator working here, or else this directory's name. Empty if several."""
-    here = _here()
+    here = _here(place)
     if len(here) > 1:
         return ""
-    return here[0].name if here else Path.cwd().name
+    return here[0].name if here else (place or Path.cwd()).name
 
 
 def _named(rest: list[str]) -> str:
@@ -59,51 +59,34 @@ def _listed(record) -> str:
     return f"{typed} ({record.name})" if typed == record.id else typed
 
 
-def _caller(verb: str):
-    """The agent or person running this command, or None after saying why not."""
-    import os
-    from custody import caller
-    who = caller(os.getpid())
-    if isinstance(who, str):
-        print(f"operator {verb}: {who}", file=sys.stderr)
-        return None
-    return who
-
-
-def _lineage(who) -> tuple:
-    """(parent, started_by_pid) for an operator ``who`` is starting."""
-    import operators
-    from custody import Agent
-    if isinstance(who, Agent):
-        return who.record.id, who.copilot_pid
-    return operators.HUMAN, who.shell_pid
-
-
 def start(rest: list[str]) -> int:
     from .entry import _bootstrap
     _bootstrap()
-    name, fresh, attach_now, copilot, words = None, False, False, [], []
+    name, fresh, attach_now, copilot, words, where = None, False, False, [], [], None
     options, literal = at_dashdash(rest)
     i = 0
     while i < len(options):
         arg = options[i]
         if arg in ("-h", "--help"):
-            print("Usage: operator start [NAME] [--name NAME] [--agent AGENT] "
+            print("Usage: operator start [NAME] [--name NAME] [--dir DIR] [--agent AGENT] "
                   "[--attach] [--fresh] [task...]")
             return 0
         if arg == "--fresh":
             fresh = True
         elif arg == "--attach":
             attach_now = True
-        elif arg == "--name" or arg.startswith("--name="):
-            if arg == "--name":
+        elif arg in ("--name", "--dir") or arg.startswith(("--name=", "--dir=")):
+            flag, eq, value = arg.partition("=")
+            if not eq:
                 i += 1
-                name = options[i] if i < len(options) else ""
-            else:
-                name = arg.split("=", 1)[1]
-            if not name.strip():
-                print("operator start --name needs a value", file=sys.stderr)
+                value = options[i] if i < len(options) else ""
+            if not value.strip():
+                print(f"operator start {flag} needs a value", file=sys.stderr)
                 return 2
+            if flag == "--name":
+                name = value
+            else:
+                where = value
         elif arg == "--agent":
             i += 1
             if i >= len(options) or not options[i].strip():
@@ -127,44 +110,55 @@ def start(rest: list[str]) -> int:
     import operators
     from supervisor import _spawn_background_loop
     from supervisor_control import active_instances, launch_status
+    who = family.caller("start")
+    if who is None:
+        return 1
+    place = family.place(who, name, attach_now, where)
+    if isinstance(place, int):
+        return place
     explicit = name is not None
     if not explicit:
-        here = _here()
+        here = _here(place)
         if len(here) > 1:
             print(f"{len(here)} operators work here: {', '.join(map(_listed, here))}",
                   file=sys.stderr)
             print("pass a name: operator start NAME", file=sys.stderr)
             return 2
-        name = default_name()
+        name = default_name(place)
     record = operators.find(name) if name.strip() else None
-    if record is not None and (explicit or _same_cwd(record.cwd, Path.cwd())):
+    if record is not None and (explicit or _same_cwd(record.cwd, place)):
+        if where is not None and not _same_cwd(record.cwd, place):
+            return family.refuse("start", f"{record.name} works in {record.cwd}. "
+                                    "Leave out --dir to start it there.")
+        if family.not_yours("start", who, record):
+            return 2
         if any(item.id == record.id for item in active_instances()):
             if attach_now and not fresh and not copilot:
                 print(f"{record.name} is already running")
                 return _attach_when_up(record)
             print(f"{record.name} is already running", file=sys.stderr)
             return 1
+        problem = family.cap_problem(who, new=False)
+        if problem:
+            return family.refuse("start", problem)
     elif record is not None:
         print(f"an operator named {name!r} already works in {record.cwd}",
               file=sys.stderr)
         print("pass a name: operator start --name NAME", file=sys.stderr)
         return 2
     else:
-        problem = operators.name_problem(name)
+        problem = operators.name_problem(name) or family.cap_problem(who, new=True)
         if problem:
             print(problem, file=sys.stderr)
             return 2
-        who = _caller("start")
-        if who is None:
-            return 1
-        parent, started_by = _lineage(who)
-        rc, guid, created = project.ensure_registered()
+        parent, started_by = family.lineage_of(who)
+        rc, guid, created = project.ensure_registered(str(place))
         if rc:
             return rc
         if created:
             print(f"registered this directory as a project ({guid})")
         try:
-            record = operators.create(name, Path.cwd(), parent=parent,
+            record = operators.create(name, place, parent=parent,
                                       started_by_pid=started_by)
         except operators.BadName as exc:
             print(str(exc), file=sys.stderr)
@@ -213,6 +207,9 @@ def attach(rest: list[str]) -> int:
     if record is None:
         print(f"No operator '{name}'.", file=sys.stderr)
         return 1
+    refused = family.person_only("attach")
+    if refused:
+        return refused
     inst = record.instance()
     try:
         if not MUX.has_session(inst.session):
@@ -231,14 +228,24 @@ def stop(rest: list[str]) -> int:
     if not name:
         print("Usage: operator stop NAME", file=sys.stderr)
         return 2
+    import lineage
     import operators
-    from supervisor_control import _request_supervisor_stop
+    from supervisor_control import active_instances, stop_all
     record = operators.find(name)
     if record is None:
         print(f"No operator '{name}'.", file=sys.stderr)
         return 1
-    _request_supervisor_stop(record.instance())
-    print(f"stop requested for {record.name}")
+    who = family.caller("stop")
+    if who is None:
+        return 1
+    if family.not_yours("stop", who, record):
+        return 2
+    live = {inst.id for inst in active_instances()}
+    tree = [record] + [op for op in lineage.subtree(record.id, operators.all_operators() or [])
+                       if op.id in live]
+    stop_all([op.instance() for op in tree])
+    for op in tree:
+        print(f"stop requested for {op.name}")
     return 0
 
 
@@ -254,6 +261,9 @@ def rename(rest: list[str]) -> int:
     if record is None:
         print(f"No operator '{names[0]}'.", file=sys.stderr)
         return 1
+    refused = family.person_only("rename")
+    if refused:
+        return refused
     old = record.name
     try:
         updated = operators.rename(record, names[1])
@@ -293,6 +303,11 @@ def delete(rest: list[str]) -> int:
     if record is None:
         print(f"No operator '{name}'.", file=sys.stderr)
         return 1
+    who = family.caller("delete")
+    if who is None:
+        return 1
+    if family.not_yours("delete", who, record):
+        return 2
     inst = record.instance()
     if (any(item.id == record.id for item in active_instances())
             or _supervisor_present(inst) is not None):

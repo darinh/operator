@@ -236,3 +236,27 @@ def test_launch_status_ignores_the_parents_startup_record(monkeypatch):
     assert launch_status(op.Instance("alpha"), 99, timeout=0) == ("dead", 99)
 
 
+def test_stopping_several_marks_every_one_before_waiting_on_any(home, monkeypatch):
+    import supervisor_control
+    family = [op.Instance(name) for name in ("lead", "scout", "deep")]
+    marked_at_each_wait = []
+
+    def wait(inst):
+        marked_at_each_wait.append(
+            (inst.id, {each.id for each in family if each.stop_marker.exists()}))
+
+    monkeypatch.setattr(supervisor_control, "_request_supervisor_stop", wait)
+    supervisor_control.stop_all(family)
+    everyone = {each.id for each in family}
+    assert sorted(marked_at_each_wait) == sorted((each.id, everyone) for each in family)
+
+
+def test_stopping_several_waits_on_all_of_them_at_once(home, monkeypatch):
+    """Each wait can take a whole stop budget, so waiting in turn would multiply it."""
+    import threading
+    import supervisor_control
+    together = threading.Barrier(3, timeout=5)
+    monkeypatch.setattr(supervisor_control, "_request_supervisor_stop",
+                        lambda inst: together.wait())
+    supervisor_control.stop_all([op.Instance(name) for name in ("lead", "scout", "deep")])
+    assert not together.broken

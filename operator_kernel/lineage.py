@@ -36,6 +36,11 @@ def depth(op_id: str, records) -> int:
     return level
 
 
+def may_manage(actor: str, target_id: str, records) -> bool:
+    """A person may act on any operator. An operator only on its own children."""
+    return actor == HUMAN or parents(records).get(target_id) == actor
+
+
 def tree(records) -> list:
     """(record, depth) for every record, each child after its parent.
 

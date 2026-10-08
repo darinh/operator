@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import time
+from pathlib import Path
 
 import pytest
 
@@ -418,3 +419,125 @@ def test_delete_refuses_a_running_operator(tmp_path, monkeypatch, capsys):
     assert lifecycle.delete(["alpha", "--yes"]) == 1
     assert capsys.readouterr().err.strip() == "stop it first: operator stop alpha"
     assert operators.find("alpha") is not None
+
+
+def _family(tmp_path):
+    """lead, its child scout, scout's child deep, and other, whom a person started."""
+    lead = operators.create("lead", tmp_path)
+    scout = operators.create("scout", tmp_path, parent=lead.id)
+    deep = operators.create("deep", tmp_path, parent=scout.id)
+    other = operators.create("other", tmp_path)
+    return lead, scout, deep, other
+
+
+def test_an_agent_starts_its_child_where_it_works_not_where_its_shell_stands(
+        launched, monkeypatch, tmp_path):
+    from test_handoff import _seat
+    (tmp_path / "lead").mkdir()
+    lead = operators.create("lead", tmp_path / "lead")
+    _seat(monkeypatch, lead)
+    assert lifecycle.start(["scout", "look around"]) == 0
+    scout = operators.find("scout")
+    assert (scout.parent, scout.cwd) == (lead.id, lead.cwd)
+    assert os.getcwd() != lead.cwd
+
+
+def test_an_agent_reaches_only_the_operators_it_started(
+        launched, monkeypatch, tmp_path, capsys):
+    from test_handoff import _seat
+    lead, scout, deep, other = _family(tmp_path)
+    _seat(monkeypatch, scout)
+    for verb, argv in ((lifecycle.start, ["lead"]), (lifecycle.start, ["other"]),
+                       (lifecycle.start, ["scout"]), (lifecycle.stop, ["lead"]),
+                       (lifecycle.stop, ["other"]), (lifecycle.delete, ["lead", "--yes"]),
+                       (lifecycle.delete, ["other", "--yes"])):
+        assert verb(argv) == 2, argv
+    assert lifecycle.attach(["deep"]) == 2
+    assert lifecycle.rename(["deep", "renamed"]) == 2
+    assert lifecycle.start([]) == 2
+    assert lifecycle.start(["deep", "--attach"]) == 2
+    assert launched == []
+    assert sorted(op.name for op in operators.all_operators()) == [
+        "deep", "lead", "other", "scout"]
+    said = capsys.readouterr().err.splitlines()
+    assert said[0] == ("operator start: lead is not your child. "
+                       "An operator may start only the operators it started.")
+    assert said[-4:] == [
+        "operator attach: only a person can do this, not an operator",
+        "operator rename: only a person can do this, not an operator",
+        'operator start: an operator must name the child it starts: operator start NAME "..."',
+        "operator start: only a person can attach, so an operator cannot pass --attach",
+    ]
+
+
+def test_an_agent_restarts_and_deletes_its_own_stopped_child(
+        launched, monkeypatch, tmp_path):
+    from test_handoff import _seat
+    from operator_cli import project
+    monkeypatch.chdir(tmp_path)
+    assert project.ensure_registered()[0] == 0
+    lead, scout, deep, other = _family(tmp_path)
+    _seat(monkeypatch, scout)
+    assert lifecycle.start(["deep", "carry on"]) == 0
+    assert len(launched) == 1
+    assert lifecycle.delete(["deep", "--yes"]) == 0
+    assert operators.find("deep") is None
+
+
+def test_the_fifth_running_child_is_refused_and_nothing_is_recorded(
+        launched, monkeypatch, tmp_path, capsys):
+    import supervisor_control
+    from test_handoff import _seat
+    lead = operators.create("lead", tmp_path)
+    kids = [operators.create(f"kid{n}", tmp_path, parent=lead.id) for n in range(4)]
+    monkeypatch.setattr(supervisor_control, "active_instances",
+                        lambda: [kid.instance() for kid in kids])
+    _seat(monkeypatch, lead)
+    assert lifecycle.start(["kid4"]) == 2
+    assert operators.find("kid4") is None
+    assert "OPERATOR_MAX_CHILDREN allows 4" in capsys.readouterr().err
+    monkeypatch.setenv("OPERATOR_MAX_CHILDREN", "5")
+    assert lifecycle.start(["kid4"]) == 0
+
+
+def test_stop_takes_every_running_operator_under_the_one_named(
+        monkeypatch, tmp_path, capsys):
+    import supervisor_control
+    from test_handoff import _seat
+    lead, scout, deep, other = _family(tmp_path)
+    idle = operators.create("idle", tmp_path, parent=lead.id)
+    running = [lead, scout, deep, other]
+    monkeypatch.setattr(supervisor_control, "active_instances",
+                        lambda: [each.instance() for each in running])
+    stopped = []
+    monkeypatch.setattr(supervisor_control, "stop_all",
+                        lambda insts: stopped.append([i.display_name for i in insts]))
+    assert lifecycle.stop(["lead"]) == 0
+    assert idle.name not in stopped[0]
+    _seat(monkeypatch, lead)
+    assert lifecycle.stop(["scout"]) == 0
+    assert stopped == [["lead", "scout", "deep"], ["scout", "deep"]]
+    assert capsys.readouterr().out.splitlines() == [
+        "stop requested for lead", "stop requested for scout",
+        "stop requested for deep", "stop requested for scout",
+        "stop requested for deep"]
+
+
+def test_dir_starts_an_operator_in_another_checkout_of_this_project(
+        launched, monkeypatch, tmp_path, capsys):
+    import paths
+    primary, linked = _repo_with_worktree(tmp_path)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    monkeypatch.chdir(primary)
+    assert lifecycle.start(["beta", "--dir", str(linked)]) == 0
+    beta = operators.find("beta")
+    assert Path(beta.cwd).resolve() == linked.resolve()
+    assert paths.catalog_guid(linked).guid == paths.catalog_guid(primary).guid
+    assert lifecycle.start(["gamma", f"--dir={plain}"]) == 2
+    assert operators.find("gamma") is None
+    assert lifecycle.start(["beta", "--dir", str(primary)]) == 2
+    err = [line for line in capsys.readouterr().err.splitlines()
+           if not line.startswith("[operator ")]
+    assert err[0].endswith("plain is not a worktree of this project.")
+    assert err[-1] == f"operator start: beta works in {beta.cwd}. Leave out --dir to start it there."

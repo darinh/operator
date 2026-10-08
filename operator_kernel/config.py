@@ -46,6 +46,24 @@ def operator_home() -> Path:
     return Path(override) if override else Path.home() / ".operator"
 
 
+def _cap(variable: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(variable, ""))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def max_children() -> int:
+    """How many children one operator may run at once. ``OPERATOR_MAX_CHILDREN``."""
+    return _cap("OPERATOR_MAX_CHILDREN", 4)
+
+
+def max_depth() -> int:
+    """How deep a line of operators may go, the person's own at 1. ``OPERATOR_MAX_DEPTH``."""
+    return _cap("OPERATOR_MAX_DEPTH", 3)
+
+
 class _CatalogUnreadable:
     """Sentinel: the catalog could not be read, which is not "no entry".
 

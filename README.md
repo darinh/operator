@@ -52,6 +52,7 @@ Each menu choice that runs a command calls the same handler as the typed command
 | `--agent`, any other Copilot option, and a task | The menu asks only for a name. |
 | `--all` | The recover screen has you pick each operator. |
 | `--home` | The menu uses `COPILOT_OPERATOR_HOME`, or `~/.operator` when that is unset. |
+| `--dir` | The menu starts an operator in the directory you stand in. |
 | `operator help`, `--help` and `-h` | The menu lists its own choices. |
 
 ### Only in the menu
@@ -77,9 +78,10 @@ Each menu choice that runs a command calls the same handler as the typed command
 ```
 operator doctor               check that this machine can run operator
 operator start [NAME] [TASK]  start a supervised operator
+operator start NAME --dir DIR start one in another worktree of this repository
 operator list                 list operators
 operator attach NAME          attach this terminal to a running operator
-operator stop NAME            ask an operator's supervisor to stop
+operator stop NAME            stop an operator and every operator under it
 operator rename NAME NEW      rename an operator
 operator delete NAME [--yes]  delete an operator and its settings
 operator recover              list operators that need recovering after a crash
@@ -94,11 +96,13 @@ NAME can also be the operator's id. operator ignores spaces around NAME, as it d
 
 Words after NAME are the task, and Copilot receives them inside its opening prompt. With `--name`, every word is the task. A word that follows a Copilot option such as `--model` and does not start with `-` is that option's value. Pass a value that starts with `-` as `--model=VALUE`. After a flag that takes no value, start the task with `--`.
 
-Handoff is for the agent inside the session, not the menu. It writes a handoff file for that operator's own repo and asks the supervisor to start the next session. When to hand off is the repository's business, in AGENTS.md or from the user. The launch preamble only says that a handoff is possible and how to run it.
+Handoff is for the agent inside the session, not the menu. It writes a handoff file for that operator's own repo and asks the supervisor to start the next session. When to hand off is the repository's business, in AGENTS.md or from the user. The launch preamble says that a handoff is possible and how to run it. It also names the operator, its parent and its children, and how to start and stop children.
 
 `operator handoff` identifies the calling session by walking its process ancestry and matching the custody record the runner wrote at launch. It refuses if it cannot find exactly one operator. `--instance` is an optional cross-check, not the address. This is a check against a caller confused about which session it is in. It is not a security boundary against other code running as the same user. Sessions launched before this check existed have no custody record, so stop and restart those operators after upgrading.
 
 `operator start` uses the same walk to record who asked. When it runs inside an operator's session, the new operator is that operator's child. Otherwise a person started it. `operator list` draws each child indented under its parent. A child whose parent was deleted lists at the top. Records written before operators had parents read as started by a person. Because the walk stops at a process whose parent has exited, a command an agent launches detached reads as a person's.
+
+An operator may start, stop and delete only its own children, and must name each child it starts. It cannot attach, rename or recover. Those are a person's commands. A child starts in its parent's directory, wherever the agent's shell stands. `--dir DIR` starts an operator in another worktree of the same repository. When DIR is not one, it exits 2 and prints the `git worktree add` command that makes it. Outside a git repository, `--dir` always exits 2. An operator may run 4 children at once, and operators nest 3 deep, counting the one a person started. `OPERATOR_MAX_CHILDREN` and `OPERATOR_MAX_DEPTH` change those limits. A person has no limit on the operators they start. `operator stop NAME` also stops every running operator under NAME, and names each one. Deleting an operator leaves its children, which then list at the top.
 
 ## Tests
 

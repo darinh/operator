@@ -254,6 +254,17 @@ def primary_repo_root(start=None) -> Path:
     Returns ``start`` unchanged when git is missing, the call fails, or the
     path is not inside a repository, so callers outside a repo keep their
     previous behaviour.
+    """
+    base = Path(start) if start is not None else Path.cwd()
+    roots = worktree_roots(base)
+    return roots[0] if roots else base
+
+
+def worktree_roots(start) -> "list[Path] | None":
+    """Every checkout of the repository ``start`` is in, the primary first.
+
+    None when git is missing, the call fails, or ``start`` is not inside a
+    repository.
 
     A path that cannot be *examined* is not one of those cases. ``is_dir()``
     raises on EACCES rather than answering, and treating that as "not a
@@ -275,10 +286,10 @@ def primary_repo_root(start=None) -> Path:
     explicit None check keeps a read that failed from reading as a repository
     with no worktrees.
     """
-    base = Path(start) if start is not None else Path.cwd()
+    base = Path(start)
     try:
         if not base.is_dir():
-            return base
+            return None
     except OSError:
         pass
     try:
@@ -289,14 +300,12 @@ def primary_repo_root(start=None) -> Path:
             **_POPEN_KWARGS,
         )
     except (OSError, ValueError, subprocess.SubprocessError):
-        return base
+        return None
     if proc.returncode != 0 or proc.stdout is None:
-        return base
-    for line in proc.stdout.splitlines():
-        if line.startswith("worktree "):
-            candidate = line[len("worktree "):].strip()
-            return Path(candidate) if candidate else base
-    return base
+        return None
+    roots = [Path(line[len("worktree "):].strip()) for line in proc.stdout.splitlines()
+             if line.startswith("worktree ") and line[len("worktree "):].strip()]
+    return roots or None
 
 
 def catalog_rows(fh):

@@ -59,6 +59,12 @@ def test_the_environment_agrees_with_the_bound_constants():
     assert os.environ["COPILOT_OPERATOR_HOME"] == str(op.OPERATOR_HOME)
 
 
+def test_the_caps_a_test_sees_are_the_defaults_whatever_the_developer_set():
+    import config
+    assert not {"OPERATOR_MAX_CHILDREN", "OPERATOR_MAX_DEPTH"} & set(os.environ)
+    assert (config.max_children(), config.max_depth()) == (4, 3)
+
+
 # ── the redirect reaches the modules that hold the names ─────────
 
 
