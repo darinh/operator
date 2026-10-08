@@ -109,8 +109,11 @@ def history() -> list:
     """Every readable message in every box as (recipient, state, message),
     oldest first."""
     found = []
-    for path in sorted(_every_message(), key=lambda path: path.name):
-        # A reader may have moved it on since it was listed.
+    # A reader may move a message on while this looks: listed in two states,
+    # it keeps the later, and gone from where it was listed, it is looked for
+    # further on.
+    latest = {(path.parent.parent, path.name): path for path in _every_message()}
+    for path in sorted(latest.values(), key=lambda path: path.name):
         for state in _STATES[_STATES.index(path.parent.name):]:
             if (message := _read(path.parent.parent / state / path.name)) is not None:
                 found.append((path.parent.parent.name, state, message))

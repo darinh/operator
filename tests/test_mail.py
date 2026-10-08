@@ -105,6 +105,23 @@ def test_history_finds_a_message_a_reader_moved_on_while_it_looked(monkeypatch):
         (mail.DELIVERING, "one"), (mail.DELIVERING, "two")]
 
 
+def test_history_lists_a_message_taken_between_the_scans_of_its_states_once(monkeypatch):
+    mail.post(BOX, _message("one"))
+    scan = mail._messages
+    taken = []
+
+    def taken_once_pending_is_scanned(folder):
+        paths = scan(folder)
+        if folder.name == mail.PENDING and not taken:
+            taken.append(folder)
+            mail.take(BOX)
+        return paths
+
+    monkeypatch.setattr(mail, "_messages", taken_once_pending_is_scanned)
+    assert [(state, message["text"]) for _, state, message in mail.history()] == [
+        (mail.DELIVERING, "one")]
+
+
 def test_history_with_no_mail_is_empty():
     assert mail.history() == []
 

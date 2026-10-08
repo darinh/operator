@@ -110,7 +110,7 @@ COUNTED = ("Recover operator sessions", "Messaging")
 
 def _choice(label: str) -> str:
     """The choice a row offers: its whole text, less the count on a COUNTED row."""
-    stem = re.sub(r" \(\d+\)$", "", label)
+    stem = re.sub(r" \((\d+|\?)\)$", "", label)
     return stem if stem in COUNTED else label
 
 
@@ -310,7 +310,8 @@ LIST_MAIL = ("`operator list` ends by saying how many messages wait for you, whe
 INBOX_WRAPS = ("Inbox wraps a long message to the width of the terminal. "
                "`operator inbox` prints each message on one line.")
 PICKER = ("Send a message lists only your parent and your children, which for a person "
-          "are the operators it started, because `operator send` refuses any other. It "
+          "are the operators it started and any whose parent is deleted, because "
+          "`operator send` refuses any other. It "
           "never lists the person, so an operator's agent mails the person with "
           "`operator send human`.")
 SEND_USAGE = 'Usage: operator send NAME "message"'
@@ -571,6 +572,10 @@ CASES = [
                ("human", "alpha", "carry on")),
          menu=(),
          expect={"said": "Start an operator\nList operators\nMessaging (1)\n"
+                         "No operators need recovery.\nQuit"}),
+    Case("messaging-count-unreadable", unreadable=True, answer="screen",
+         menu=(),
+         expect={"said": "Start an operator\nList operators\nMessaging (?)\n"
                          "No operators need recovery.\nQuit"}),
     Case("send-cancelled", given=IDLE_HERE,
          menu=("Messaging", "Send a message", "alpha", Key("esc"))),

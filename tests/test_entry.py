@@ -670,3 +670,30 @@ def test_start_problem_refuses_only_a_name_it_cannot_start_here(tmp_path, monkey
         f"theirs already works in {there.resolve()}. Choose another name.")
     assert actions.start_problem("-x") == "a name cannot start with -"
     assert actions.start_problem("") == "a name is needed"
+
+
+def test_the_menu_does_not_count_or_pick_for_a_caller_it_cannot_tell(monkeypatch, tmp_path):
+    import custody
+    import mail
+    import operators
+    from operator_cli.entry import _Actions
+    operators.create("alpha", tmp_path)
+    mail.post(operators.HUMAN, {"from": "x", "from_name": "alpha", "to": operators.HUMAN,
+                                "relation": "an operator you started", "text": "done",
+                                "sent": "2026-01-02T03:04:05Z"})
+    monkeypatch.setattr(custody, "caller", lambda pid: "could not read the process table")
+    actions = _Actions()
+    assert actions.waiting_count() == "?"
+    assert actions.recipients() == ([], [], ["could not read the process table"])
+
+
+def test_a_person_may_pick_an_operator_whose_parent_is_deleted(monkeypatch, tmp_path):
+    import custody
+    import operators
+    from operator_cli.entry import _Actions
+    operators.create("alpha", tmp_path)
+    operators.create("scout", tmp_path, parent="op-deleted")
+    monkeypatch.setattr(custody, "caller", lambda pid: custody.Human(None))
+    running, offline, problems = _Actions().recipients()
+    assert sorted(op.name for op in running + offline) == ["alpha", "scout"]
+    assert problems == []
