@@ -67,7 +67,7 @@ Every verb takes `--run <run>`.
 
 `operator` runs the venv's console script in `repo/` with an empty stdin pipe. A verb that would ask a question therefore takes its no-terminal path, as it would in a script. Not `DEVNULL`: on Windows that reads as a terminal. Everything after `--` reaches `operator` untouched. Each call lands in `artifacts/transcript.md` with its exit code and both streams.
 
-`wait --file` takes a glob relative to the run, like `artifacts/agents/lead/stdin.log`, and refuses one that could leave it: absolute, rooted, on a drive, or holding `..`. A match through a link that points outside the run does not count. `agent NAME`, `screen --label`, `evidence --label` and `up --run-id` become paths too, and are refused by the same rule. `wait --screen NAME` keeps polling until NAME's record exists, so it can be started before the operator is.
+`wait --file` takes a glob relative to the run, like `artifacts/agents/lead/stdin.log`, and refuses one that could leave it: absolute, rooted, on a drive, or holding `..`. A match through a link that points outside the run does not count. `agent NAME`, `screen --label`, `evidence --label` and `up --run-id` each become one file or directory name, so each must be a plain name: letters, digits, `.`, `_` and `-`, starting with a letter or digit. The fake files an operator whose name is not plain, like `scout two`, under its id instead: its script is `scripts/<id>.json` and its logs are in `artifacts/agents/<id>/`. `wait --screen NAME` keeps polling until NAME's record exists, so it can be started before the operator is.
 
 ### Scripting an agent
 

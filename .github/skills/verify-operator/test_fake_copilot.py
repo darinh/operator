@@ -116,6 +116,19 @@ def test_text_without_a_preamble_is_unnamed():
     assert fake.identity("no preamble here") == ("unnamed", "")
 
 
+@pytest.mark.parametrize("name", ["../../../escape", "nested/C:escape", "scout two"])
+def test_a_name_that_is_not_plain_is_filed_under_the_id(run, monkeypatch, name):
+    """The kernel takes almost any operator name, and the fake makes paths of it."""
+    _script(run, "op-1a2b3c4d", [{"exit": 3}])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    monkeypatch.setattr(fake.time, "sleep", _never_idle)
+    with pytest.raises(SystemExit) as ended:
+        fake.main(["-i", PREAMBLE.replace("operator scout (", f"operator {name} (")])
+    assert ended.value.code == 3
+    assert [p.name for p in (run / "artifacts" / "agents").iterdir()] == ["op-1a2b3c4d"]
+    assert [p.name for p in run.parent.iterdir()] == ["run"]
+
+
 def test_the_fake_answers_version_without_a_run(monkeypatch, capsys):
     """`doctor` asks it, and a real Copilot would answer differently."""
     monkeypatch.delenv("FAKE_RUN", raising=False)

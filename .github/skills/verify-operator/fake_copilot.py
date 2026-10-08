@@ -15,6 +15,9 @@ At startup it:
    way Copilot does. The runner reads the id from it, and the supervisor types
    mail into a session only once it has one.
 3. Reads its operator name from the preamble's `You are operator NAME (ID).`
+   A name that is not one plain name, the rule `control_operator.py` holds
+   script names to, is replaced by the ID, so a name like `../x` cannot lead
+   the files below out of the run.
 4. Runs the steps in `<run>/artifacts/scripts/NAME.sN.json` for session N, or
    else `NAME.json`. `control_operator.py agent` writes those files.
 5. Reads stdin until it is killed or a line is `/exit`. It appends each line
@@ -49,6 +52,7 @@ STEPS = {
 }
 
 IDENTITY = re.compile(r"You are operator (.+?) \(([^()\s]+)\)\.")
+PLAIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
 def validate_steps(steps) -> None:
@@ -212,7 +216,8 @@ def main(argv: list[str] | None = None) -> int:
 
     prompt = prompt_of(argv)
     name, op_id = identity(prompt)
-    agent = Agent(run_dir, name, op_id)
+    key = next((k for k in (name, op_id) if PLAIN.fullmatch(k)), "unnamed")
+    agent = Agent(run_dir, key, op_id)
     starts = agent.logs / "starts.log"
     session = 1 + (len(starts.read_text(encoding="utf-8").splitlines())
                    if starts.exists() else 0)
@@ -221,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     if log_dir:
         write_process_log(Path(log_dir), session_id, os.getpid(),
                           int(time.time() * 1000))
-    script = script_for(run_dir / "artifacts" / "scripts", name, session)
+    script = script_for(run_dir / "artifacts" / "scripts", key, session)
     agent.log("starts.log", f"[{_now()}] session={session} pid={os.getpid()} "
               f"id={op_id} session_id={session_id} cwd={os.getcwd()} "
               f"operator={shutil.which('operator')} "

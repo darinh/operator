@@ -242,11 +242,18 @@ def _target(session: str, pane: bool = False) -> str:
     return f"={session}:" if pane else f"={session}"
 
 
-def _inside(text: str, refusal: str) -> str:
-    """TEXT, which a verb joins onto a directory, unless it could leave it."""
-    path = PurePath(text)
-    if not text or path.anchor or ".." in path.parts:
-        raise SystemExit(f"{refusal}, not {text!r}")
+PLAIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def _plain(text: str, what: str) -> str:
+    """TEXT, which a verb makes a file or directory name, if it is one plain name.
+
+    Lexical checks on a path miss Windows rules. `resolve()` turns
+    `x\\nested\\C:escape` into the relative `C:escape`, and `x\\...` into `x`.
+    """
+    if not PLAIN.fullmatch(text):
+        raise SystemExit(f"{what} is one plain name: letters, digits, '.', '_' and '-', "
+                         f"starting with a letter or digit. Not {text!r}")
     return text
 
 
@@ -374,7 +381,7 @@ def _git(*args: str) -> None:
 def cmd_up(args) -> int:
     root = Path(args.root).expanduser() if args.root else Path.cwd() / ".verify-operator"
     if args.run_id:
-        _inside(args.run_id, "up: --run-id names a directory under --root")
+        _plain(args.run_id, "up: --run-id")
     run_id = args.run_id or (datetime.now().strftime("%Y%m%d-%H%M%S-")
                              + uuid.uuid4().hex[:6])
     run = (root / run_id).resolve()
@@ -525,7 +532,7 @@ def cmd_agent(args) -> int:
     """Write the steps the fake runs when it starts as operator NAME."""
     run = Path(args.run).expanduser().resolve()
     _meta(run)
-    _inside(args.name, "agent: NAME names a script under artifacts/scripts")
+    _plain(args.name, "agent: NAME")
     try:
         steps = [json.loads(step) for step in args.steps]
         _load_fake().validate_steps(steps)
@@ -579,7 +586,7 @@ def cmd_keys(args) -> int:
 def cmd_screen(args) -> int:
     """Save what a session's pane shows to artifacts/screens/LABEL.txt."""
     run = Path(args.run).expanduser().resolve()
-    _inside(args.label, "screen: --label names a file under artifacts/screens")
+    _plain(args.label, "screen: --label")
     text = _capture(_session(run, args.target))
     if text is None:
         print(f"screen: no session for {args.target}", file=sys.stderr)
@@ -596,9 +603,10 @@ def cmd_screen(args) -> int:
 def cmd_wait(args) -> int:
     """Wait for a file under the run, or for text on a screen."""
     run = Path(args.run).expanduser().resolve()
-    if args.file is not None:
-        _inside(args.file, "wait: --file takes a pattern under the run, like "
-                           "artifacts/agents/NAME/starts.log")
+    pattern = PurePath(args.file or "")
+    if args.file is not None and (not args.file or pattern.anchor or ".." in pattern.parts):
+        raise SystemExit(f"wait: --file takes a pattern under the run, like "
+                         f"artifacts/agents/NAME/starts.log, not {args.file!r}")
     deadline = time.monotonic() + args.timeout
     last = ""
     while True:
@@ -625,7 +633,7 @@ def cmd_wait(args) -> int:
 def cmd_evidence(args) -> int:
     """Copy the home's state files into the artifacts directory under a label."""
     run = Path(args.run).expanduser().resolve()
-    _inside(args.label, "evidence: --label names a directory under artifacts")
+    _plain(args.label, "evidence: --label")
     home = _home(run)
     dest = _artifacts(run) / args.label
     dest.mkdir(parents=True, exist_ok=True)

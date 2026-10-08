@@ -374,17 +374,31 @@ def _named(run: Path, verb: str, text: str):
     return calls[verb]()
 
 
+NOT_PLAIN = ESCAPES + ["nested/C:escape", "a/x:stream", "...", ".hidden", "a/b", "x y"]
+
+
 @pytest.mark.parametrize("verb", ["agent", "screen", "evidence", "up"])
-@pytest.mark.parametrize("text", ESCAPES)
-def test_a_name_that_would_leave_its_directory_is_refused(run, verb, text):
-    """A script name, a label and a run id each become a path under the run,
-    or under --root for a run id, so each is held to wait --file's rule."""
+@pytest.mark.parametrize("text", NOT_PLAIN)
+def test_a_name_that_is_not_one_plain_name_is_refused(run, verb, text):
+    """A script name, a label and a run id each become a file or directory name.
+    Windows resolves `nested\\C:escape` to the relative `C:escape`, so no rule
+    about `..` and anchors keeps a name inside its directory there."""
     if verb == "up" and text == "":
         pytest.skip("an empty --run-id asks up to make one")
     text = str(run.parent / "sib") if text == "absolute" else text
     with pytest.raises(SystemExit, match=f"^{verb}: "):
         _named(run, verb, text)
     assert sorted(p.name for p in run.parent.iterdir()) == ["run"]
+
+
+@pytest.mark.parametrize("text", ["demo", "lead", "after-lead", "pr3-lane1", "v1.2_x", "9"])
+def test_a_plain_name_is_accepted(text):
+    assert control._plain(text, "x") == text
+
+
+def test_the_harness_and_the_fake_agree_on_a_plain_name():
+    """`agent NAME` writes the script the fake looks up by the same name."""
+    assert control.PLAIN.pattern == fake.PLAIN.pattern
 
 
 def test_a_file_that_cannot_be_read_yet_is_not_found_yet(run, monkeypatch):
