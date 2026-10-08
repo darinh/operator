@@ -79,7 +79,9 @@ NAMES = {20: (30, "python.exe"), 30: (40, "Operator.EXE"), 40: (50, "pwsh.exe"),
 def test_what_ran_the_command_is_past_its_own_launcher(monkeypatch, windows, argv0,
                                                          chain, ran):
     """A launcher and the Pythons it starts end with the command. A Python
-    that ran operator.exe, or ran us with -m, is what started it."""
+    that ran operator.exe, or ran us with -m, is what started it. The argv0
+    values are Windows paths, read as such on any host, so CI on Linux runs
+    these too."""
     import process_tree
     monkeypatch.setattr(process_tree, "IS_WINDOWS", windows)
     monkeypatch.setattr(process_tree, "_win_table", lambda: NAMES)
