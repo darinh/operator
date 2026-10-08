@@ -37,15 +37,27 @@ def box(recipient: str) -> Path:
 
 def post(recipient: str, message: dict) -> None:
     """File ``message`` for ``recipient``, whole or not at all, after every
-    message already waiting, even within one tick of a coarse clock."""
+    message posted before it in this home, even within one tick of a coarse
+    clock."""
     folder = box(recipient) / PENDING
     folder.mkdir(parents=True, exist_ok=True)
-    newest = max((int(path.name[:20]) for path in _messages(folder)
-                  if path.name[:20].isdigit()), default=0)
-    name = f"{max(time_ns(), newest + 1):020d}-{secrets.token_hex(4)}.json"
+    name = f"{_stamp():020d}-{secrets.token_hex(4)}.json"
     tmp = folder.parent / f"{name}.tmp"
     tmp.write_text(json.dumps(message), encoding="utf-8")
     os.replace(tmp, folder / name)
+
+
+def _stamp() -> int:
+    """Later than the last stamp this home handed out. Posts that overlap can
+    tie, and either order is true of them."""
+    clock = box(HUMAN).parent / "clock"
+    try:
+        last = int(clock.read_text(encoding="ascii"))
+    except (OSError, ValueError):
+        last = 0
+    stamp = max(time_ns(), last + 1)
+    clock.write_text(str(stamp), encoding="ascii")
+    return stamp
 
 
 def take(recipient: str) -> "tuple[Path, dict] | None":
