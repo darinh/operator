@@ -102,17 +102,20 @@ def page(title, text, keys, render) -> None:
 
 
 def multi_select(title, labels, keys, render, status=""):
-    """Names left toggled on, ``[]`` when Enter finds none, None on Esc."""
+    """Names left toggled on, ``[]`` when Enter finds none, None on Esc. A list
+    longer than the terminal scrolls, as in ``select``."""
     on = [False] * len(labels)
-    cursor = 0
+    cursor = top = 0
     if not labels:
         render(title, ["(none)"], highlight=None, status=status)
         next(keys)
         return []
     while True:
+        room = _room(title, status)
+        top = max(min(top, cursor - 1), cursor - room + 1, 0)
         shown = [f"[{'x' if on[i] else ' '}] {i + 1}. {labels[i]}"
                  for i in range(len(labels))]
-        render(title, shown, highlight=cursor, status=status)
+        render(title, shown[top:top + room], highlight=cursor - top, status=status)
         key = next(keys)
         if key == "up":
             cursor = (cursor - 1) % len(labels)
@@ -291,18 +294,19 @@ def messaging_screen(keys, render, actions) -> str:
 
 
 def inbox_screen(keys, render, actions) -> str:
-    """The person's new mail, filed as read, the same as `operator inbox`."""
+    """The caller's new mail, filed as read, the same as `operator inbox`."""
     page("Inbox. Messages shown here are now marked read. Esc goes back.",
          _captured(actions.inbox, [], render), keys, render)
     return ""
 
 
 def send_screen(keys, render, actions) -> str:
-    """Pick an operator the person started, then type the message."""
+    """Pick an operator the caller may message, then type the message."""
     while True:
-        rows, found = _list_rows(*actions.base_operators())
-        picked = select("Send a message to an operator you started. Esc goes back.",
-                        rows, keys, render)
+        running, offline, problems = actions.recipients()
+        rows, found = _list_rows(running, offline)
+        picked = select("Send a message. Esc goes back.",
+                        rows, keys, render, status="\n".join(problems))
         if picked is None:
             return ""
         name = found[picked].name

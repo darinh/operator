@@ -25,6 +25,7 @@ from probes import log
 #: The most characters one message may hold.
 LIMIT = 4000
 PENDING, DELIVERING, DELIVERED = "pending", "delivering", "delivered"
+_STATES = (PENDING, DELIVERING, DELIVERED)
 _FIELDS = ("from", "from_name", "relation", "text", "sent")
 # A name may hold "]", and one that closed the header early could pose as the person.
 _UNBRACKETED = str.maketrans("[]", "()")
@@ -107,9 +108,14 @@ def waiting(recipient: str) -> int:
 def history() -> list:
     """Every readable message in every box as (recipient, state, message),
     oldest first."""
-    return [(path.parent.parent.name, path.parent.name, message)
-            for path in sorted(_every_message(), key=lambda path: path.name)
-            if (message := _read(path)) is not None]
+    found = []
+    for path in sorted(_every_message(), key=lambda path: path.name):
+        # A reader may have moved it on since it was listed.
+        for state in _STATES[_STATES.index(path.parent.name):]:
+            if (message := _read(path.parent.parent / state / path.name)) is not None:
+                found.append((path.parent.parent.name, state, message))
+                break
+    return found
 
 
 def _every_message() -> list:
@@ -118,7 +124,7 @@ def _every_message() -> list:
         boxes = sorted((config.OPERATOR_HOME / "mail").iterdir())
     except OSError:
         return []
-    return [path for folder in boxes for state in (PENDING, DELIVERING, DELIVERED)
+    return [path for folder in boxes for state in _STATES
             for path in _messages(folder / state)]
 
 

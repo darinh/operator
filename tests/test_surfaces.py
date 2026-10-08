@@ -309,8 +309,10 @@ LIST_MAIL = ("`operator list` ends by saying how many messages wait for you, whe
              "its Messaging row.")
 INBOX_WRAPS = ("Inbox wraps a long message to the width of the terminal. "
                "`operator inbox` prints each message on one line.")
-PICKER = ("Send a message lists only the operators a person started, because mail "
-          "goes only between a parent and its child. `operator send` refuses any other.")
+PICKER = ("Send a message lists only your parent and your children, which for a person "
+          "are the operators it started, because `operator send` refuses any other. It "
+          "never lists the person, so an operator's agent mails the person with "
+          "`operator send human`.")
 SEND_USAGE = 'Usage: operator send NAME "message"'
 NOT_FAMILY = ("operator send: bravo is not your parent or your child, and mail goes "
               "only between those two.")
@@ -564,6 +566,12 @@ CASES = [
          menu=(),
          expect={"said": "Start an operator\nList operators\nMessaging (2)\n"
                          "No operators need recovery.\nQuit"}),
+    Case("messaging-count-for-an-operator", given=BUSY, seated="alpha", answer="screen",
+         mail=(("alpha", "human", "done"), ("bravo", "human", "stuck"),
+               ("human", "alpha", "carry on")),
+         menu=(),
+         expect={"said": "Start an operator\nList operators\nMessaging (1)\n"
+                         "No operators need recovery.\nQuit"}),
     Case("send-cancelled", given=IDLE_HERE,
          menu=("Messaging", "Send a message", "alpha", Key("esc"))),
     Case("message-log", given=FAMILY, parents={"scout": "alpha"}, answer="screen",
@@ -655,6 +663,13 @@ CASES = [
                          "and mail goes only between those two."},
          menu_expect={"said": "Running:\n(none)\nOffline:\n1. alpha  (<here>)"},
          doc=PICKER),
+    Case("send-to-its-child", given=FAMILY, parents={"scout": "alpha"}, seated="alpha",
+         argv=(["send", "scout", "look around"],),
+         menu=("Messaging", "Send a message", "scout", Text("look around", "TEXT")),
+         expect={"said": "sent to scout"}),
+    Case("send-unreadable", unreadable=True, answer="screen",
+         menu=("Messaging", "Send a message"),
+         expect={"said": "Running:\n(none)\nOffline:\n(none)\ncould not read operators"}),
     Case("send-not-family", given=BUSY, seated="alpha", code=2,
          argv=(["send", "bravo", "hello"],),
          expect={"said": NOT_FAMILY}),

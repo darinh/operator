@@ -89,6 +89,22 @@ def test_a_message_put_back_keeps_its_place_ahead_of_mail_posted_while_it_was_ou
     assert [mail.take(BOX)[1]["text"] for _ in range(2)] == ["old", "new"]
 
 
+def test_history_finds_a_message_a_reader_moved_on_while_it_looked(monkeypatch):
+    for text in ("one", "two"):
+        mail.post(BOX, _message(text))
+    listed = mail._every_message
+
+    def listed_then_taken():
+        paths = listed()
+        while mail.take(BOX) is not None:
+            pass
+        return paths
+
+    monkeypatch.setattr(mail, "_every_message", listed_then_taken)
+    assert [(state, message["text"]) for _, state, message in mail.history()] == [
+        (mail.DELIVERING, "one"), (mail.DELIVERING, "two")]
+
+
 def test_history_with_no_mail_is_empty():
     assert mail.history() == []
 
