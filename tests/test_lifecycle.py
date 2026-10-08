@@ -513,6 +513,50 @@ def test_the_fifth_running_child_is_refused_and_nothing_is_recorded(
     assert lifecycle.start(["kid4"]) == 0
 
 
+def test_two_children_started_at_once_cannot_both_take_the_last_place(
+        launched, monkeypatch, tmp_path, capsys):
+    """An agent can run two starts at once. Each counts the running children
+    and then launches, so with no lock held across both, each counts three of
+    four and both launch. The first launch here waits until the second start
+    has counted, or a second has passed."""
+    import threading
+    import supervisor
+    import supervisor_control
+    from operator_cli import family
+    from test_handoff import _seat
+    lead = operators.create("lead", tmp_path)
+    running = [operators.create(f"kid{n}", tmp_path, parent=lead.id).instance()
+               for n in range(3)]
+    monkeypatch.setattr(supervisor_control, "active_instances", lambda: list(running))
+    launching, counted = threading.Event(), threading.Event()
+    real_cap = family.cap_problem
+
+    def cap_problem(who, new):
+        if launching.is_set():
+            counted.set()
+        return real_cap(who, new)
+
+    def spawn(instance, copilot_args, is_fresh, cwd=None):
+        launching.set()
+        counted.wait(1.0)
+        running.append(instance)
+        return 1
+
+    monkeypatch.setattr(family, "cap_problem", cap_problem)
+    monkeypatch.setattr(supervisor, "_spawn_background_loop", spawn)
+    _seat(monkeypatch, lead)
+    codes = []
+    starts = [threading.Thread(target=lambda n=n: codes.append(lifecycle.start([f"new{n}"])))
+              for n in range(2)]
+    for each in starts:
+        each.start()
+    for each in starts:
+        each.join(10)
+    assert sorted(codes) == [0, 2]
+    assert len(running) == 4
+    assert "OPERATOR_MAX_CHILDREN allows 4" in capsys.readouterr().err
+
+
 def test_stop_takes_every_running_operator_under_the_one_named(
         monkeypatch, tmp_path, capsys):
     import supervisor_control

@@ -187,7 +187,7 @@ class Case:
     and ``doc`` is the README bullet that documents it, word for word.
     ``stands`` is the place the user runs operator in, and ``unreadable``
     puts a file where the operators directory goes. ``mail`` is (operator,
-    text) for each message waiting for the person.
+    text) for each message waiting for the person. ``env`` is set for the run.
     """
     id: str
     expect: dict = field(default_factory=dict)
@@ -204,6 +204,7 @@ class Case:
     stands: str = "here"
     unreadable: bool = False
     mail: tuple = ()
+    env: dict = field(default_factory=dict)
 
     def expected(self, surface: str) -> dict:
         want = {
@@ -229,6 +230,7 @@ def attached(name):
 
 
 BUSY = {"alpha": ("here", "running"), "bravo": ("there", "offline")}
+BOTH_RUN = {"alpha": ("here", "running"), "bravo": ("there", "running")}
 IDLE_HERE = {"alpha": ("here", "offline")}
 REGISTERED = "registered this directory as a project (<guid>)"
 START_USAGE = ("Usage: operator start [NAME] [--name NAME] [--dir DIR] "
@@ -631,6 +633,37 @@ CASES = [
     Case("inbox-extra", code=2,
          argv=(["inbox", "now"],),
          expect={"said": "Usage: operator inbox"}),
+    Case("list-mail-to-an-operator", given=BUSY, seated="alpha", mail=(("alpha", "done"),),
+         answer="screen",
+         argv=(["list"],),
+         expect={"said": LISTED}),
+    *[Case(f"{verb}-not-its-child", given=BOTH_RUN, seated="alpha", code=2,
+           argv=([verb, "bravo", *more],),
+           expect={"said": f"operator {verb}: bravo is not your child. "
+                           f"An operator may {verb} only the operators it started."})
+      for verb, more in (("start", []), ("stop", []), ("delete", ["--yes"]))],
+    *[Case(f"{argv[0]}-by-an-operator", given=IDLE_HERE, seated="alpha", code=2,
+           argv=(argv, *more),
+           expect={"said": f"operator {argv[0]}: only a person can do this, "
+                           "not an operator"})
+      for argv, *more in ((["attach", "alpha"],), (["rename", "alpha", "zulu"],),
+                          (["recover", "alpha"], ["recover", "--all"]))],
+    Case("start-unnamed-by-an-operator", given=IDLE_HERE, seated="alpha", code=2,
+         argv=(["start"], ["start", "--fresh"]),
+         expect={"said": "operator start: an operator must name the child it starts: "
+                         'operator start NAME "..."'}),
+    Case("start-attach-by-an-operator", given=IDLE_HERE, seated="alpha", code=2,
+         argv=(["start", "kid", "--attach"],),
+         expect={"said": "operator start: only a person can attach, so an operator "
+                         "cannot pass --attach"}),
+    Case("start-too-deep", given=IDLE_HERE, seated="alpha", code=2,
+         env={"OPERATOR_MAX_DEPTH": "1"},
+         argv=(["start", "kid", "look"],),
+         expect={"said": "a child of alpha would be 2 levels deep, and "
+                         "OPERATOR_MAX_DEPTH allows 1."}),
+    Case("start-human", code=2,
+         argv=(["start", "human"], ["start", "--name", "Human"]),
+         expect={"said": "'human' is reserved for the person who starts operators"}),
 ]
 
 
@@ -755,6 +788,8 @@ class World:
         if case.unreadable:
             operators.records_dir().parent.mkdir(parents=True, exist_ok=True)
             operators.records_dir().write_text("", encoding="utf-8")
+        for key, value in case.env.items():
+            self.monkeypatch.setenv(key, value)
         self.monkeypatch.chdir(self.places[case.stands])
         self.capsys.readouterr()
 

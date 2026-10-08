@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -15,9 +16,11 @@ from test_handoff import _seat
 
 
 @pytest.mark.parametrize("verb", sorted(cli.HANDLERS))
-def test_every_verb_puts_the_kernel_on_the_path_before_importing_from_it(tmp_path, verb):
-    """The suite runs with the kernel already importable, which once hid that
-    `send` and `inbox` imported it first and crashed when installed."""
+def test_every_verb_answers_help_from_a_fresh_interpreter(tmp_path, verb):
+    """This checks only what a verb runs before it reads --help. `send` and
+    `inbox` once imported the kernel there, before putting it on the path, and
+    crashed when installed. The suite missed it, because its conftest already
+    has the kernel on the path."""
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     env.update(COPILOT_OPERATOR_HOME=str(tmp_path), COPILOT_LOG_DIR=str(tmp_path / "logs"))
     result = subprocess.run(
@@ -116,11 +119,31 @@ def test_a_persons_inbox_takes_back_what_an_interrupted_inbox_claimed(
         monkeypatch, capsys, family):
     _as(monkeypatch, family, "alpha")
     assert cli.main(["send", HUMAN, "stranded"]) == 0
-    assert mail.take(HUMAN) is not None
+    path, _ = mail.take(HUMAN)
+    _age(path, 120)
     _as(monkeypatch, family, HUMAN)
     capsys.readouterr()
     assert cli.main(["inbox"]) == 0
     assert capsys.readouterr().out.rstrip().endswith("] stranded")
+
+
+def test_a_persons_inbox_leaves_alone_what_another_inbox_is_reading(
+        monkeypatch, capsys, family):
+    """Two terminals may run inbox at once. Taking back a claim another
+    reader still holds would print one message in both."""
+    _as(monkeypatch, family, "alpha")
+    assert cli.main(["send", HUMAN, "once"]) == 0
+    path, _ = mail.take(HUMAN)
+    _as(monkeypatch, family, HUMAN)
+    capsys.readouterr()
+    assert cli.main(["inbox"]) == 0
+    assert capsys.readouterr().out == "No messages.\n"
+    assert path.exists()
+
+
+def _age(path, seconds):
+    then = time.time() - seconds
+    os.utime(path, (then, then))
 
 
 def test_a_send_that_cannot_be_written_says_so(monkeypatch, capsys, family):

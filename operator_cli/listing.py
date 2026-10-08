@@ -44,9 +44,17 @@ def list_instances() -> int:
     import mail
     from operators import HUMAN
     waiting = mail.waiting(HUMAN)
-    if waiting:
+    if waiting and not _an_operator_asks():
         print(f"{waiting} message(s) waiting. Read them with: operator inbox")
     return 0
+
+
+def _an_operator_asks() -> bool:
+    """An operator's `inbox` reads its own box, never the person's."""
+    import os
+
+    from custody import Agent, caller
+    return isinstance(caller(os.getpid()), Agent)
 
 
 def sections(records):
