@@ -49,11 +49,12 @@ CLI = REPO / "operator_cli"
 # Raised to 1293/1656 when List operators shows the records it could not read,
 # as `operator list` does. listing.load reads them once for both. Both are the
 # measured sizes.
-# Raised to 1295/1658 when delete keeps a project while an operator works in
-# any checkout of it, comparing primary checkouts rather than raw directories.
-# Both are the measured sizes.
-MAX_CLI_CODE_LINES = 1295
-MAX_CLI_TOTAL_LINES = 1658
+# Raised to 1298/1662 when delete keeps a project while an operator works in
+# any checkout of it, comparing primary checkouts rather than raw directories,
+# and keeps it while a remaining operator's checkout is gone and cannot say
+# which project it was. Both are the measured sizes.
+MAX_CLI_CODE_LINES = 1298
+MAX_CLI_TOTAL_LINES = 1662
 
 
 def cli_modules() -> list[Path]:
