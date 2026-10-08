@@ -293,7 +293,7 @@ def test_two_labels_do_not_overwrite_each_other(run):
 def test_teardown_removes_the_instance_and_keeps_the_proof(run):
     (run / "artifacts" / "transcript.md").write_text("proof\n", encoding="utf-8")
     assert control.cmd_down(SimpleNamespace(run=str(run))) == 0
-    for name in control.INSTANCE_DIRS:
+    for name in ("home", "venv", "fake", "repo", "logs"):
         assert not (run / name).exists(), name
     assert (run / "artifacts" / "transcript.md").read_text("utf-8") == "proof\n"
     assert (run / "run.json").exists()
