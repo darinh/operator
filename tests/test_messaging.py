@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +12,20 @@ import mail
 from operator_cli import entry as cli
 from operators import HUMAN
 from test_handoff import _seat
+
+
+@pytest.mark.parametrize("verb", sorted(cli.HANDLERS))
+def test_every_verb_puts_the_kernel_on_the_path_before_importing_from_it(tmp_path, verb):
+    """The suite runs with the kernel already importable, which once hid that
+    `send` and `inbox` imported it first and crashed when installed."""
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env.update(COPILOT_OPERATOR_HOME=str(tmp_path), COPILOT_LOG_DIR=str(tmp_path / "logs"))
+    result = subprocess.run(
+        [sys.executable, "-c", "import sys; from operator_cli.entry import main; "
+         "sys.exit(main(sys.argv[1:]))", verb, "--help"],
+        cwd=Path(__file__).resolve().parents[1], env=env, stdin=subprocess.DEVNULL,
+        capture_output=True, encoding="utf-8", errors="replace", timeout=120)
+    assert "Traceback" not in result.stderr, result.stderr
 
 
 @pytest.fixture
