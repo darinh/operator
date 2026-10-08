@@ -100,3 +100,15 @@ def test_list_with_no_records_says_how_to_start(capsys):
     assert capsys.readouterr().out == (
         "No operators yet. Start one with: operator start\n"
     )
+
+
+def test_list_says_mail_waits_even_when_its_sender_was_deleted(capsys):
+    import mail
+    mail.post(operators.HUMAN, {"from": "op-gone0000", "from_name": "gone",
+                                "to": operators.HUMAN, "relation": "an operator you started",
+                                "text": "last words", "sent": "x"})
+    assert listing.list_instances() == 0
+    assert capsys.readouterr().out == (
+        "No operators yet. Start one with: operator start\n"
+        "1 message(s) waiting. Read them with: operator inbox\n"
+    )

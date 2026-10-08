@@ -44,3 +44,13 @@ def test_a_person_manages_anyone_and_an_operator_only_its_own_children():
                if lineage.may_manage(actor, target.id, records)}
     assert managed == {*((HUMAN, op_id) for op_id in "abcdef"),
                        ("a", "b"), ("a", "d"), ("b", "c")}
+
+
+def test_mail_crosses_one_edge_either_way():
+    records = [_op("a"), _op("b", "a"), _op("c", "b"), _op("d", "a"), _op("f", "gone")]
+    edges = {(sender, recipient) for sender in [HUMAN, *"abcdf"]
+             for recipient in [HUMAN, *"abcdf"]
+             if lineage.may_message(sender, recipient, records)}
+    assert edges == {(HUMAN, "a"), ("a", HUMAN), (HUMAN, "f"), ("f", HUMAN),
+                     ("a", "b"), ("b", "a"), ("a", "d"), ("d", "a"),
+                     ("b", "c"), ("c", "b")}

@@ -154,7 +154,13 @@ MAX_MODULE_LINES = 603
 #: whole subtree before it waits on any of it, and the preamble tells an
 #: operator its parent, its children and how to start and stop them. 2670 is
 #: the measured size.
-MAX_KERNEL_CODE_LINES = 2670
+#:
+#: Raised from 2670 to 2798 when a parent and its child could message each
+#: other. The new `mail.py` files each message by rename, so two readers never
+#: take the same one, and types it into the recipient's session from that
+#: operator's own supervisor, so two senders never interleave keystrokes. The
+#: preamble says where to send and how much waits. 2798 is the measured size.
+MAX_KERNEL_CODE_LINES = 2798
 
 #: Per-module code ceiling, the same split applied one file down.
 #: Raised from 325 when the runner records custody beside the pid file.

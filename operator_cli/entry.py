@@ -16,7 +16,7 @@ from pathlib import Path
 from operator_kernel.argtail import at_dashdash
 
 from . import argv as _argv
-from . import handoff, recover
+from . import handoff, messaging, recover
 from .home import _bootstrap, _home, _settle_home
 from .lifecycle import _same_cwd, attach as _attach, default_name as _default_name, delete as _delete, rename as _rename, start as _start, stop as _stop
 
@@ -174,6 +174,8 @@ HANDLERS = {
     "delete": _delete,
     "recover": recover.main,
     "handoff": handoff.main,
+    "send": messaging.send,
+    "inbox": messaging.inbox,
 }
 
 

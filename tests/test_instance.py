@@ -37,3 +37,20 @@ def test_cleanup_removes_only_the_files_a_live_operator_still_owns(tmp_path, mon
         path.write_text("x", encoding="utf-8")
     operator.cleanup_files()
     assert not any(path.exists() for path in owned)
+
+
+def test_delete_files_drops_the_mailbox_and_a_clean_stop_keeps_it(tmp_path, monkeypatch):
+    """Mail to a stopped operator waits for its next start, so only delete
+    may take it, and a box that stays is reported like any file that stays."""
+    monkeypatch.setattr(op, "RESTART_DIR", tmp_path)
+    operator = op.Instance("alpha")
+    op.mail.post(operator.id, {"from": "human", "from_name": "human", "to": operator.id,
+                               "relation": "your parent", "text": "wait", "sent": "x"})
+    operator.cleanup_files()
+    assert op.mail.waiting(operator.id) == 1
+    forget = op.mail.forget
+    monkeypatch.setattr(op.mail, "forget", lambda recipient: False)
+    assert operator.delete_files() == [op.mail.box(operator.id)]
+    monkeypatch.setattr(op.mail, "forget", forget)
+    assert operator.delete_files() == []
+    assert not op.mail.box(operator.id).exists()

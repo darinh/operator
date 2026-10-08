@@ -119,3 +119,41 @@ def test_the_loop_takes_a_fresh_flag_and_nothing_beside_it():
         "instance", "copilot_args", "is_fresh", "cwd")
 
 
+@pytest.mark.parametrize("reported, stranded", [(False, False), (True, False), (True, True)])
+def test_mail_is_typed_only_once_the_session_reports_its_id(
+        looping, monkeypatch, reported, stranded):
+    """Keystrokes sent before a launch's session is up are lost, so the
+    supervisor holds mail until the runner has written this launch's id.
+    Mail a killed supervisor had claimed but not typed goes out on restart."""
+    inst = op.Instance("reader")
+    op.mail.post(inst.id, {"from": "human", "from_name": "human", "to": inst.id,
+                           "relation": "your parent", "text": "ping",
+                           "sent": "2026-01-02T03:04:05Z"})
+    if stranded:
+        assert op.mail.take(inst.id) is not None
+        assert op.mail.waiting(inst.id) == 0
+    polls = {"n": 0}
+
+    def start_session(instance, args, session_num, remain_on_exit=False, preamble=""):
+        op.MUX.sessions[instance.session] = {"cwd": "", "argv": [],
+                                             "remain_on_exit": False, "dead": False}
+        if reported:
+            instance.session_file.write_text(RESUME_ID, encoding="utf-8")
+
+    def running(instance):
+        polls["n"] += 1
+        if polls["n"] >= 2:
+            instance.stop_marker.touch()
+        return True
+
+    monkeypatch.setattr(op, "start_session", start_session)
+    monkeypatch.setattr(op, "is_copilot_running", running)
+    monkeypatch.setattr(op, "stop_session_gracefully", lambda instance: None)
+    monkeypatch.setattr(op, "SESSION_ID_WAIT", 0)
+    assert op.run_loop_mode(inst, ["--agent", "test:agent"], is_fresh=True) == 0
+    typed = [text for _, text in op.MUX.keys if text.startswith("[operator message")]
+    assert typed == (["[operator message from the person who started you] ping"]
+                     if reported else [])
+    assert op.mail.waiting(inst.id) == (0 if reported else 1)
+
+

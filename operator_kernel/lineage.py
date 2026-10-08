@@ -41,6 +41,12 @@ def may_manage(actor: str, target_id: str, records) -> bool:
     return actor == HUMAN or parents(records).get(target_id) == actor
 
 
+def may_message(sender: str, recipient: str, records) -> bool:
+    """Mail crosses one edge, between a parent, or the person, and its child."""
+    up = parents(records)
+    return up.get(recipient) == sender or up.get(sender) == recipient
+
+
 def tree(records) -> list:
     """(record, depth) for every record, each child after its parent.
 
