@@ -160,7 +160,13 @@ MAX_MODULE_LINES = 603
 #: take the same one, and types it into the recipient's session from that
 #: operator's own supervisor, so two senders never interleave keystrokes. The
 #: preamble says where to send and how much waits. 2798 is the measured size.
-MAX_KERNEL_CODE_LINES = 2798
+#:
+#: Raised from 2798 to 2815 so a person's operator records the shell that ran
+#: `operator`. On Windows that command is pip's `operator.exe`, which runs
+#: Python as a child, so the nearest parent ends with the command.
+#: `process_tree.shell` reads image names to step past it. 2815 is the
+#: measured size.
+MAX_KERNEL_CODE_LINES = 2815
 
 #: Per-module code ceiling, the same split applied one file down.
 #: Raised from 325 when the runner records custody beside the pid file.

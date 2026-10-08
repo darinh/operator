@@ -104,7 +104,7 @@ def caller(pid: int) -> "Agent | Human | str":
             continue
         matches.append(Agent(record, custody.session, custody.pid))
     if not matches:
-        return Human(chain[0] if chain else 0)
+        return Human(process_tree.shell(chain))
     if len(matches) > 1:
         return "more than one operator matches this process"
     return matches[0]
