@@ -53,6 +53,9 @@ DRIVEN_SCRIPTS = ("operator", "copilot")
 #: The kernel's order, so the harness talks to the multiplexer operator uses.
 MUX_CANDIDATES = ("tmux", "psmux", "pmux")
 
+#: What a pane sets. Inside one, psmux refuses `attach` as a nested session.
+PANE_VARIABLES = ("TMUX", "TMUX_PANE", "PSMUX_SESSION", "PSMUX_TARGET_SESSION")
+
 #: Files under the home worth snapshotting. Globs, resolved against the home.
 STATE_GLOBS = (
     "operator.log",
@@ -139,8 +142,13 @@ def _meta(run: Path) -> dict:
 
 
 def _env(run: Path) -> dict:
-    """The child's environment, settled before the process starts."""
-    env = dict(os.environ)
+    """The child's environment, settled before the process starts.
+
+    The multiplexer's pane variables are dropped, so `operator` behaves as it
+    does in a person's terminal even when this runs inside a pane: the menu
+    `exec` opens, or an operator's own session driving this skill.
+    """
+    env = {k: v for k, v in os.environ.items() if k.upper() not in PANE_VARIABLES}
     scripts = str(_scripts_dir(run))
     env["PATH"] = scripts + os.pathsep + env.get("PATH", "")
     env["COPILOT_OPERATOR_HOME"] = str(_home(run))
@@ -448,9 +456,19 @@ def cmd_operator(args) -> int:
 
 
 def cmd_exec(args) -> int:
-    """Run `operator` in this console with the run's environment. `menu` uses it."""
+    """Run `operator` in this console with the run's environment. `menu` uses it.
+
+    With `--hold` the console stays open after `operator` exits, showing its
+    exit code, so the last screen of a menu that quit or attached can be read.
+    """
     run = Path(args.run).expanduser().resolve()
-    return subprocess.call([str(_venv_exe(run, "operator")), *args.rest], env=_env(run))
+    code = subprocess.call([str(_venv_exe(run, "operator")), *args.rest], env=_env(run))
+    if not args.hold:
+        return code
+    _note(run, f"menu: operator exited {code}")
+    print(f"\n[operator exited {code}]", flush=True)
+    while True:
+        time.sleep(3600)
 
 
 def cmd_agent(args) -> int:
@@ -479,7 +497,8 @@ def cmd_menu(args) -> int:
     if _has_session(session):
         print(f"menu: session {session} is already open", file=sys.stderr)
         return 2
-    pane = [sys.executable, str(Path(__file__).resolve()), "exec", "--run", str(run)]
+    pane = [sys.executable, str(Path(__file__).resolve()), "exec", "--hold",
+            "--run", str(run)]
     proc = _mux_run(["new-session", "-d", "-s", session, "-x", "160", "-y", "50",
                      "-c", meta["repo"], "--", *pane], env=_env(run))
     _record(run, f"menu: open {session}", ["new-session", session, *pane], proc)
@@ -664,6 +683,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_in_pane = verb("exec", cmd_exec, "run `operator` here with the run's "
                                          "environment (what `menu` runs in its pane)")
+    run_in_pane.add_argument("--hold", action="store_true",
+                             help="stay open after operator exits, showing its exit code")
     run_in_pane.add_argument("rest", nargs=argparse.REMAINDER)
 
     agent = verb("agent", cmd_agent, "write the steps the fake runs as operator NAME")

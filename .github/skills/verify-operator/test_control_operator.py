@@ -102,6 +102,15 @@ def test_copilot_logs_land_in_the_run(run):
     assert control._env(run)["COPILOT_LOG_DIR"] == str(run / "logs")
 
 
+def test_operator_never_learns_it_runs_inside_a_pane(run, monkeypatch):
+    """Measured in the menu's pane: Start printed `sessions should be nested
+    with care, unset PSMUX_SESSION to force` and `operator` exited 0."""
+    for name in control.PANE_VARIABLES:
+        monkeypatch.setenv(name, "vo-outer")
+    env = control._env(run)
+    assert not {k.upper() for k in env} & set(control.PANE_VARIABLES)
+
+
 def test_no_session_server_keeps_a_warm_server_in_the_run(run):
     """A warm server holds its start directory open, and `down` then cannot
     remove the run. Measured: without the variable the directory stayed locked."""
@@ -197,10 +206,34 @@ def test_the_menu_pane_runs_operator_through_the_runs_environment(monkeypatch, r
     assert control.main(["menu", "--run", str(run)]) == 0
     args, env = calls[0]
     pane = args[args.index("--") + 1:]
-    assert pane[1:] == [str(Path(control.__file__).resolve()), "exec", "--run", str(run)]
+    assert pane[1:] == [str(Path(control.__file__).resolve()), "exec", "--hold",
+                        "--run", str(run)]
     assert args[args.index("-s") + 1] == "vo-test"
     assert args[args.index("-c") + 1] == str(run / "repo")
     assert env["PATH"].split(os.pathsep)[0] == str(control._scripts_dir(run))
+
+
+def test_the_menu_pane_outlives_operator_so_its_last_screen_can_be_read(
+        monkeypatch, run, capsys):
+    """Without the hold, a menu that quits or attaches takes its session with it."""
+    class Held(Exception):
+        pass
+
+    def hold(seconds):
+        raise Held
+
+    monkeypatch.setattr(control.subprocess, "call", lambda argv, env=None: 3)
+    monkeypatch.setattr(control.time, "sleep", hold)
+    with pytest.raises(Held):
+        control.main(["exec", "--hold", "--run", str(run)])
+    assert "[operator exited 3]" in capsys.readouterr().out
+    assert "menu: operator exited 3" in (
+        control._artifacts(run) / "transcript.md").read_text(encoding="utf-8")
+
+
+def test_exec_without_hold_returns_operators_exit_code(monkeypatch, run):
+    monkeypatch.setattr(control.subprocess, "call", lambda argv, env=None: 3)
+    assert control.main(["exec", "--run", str(run)]) == 3
 
 
 def test_a_target_is_the_menu_or_an_operator_by_name_or_id(run):
