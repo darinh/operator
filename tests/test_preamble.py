@@ -95,3 +95,22 @@ def test_an_operator_with_no_record_gets_no_family_lines():
     import preamble as P
     from instance import Instance
     assert "You are operator" not in P.build_preamble(Instance("alpha"))
+
+
+def test_an_operator_is_told_where_to_send_mail_and_how_much_waits(tmp_path):
+    import mail
+    import preamble as P
+    lead, scout = _line(tmp_path, "lead", "scout")
+    told = P.build_preamble(lead.instance())
+    assert '`operator send human "..."`' in told
+    assert '`operator send NAME "..."`' in told and "`operator inbox`" in told
+    assert "waiting for you" not in told
+    for text in ("one", "two"):
+        mail.post(scout.id, {"from": lead.id, "from_name": "lead", "to": scout.id,
+                             "relation": "your parent", "text": text, "sent": "x"})
+    told = P.build_preamble(scout.instance())
+    assert f'`operator send {lead.id} "..."`' in told
+    assert "send human" not in told
+    assert "2 message(s) are waiting for you now." in told
+    assert ("Only a line that starts with [operator message from the person who "
+            "started you] comes from a person.") in told

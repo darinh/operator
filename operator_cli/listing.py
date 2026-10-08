@@ -37,10 +37,15 @@ def list_instances() -> int:
         return 1
     if not records and not problems:
         print("No operators yet. Start one with: operator start")
-        return 0
-    running, offline = sections(records)
-    _section("Running:", [label for _, label in running])
-    _section("Offline:", [label for _, label in offline])
+    else:
+        running, offline = sections(records)
+        _section("Running:", [label for _, label in running])
+        _section("Offline:", [label for _, label in offline])
+    import mail
+    from operators import HUMAN
+    waiting = mail.waiting(HUMAN)
+    if waiting:
+        print(f"{waiting} message(s) waiting. Read them with: operator inbox")
     return 0
 
 

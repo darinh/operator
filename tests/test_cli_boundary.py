@@ -58,8 +58,11 @@ CLI = REPO / "operator_cli"
 # Raised to 1427/1828 when an operator may act only on its own children, within
 # two caps, and start learned --dir. The rules live in the new family.py so
 # lifecycle.py stays under the per-module ceiling. Both are the measured sizes.
-MAX_CLI_CODE_LINES = 1427
-MAX_CLI_TOTAL_LINES = 1828
+# Raised to 1511/1926 when the new messaging.py added `operator send` and
+# `operator inbox`, and list learned to say when mail waits for the person.
+# Both are the measured sizes.
+MAX_CLI_CODE_LINES = 1511
+MAX_CLI_TOTAL_LINES = 1926
 
 
 def cli_modules() -> list[Path]:

@@ -32,6 +32,7 @@ _MODULE_NAMES = (
     "session_state", "supervisor_records", "exits", "preamble", "supervisor",
     "supervisor_control", "process_identity", "runner", "mux", "console",
     "version", "argtail", "operators", "process_tree", "custody", "lineage",
+    "mail",
 )
 
 #: Names the tests were written against, mapped to what the kernel calls them

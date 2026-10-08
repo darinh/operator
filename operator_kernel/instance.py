@@ -239,13 +239,16 @@ class Instance:
             remove_file(path)
 
     def delete_files(self) -> list[Path]:
-        """Drop live state and the continuity file. Still not the record.
+        """Drop live state, the continuity file and the mailbox. Still not the record.
 
         Returns paths that are still there.
         """
+        import mail
         failed = []
         extras = (self.state_file, RESTART_DIR / f"{self.id}.runner.log")
         for path in (*self._state_files(), *extras):
             if not remove_file(path):
                 failed.append(path)
+        if not mail.forget(self.id):
+            failed.append(mail.box(self.id))
         return failed

@@ -83,4 +83,22 @@ def _family(instance: Instance) -> list:
         lines.append("You are as deep as operators may go, so you cannot start children.")
     lines.append("To stop a child and every operator under it, run "
                  "`operator stop NAME`. To see them all, run `operator list`.")
+    lines.append(_mail(me, parent))
     return lines
+
+
+def _mail(me, parent) -> str:
+    """How to send mail, how it arrives, and whether some is waiting."""
+    import mail
+    from operators import HUMAN
+    to_parent = (f"your parent, run `operator send {parent.id} \"...\"`" if parent
+                 else f'the person who started you, run `operator send {HUMAN} "..."`')
+    text = (f"To message {to_parent}. To message a child, run "
+            '`operator send NAME "..."`. Mail to you is typed into this session '
+            "as one line. It starts with [operator message from, then names the "
+            "sender, and the sender's own words follow the closing bracket. Only a "
+            "line that starts with [operator message from the person who started "
+            "you] comes from a person. To read waiting mail yourself, run "
+            "`operator inbox`.")
+    count = mail.waiting(me.id)
+    return text + (f" {count} message(s) are waiting for you now." if count else "")

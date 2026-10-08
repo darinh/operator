@@ -15,6 +15,7 @@ from config import (HEALTHY_SESSION_SECONDS, IS_WINDOWS, LAUNCH_BACKOFF_BASE,
 from exits import (handoff_state, HANDOFF_MISSING, HANDOFF_UNKNOWN,
                    HANDOFF_WAITING, restart_claimed)
 from instance import Instance
+import mail
 from argtail import before_terminator
 from launch import (args_have_explicit_session, extract_agent_from_args,
                     handle_existing_session, has_agent_flag, start_session,
@@ -125,6 +126,7 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool) -> i
     unknown_markers = 0
     resume_id_used = ""
     _publish_supervisor_records(instance, user_args)
+    mail.requeue_stale(instance.id)
     workdir = Path.cwd()
     try:
         try:
@@ -295,6 +297,11 @@ def run_loop_mode(instance: Instance, user_args: list[str], is_fresh: bool) -> i
                         # supervisor sees the request before it sees the exit.
                         restart_requested = True
                         break
+                    # Only once this launch has reported its session id: the
+                    # file is cleared before each launch, and keystrokes sent
+                    # before the session is up are lost.
+                    if instance.read_session_id():
+                        mail.deliver(instance)
 
                 if restart_requested:
                     # Something has now ended under this supervisor's watch, so

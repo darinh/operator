@@ -358,6 +358,19 @@ def test_delete_keeps_the_record_when_a_file_cannot_be_removed(
     assert state.read_text(encoding="utf-8") == "stay"
 
 
+def test_delete_keeps_the_record_when_its_mailbox_cannot_be_removed(
+        tmp_path, monkeypatch, capsys):
+    import mail
+    record = operators.create("alpha", tmp_path)
+    mail.post(record.id, {"from": "human", "from_name": "human", "to": record.id,
+                          "relation": "your parent", "text": "stay", "sent": "x"})
+    monkeypatch.setattr(mail, "forget", lambda recipient: False)
+    assert lifecycle.delete(["alpha", "--yes"]) == 1
+    assert str(mail.box(record.id)) in capsys.readouterr().err
+    assert operators.find("alpha") is not None
+    assert mail.waiting(record.id) == 1
+
+
 def test_delete_keeps_the_record_when_the_catalog_cannot_be_read(
         tmp_path, monkeypatch, capsys):
     import paths

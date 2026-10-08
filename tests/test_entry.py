@@ -625,11 +625,15 @@ def test_delete_yes_removes_record_state_and_handoff(tmp_path, monkeypatch, caps
     assert isinstance(handoff, Path)
     handoff.parent.mkdir(parents=True, exist_ok=True)
     handoff.write_text("bye", encoding="utf-8")
+    import mail
+    mail.post(record.id, {"from": "human", "from_name": "human", "to": record.id,
+                          "relation": "your parent", "text": "unread", "sent": "x"})
     assert cli.main(["delete", "alpha", "--yes"]) == 0
     assert operators.find("alpha") is None
     assert not inst.state_file.exists()
     assert not runner_log.exists()
     assert not handoff.exists()
+    assert not mail.box(record.id).exists()
     assert not paths.catalog_guid(tmp_path).guid
 
 

@@ -186,7 +186,8 @@ class Case:
     ``expect`` for the menu, only where the README documents the difference,
     and ``doc`` is the README bullet that documents it, word for word.
     ``stands`` is the place the user runs operator in, and ``unreadable``
-    puts a file where the operators directory goes.
+    puts a file where the operators directory goes. ``mail`` is (operator,
+    text) for each message waiting for the person.
     """
     id: str
     expect: dict = field(default_factory=dict)
@@ -202,6 +203,7 @@ class Case:
     doc: str = ""
     stands: str = "here"
     unreadable: bool = False
+    mail: tuple = ()
 
     def expected(self, surface: str) -> dict:
         want = {
@@ -255,11 +257,13 @@ No command opens a keyboard menu when stdin and stdout are a TTY.
   start                 start a supervised operator (start [NAME] [TASK])
   list                  list operators
   attach                attach this terminal to a running operator
-  stop                  ask an operator's supervisor to stop
+  stop                  stop an operator and every operator it started
   rename                rename an operator
   delete                delete an operator and its settings
   recover               list operators that need recovering after a crash
-  handoff               write this operator's handoff and start the next session"""
+  handoff               write this operator's handoff and start the next session
+  send                  message an operator's parent or child (send NAME TEXT)
+  inbox                 read the messages sent to you"""
 WRITTEN = "handoff written to <home>/projects/<guid>/handoff/<id>.md"
 RECOVERING = "Recovering 'alpha' in <here>"
 TAKEN = ("Start an operator refuses a name that an operator in another directory "
@@ -293,6 +297,12 @@ DELETE_ASKS = ("Delete on the list screen asks \"Delete? [y/N]\" and deletes on 
                "key y or Y. `operator delete NAME` without `--yes` asks the same in "
                "a terminal and deletes on y or yes, in any case, then Enter. Without "
                "a terminal it exits 2 and says to pass `--yes`.")
+LIST_MAIL = ("`operator list` ends by saying how many messages wait for you, when "
+             "some do. List operators does not say. Read them with `operator inbox`.")
+SEND_USAGE = 'Usage: operator send NAME "message"'
+NOT_FAMILY = ("operator send: bravo is not your parent or your child, and mail goes "
+              "only between those two.")
+LISTED = "Running:\n1. alpha  (<here>)\nOffline:\n1. bravo  (<there>)"
 
 CASES = [
     Case("start-here-new",
@@ -410,7 +420,14 @@ CASES = [
     Case("list", given=BUSY, answer="screen",
          argv=(["list"],),
          menu=("List operators",),
-         expect={"said": "Running:\n1. alpha  (<here>)\nOffline:\n1. bravo  (<there>)"}),
+         expect={"said": LISTED}),
+    Case("list-mail", given=BUSY, mail=(("alpha", "done"), ("bravo", "stuck")),
+         answer="screen",
+         argv=(["list"],),
+         menu=("List operators",),
+         expect={"said": LISTED + "\n2 message(s) waiting. Read them with: operator inbox"},
+         menu_expect={"said": LISTED},
+         doc=LIST_MAIL),
     Case("list-empty", answer="screen",
          argv=(["list"],),
          menu=("List operators",),
@@ -578,6 +595,42 @@ CASES = [
     Case("handoff-help",
          argv=(["handoff", "--help"], ["handoff", "-h"]),
          expect={"said": HANDOFF_USAGE}),
+    Case("send-to-parent", given=IDLE_HERE, seated="alpha",
+         argv=(["send", "human", "done", "for", "now"],
+               ["send", " HUMAN ", "--", "done for now"]),
+         expect={"said": "sent to human"}),
+    Case("send-to-child", given=IDLE_HERE,
+         argv=(["send", "alpha", "carry", "on"],),
+         expect={"said": "sent to alpha"}),
+    Case("send-not-family", given=BUSY, seated="alpha", code=2,
+         argv=(["send", "bravo", "hello"],),
+         expect={"said": NOT_FAMILY}),
+    Case("send-too-long", code=2,
+         argv=(["send", "human", "x" * 4001],),
+         expect={"said": "operator send: a message may hold 4000 characters, "
+                         "and this one holds 4001."}),
+    Case("send-unknown", code=1,
+         argv=(["send", "zulu", "hello"],),
+         expect={"said": "No operator 'zulu'."}),
+    Case("send-needs-text", given=IDLE_HERE, code=2,
+         argv=(["send"], ["send", "alpha"], ["send", "alpha", "--"]),
+         expect={"said": SEND_USAGE}),
+    Case("send-help",
+         argv=(["send", "--help"], ["send", "-h"]),
+         expect={"said": SEND_USAGE}),
+    Case("inbox", given=BUSY, mail=(("alpha", "done"),),
+         argv=(["inbox"],),
+         expect={"said": "2026-01-02T03:04:05Z  [operator message from alpha (<id>), "
+                         "an operator you started] done"}),
+    Case("inbox-empty",
+         argv=(["inbox"],),
+         expect={"said": "No messages."}),
+    Case("inbox-help",
+         argv=(["inbox", "--help"], ["inbox", "-h"]),
+         expect={"said": "Usage: operator inbox"}),
+    Case("inbox-extra", code=2,
+         argv=(["inbox", "now"],),
+         expect={"said": "Usage: operator inbox"}),
 ]
 
 
@@ -662,6 +715,7 @@ class World:
                                     "remain_on_exit": False, "dead": False}
 
     def give(self, case: Case) -> None:
+        import mail
         import operators
         from operator_cli import project
         for name, (where, state) in case.given.items():
@@ -692,6 +746,12 @@ class World:
                                      encoding="utf-8")
         if case.seated:
             _seat(self.monkeypatch, operators.find(case.seated))
+        for name, text in case.mail:
+            sender = operators.find(name)
+            mail.post(operators.HUMAN, {
+                "from": sender.id, "from_name": sender.name, "to": operators.HUMAN,
+                "relation": "an operator you started", "text": text,
+                "sent": "2026-01-02T03:04:05Z"})
         if case.unreadable:
             operators.records_dir().parent.mkdir(parents=True, exist_ok=True)
             operators.records_dir().write_text("", encoding="utf-8")

@@ -32,3 +32,11 @@ def test_help_says_start_takes_a_task(capsys):
     assert cli.main(["--help"]) == 0
     assert ("  start                 start a supervised operator (start [NAME] [TASK])"
             in capsys.readouterr().out.splitlines())
+
+
+def test_help_says_stop_reaches_children_and_send_takes_text(capsys):
+    assert cli.main(["--help"]) == 0
+    shown = capsys.readouterr().out.splitlines()
+    assert "  stop                  stop an operator and every operator it started" in shown
+    assert ("  send                  message an operator's parent or child "
+            "(send NAME TEXT)") in shown
