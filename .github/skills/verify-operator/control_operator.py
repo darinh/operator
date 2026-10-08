@@ -223,7 +223,9 @@ def _mux_run(args: list, env: dict | None = None, cwd: str | None = None):
 
 
 def _has_session(session: str) -> bool:
-    return _mux_run(["has-session", "-t", session]).returncode == 0
+    """By exact name. tmux matches `-t vo-demo` to vo-demo2 when vo-demo is gone."""
+    proc = _mux_run(["list-sessions", "-F", "#{session_name}"])
+    return session in (proc.stdout or "").splitlines()
 
 
 def _records(run: Path) -> list[dict]:

@@ -257,6 +257,19 @@ def test_menu_again_replaces_the_held_pane(monkeypatch, run):
     assert calls == ["kill-session", "new-session"]
 
 
+@pytest.mark.parametrize("listed, code, expected", [
+    ("vo-test2\nop-1\n", 0, False),
+    ("vo-test\nvo-test2\n", 0, True),
+    ("", 1, False),
+], ids=["sibling-only", "exact", "no-server"])
+def test_a_session_is_found_by_its_exact_name(monkeypatch, listed, code, expected):
+    """tmux takes `-t vo-test` to mean vo-test2 when no vo-test exists, so a
+    has-session check would let menu or down kill a sibling run's session."""
+    monkeypatch.setattr(control, "_mux_run", lambda args, env=None, cwd=None:
+                        SimpleNamespace(returncode=code, stdout=listed, stderr=""))
+    assert control._has_session("vo-test") is expected
+
+
 def test_a_target_is_the_menu_or_an_operator_by_name_or_id(run):
     _record_operator(run, "op-11111111", "lead")
     assert control._session(run, "menu") == "vo-test"
