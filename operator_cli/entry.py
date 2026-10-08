@@ -90,14 +90,30 @@ class _Actions:
             return None
         return f"{record.name} already works in {record.cwd}. Choose another name."
 
-    def sections(self):
+    def sections(self, base=False):
+        """Operators as (running, offline, problems). ``base`` keeps only the
+        ones a person started, which are the ones a person may message."""
+        import lineage
+        from operators import HUMAN
+
         from .listing import load, sections
         from .menu import Op
         records, problems = load()
-        running, offline = sections(records or [])
+        up = lineage.parents(records or [])
+        kept = [op for op in records or [] if not base or up[op.id] == HUMAN]
+        running, offline = sections(kept)
         return ([Op(op.name, op.cwd, label, True) for op, label in running],
                 [Op(op.name, op.cwd, label, False) for op, label in offline],
                 problems)
+
+    def base_operators(self):
+        running, offline, _ = self.sections(base=True)
+        return running, offline
+
+    def waiting_count(self) -> int:
+        import mail
+        from operators import HUMAN
+        return mail.waiting(HUMAN)
 
     start = staticmethod(_start)
     attach = staticmethod(_attach)
@@ -105,6 +121,9 @@ class _Actions:
     rename = staticmethod(_rename)
     delete = staticmethod(_delete)
     recover = staticmethod(recover.main)
+    send = staticmethod(messaging.send)
+    inbox = staticmethod(messaging.inbox)
+    message_log = staticmethod(messaging.log_rows)
 
 
 def _interactive() -> int:

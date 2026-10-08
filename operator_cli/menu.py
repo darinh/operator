@@ -7,7 +7,9 @@ Start an operator, Attach, and Start and attach are the leaves.
 from __future__ import annotations
 
 import io
+import shutil
 import sys
+import textwrap
 from contextlib import redirect_stderr, redirect_stdout
 
 
@@ -34,6 +36,7 @@ class Leave:
 
 def render(title: str, rows, highlight=None, status: str = "") -> None:
     out = sys.stdout
+    width = shutil.get_terminal_size().columns - 3
     out.write("\x1b[2J\x1b[H")
     if status:
         out.write(status.rstrip("\n"))
@@ -42,19 +45,31 @@ def render(title: str, rows, highlight=None, status: str = "") -> None:
     out.write("\n")
     for index, row in enumerate(rows):
         out.write("> " if index == highlight else "  ")
-        out.write(row)
+        out.write(row[:width])
         out.write("\n")
     out.flush()
 
 
+def _room(title: str, status: str) -> int:
+    """How many rows fit under the status and the title, with the cursor's line left free."""
+    columns, lines = shutil.get_terminal_size()
+    above = f"{status.rstrip(chr(10))}\n\n{title}" if status else title
+    used = sum(len(line) // columns + 1 for line in above.split("\n"))
+    return max(lines - used - 1, 3)
+
+
 def select(title, rows, keys, render, status=""):
-    """Index of the chosen row, or None on Esc. Headings are not chosen."""
+    """Index of the chosen row, or None on Esc. Headings are not chosen. A list
+    longer than the terminal scrolls, keeping the row above the highlight in view."""
     labels = [row.label for row in rows]
     selectable = [i for i, row in enumerate(rows) if row.selectable]
-    cursor = 0
+    cursor = top = 0
     while True:
-        highlight = selectable[cursor] if selectable else None
-        render(title, labels, highlight=highlight, status=status)
+        room = _room(title, status)
+        at = selectable[cursor] if selectable else 0
+        top = max(min(top, at - 1), at - room + 1, 0)
+        render(title, labels[top:top + room],
+               highlight=at - top if selectable else None, status=status)
         key = next(keys)
         if key == "esc":
             return None
@@ -66,6 +81,24 @@ def select(title, rows, keys, render, status=""):
             cursor = (cursor + 1) % len(selectable)
         elif key == "enter":
             return selectable[cursor]
+
+
+def page(title, text, keys, render) -> None:
+    """Show ``text`` wrapped to the terminal until Enter or Esc. Up and Down scroll."""
+    width = shutil.get_terminal_size().columns - 3
+    lines = [part for line in text.split("\n")
+             for part in textwrap.wrap(line, width, break_on_hyphens=False) or [""]]
+    top = 0
+    while True:
+        room = _room(title, "")
+        render(title, lines[top:top + room], highlight=None)
+        key = next(keys)
+        if key in ("enter", "esc"):
+            return None
+        if key == "up":
+            top = max(top - 1, 0)
+        elif key == "down":
+            top = min(top + 1, max(len(lines) - room, 0))
 
 
 def multi_select(title, labels, keys, render, status=""):
@@ -152,7 +185,8 @@ def _main(keys, render, actions, status):
         recover = "No operators need recovery."
         if count:
             recover = f"Recover operator sessions ({count})"
-        labels = ["Start an operator", "List operators", recover, "Quit"]
+        labels = ["Start an operator", "List operators",
+                  f"Messaging ({actions.waiting_count()})", recover, "Quit"]
         picked = select("operator", [Row(label) for label in labels],
                         keys, render, status=status)
         if picked is None:
@@ -163,6 +197,8 @@ def _main(keys, render, actions, status):
             continue
         if labels[picked].startswith("Recover operator sessions"):
             return "recover"
+        if labels[picked].startswith("Messaging"):
+            return "messaging"
         if labels[picked] == "List operators":
             return "list"
         return "start"
@@ -241,6 +277,55 @@ def recover_screen(keys, render, actions) -> str:
     return _captured(actions.recover, chosen, render)
 
 
+def messaging_screen(keys, render, actions) -> str:
+    screens = {"Inbox": inbox_screen, "Send a message": send_screen,
+               "Message Log": log_screen}
+    choices = list(screens)
+    status = ""
+    while True:
+        picked = select("Messaging", [Row(choice) for choice in choices],
+                        keys, render, status=status)
+        if picked is None:
+            return ""
+        status = screens[choices[picked]](keys, render, actions)
+
+
+def inbox_screen(keys, render, actions) -> str:
+    """The person's new mail, filed as read, the same as `operator inbox`."""
+    page("Inbox. Messages shown here are now marked read. Esc goes back.",
+         _captured(actions.inbox, [], render), keys, render)
+    return ""
+
+
+def send_screen(keys, render, actions) -> str:
+    """Pick an operator the person started, then type the message."""
+    while True:
+        rows, found = _list_rows(*actions.base_operators())
+        picked = select("Send a message to an operator you started. Esc goes back.",
+                        rows, keys, render)
+        if picked is None:
+            return ""
+        name = found[picked].name
+        text = ask_text(f"Message to {name}. Enter sends it. Esc goes back.",
+                        keys, render)
+        if text is not None:
+            return _captured(actions.send, [name, text], render)
+
+
+def log_screen(keys, render, actions) -> str:
+    """Every message in this home, oldest first. Enter opens one."""
+    entries = actions.message_log()
+    rows = [Row(f"{n}. {row}") for n, (row, _) in enumerate(entries, 1)]
+    if not entries:
+        rows.append(Row("(none)", False))
+    while True:
+        picked = select("Message Log, oldest first. Enter shows a whole message. "
+                        "Esc goes back.", rows, keys, render)
+        if picked is None:
+            return ""
+        page(f"Message {picked + 1}. Esc goes back.", entries[picked][1], keys, render)
+
+
 def run(keys, render, actions):
     """0 when the user quits, or a ``Leave`` the caller runs outside raw mode."""
     status = ""
@@ -249,7 +334,7 @@ def run(keys, render, actions):
         if pick is None:
             return 0
         screen = {"start": start_screen, "list": list_screen,
-                  "recover": recover_screen}[pick]
+                  "recover": recover_screen, "messaging": messaging_screen}[pick]
         done = screen(keys, render, actions)
         if isinstance(done, Leave):
             return done

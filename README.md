@@ -19,9 +19,11 @@ operator doctor
 
 `operator` with no arguments opens a menu when stdin and stdout are a terminal. Otherwise it prints help and exits 2.
 
-Up and Down move the highlight. Space toggles a row on the recover screen. Enter confirms. Esc goes back. Esc on the main menu quits. Ctrl-C exits 130 and restores the terminal.
+Up and Down move the highlight, and scroll a list or a message longer than the terminal. Space toggles a row on the recover screen. Enter confirms. Esc goes back. Esc on the main menu quits. Ctrl-C exits 130 and restores the terminal.
 
-The main menu is Start an operator, List operators, Recover operator sessions when any need it, and Quit. When none need recovery, that row says so and selecting it stays on the menu.
+The main menu is Start an operator, List operators, Messaging, Recover operator sessions when any need it, and Quit. Messaging shows how many new messages wait for you, `(0)` included. When none need recovery, that row says so and selecting it stays on the menu.
+
+Messaging has three screens. Inbox shows your new messages and marks them read, as `operator inbox` does. Send a message lists the operators you started, then asks for the text. Message Log lists every message in this home, oldest first: between each operator and its parent or child, and to and from you. Each row has the time it was sent, who sent it, who it went to, whether it is waiting, delivering or delivered, and the start of the text. Enter on a row shows the whole message. A deleted operator's mail is deleted with it.
 
 Start an operator asks for a name, prefilled with the operator already working in this directory or else the directory's name. The name is empty when several operators work here. Enter starts that operator and attaches this terminal to it, or attaches if it is already running. Attach, and Start and attach, on the list screen also leave the menu and take this terminal. Every other action returns you to the screen you came from.
 
@@ -41,6 +43,8 @@ Each menu choice that runs a command calls the same handler as the typed command
 | List operators > NAME > Rename > type NEW > Enter | `operator rename NAME NEW` |
 | List operators > NAME > Delete > y | `operator delete NAME --yes` |
 | Recover operator sessions > Space on each NAME > Enter | `operator recover NAME ...` |
+| Messaging > Inbox | `operator inbox` |
+| Messaging > Send a message > NAME > type TEXT > Enter | `operator send NAME TEXT` |
 
 ### Only on the command line
 
@@ -52,9 +56,7 @@ Each menu choice that runs a command calls the same handler as the typed command
 | `--agent`, any other Copilot option, and a task | The menu asks only for a name. |
 | `--all` | The recover screen has you pick each operator. |
 | `--home` | The menu uses `COPILOT_OPERATOR_HOME`, or `~/.operator` when that is unset. |
-| `--dir` | The menu starts an operator in the directory you stand in. |
-| `operator send` | Mail goes between an operator and its parent or child, and agents send it from their sessions. |
-| `operator inbox` | It prints mail and files it as read, and the menu has no screen for reading text. |
+| `--dir` | A person starts an operator in the directory they stand in. An operator's agent passes `--dir` to start a child in another worktree. |
 | `operator help`, `--help` and `-h` | The menu lists its own choices. |
 
 ### Only in the menu
@@ -62,6 +64,7 @@ Each menu choice that runs a command calls the same handler as the typed command
 | Menu | Why the command line lacks it |
 | --- | --- |
 | Quit | A typed command ends by itself. |
+| Message Log | `operator inbox` prints only the new messages sent to you. Nothing else shows the mail between operators. |
 
 ### Where they behave differently
 
@@ -70,7 +73,9 @@ Each menu choice that runs a command calls the same handler as the typed command
 - Start an operator refuses a name that starts with `-` and asks again. `operator start -x` takes `-x` as a Copilot option and starts this directory's operator. `operator start --name=-x` refuses it as the menu does.
 - The list screen offers Attach and Stop for a running operator, and Start, Start and attach, Rename and Delete for a stopped one. For a running operator, `operator rename` renames it, `operator start NAME --attach` attaches, and `operator start NAME` and `operator delete` refuse. For a stopped operator, `operator attach` refuses and `operator stop` prints "stop requested for NAME" with nothing to stop.
 - `operator list` with no operators says "No operators yet. Start one with: operator start". List operators shows `(none)` under both headings.
-- `operator list` ends by saying how many messages wait for you, when some do. List operators does not say. Read them with `operator inbox`.
+- `operator list` ends by saying how many messages wait for you, when some do. List operators does not say. The main menu shows how many on its Messaging row.
+- Inbox wraps a long message to the width of the terminal. `operator inbox` prints each message on one line.
+- Send a message lists only the operators a person started, because mail goes only between a parent and its child. `operator send` refuses any other.
 - Delete on the list screen asks "Delete? [y/N]" and deletes on the key y or Y. `operator delete NAME` without `--yes` asks the same in a terminal and deletes on y or yes, in any case, then Enter. Without a terminal it exits 2 and says to pass `--yes`.
 - When it cannot read the operators directory, `operator list` says "could not read operators" and exits 1. List operators says so above `(none)` under both headings.
 - `operator recover` with no names lists the operators that need recovering, or says none do. The menu shows how many on its main menu row.

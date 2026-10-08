@@ -88,3 +88,26 @@ def inbox(rest: list[str]) -> int:
     if not read:
         print("No messages.")
     return 0
+
+
+#: What the Message Log calls each state a message can be in.
+STATUS = {"pending": "waiting", "delivering": "delivering", "delivered": "delivered"}
+
+
+def log_rows() -> list:
+    """Every message in this home, oldest first, as (row, detail): one line for
+    the Message Log, and the whole message for when it is opened."""
+    from .entry import _bootstrap
+    _bootstrap()
+    import mail
+    from operators import all_operators
+    names = {op.id: op.name for op in all_operators() or []}
+    rows = []
+    for recipient, state, message in mail.history():
+        sender, to = names.get(message["from"], message["from"]), names.get(recipient, recipient)
+        head = [f"From: {sender}", f"To: {to}", f"Sent: {message['sent']}",
+                f"Status: {STATUS[state]}", ""]
+        rows.append((f"{message['sent']}  {sender} -> {to}  {STATUS[state]}  "
+                     f"{mail.flat(message['text'])}",
+                     "\n".join([*head, *map(mail.flat, message["text"].splitlines())])))
+    return rows
