@@ -69,7 +69,7 @@ Every verb takes `--run <run>`.
 
 ### Scripting an agent
 
-Write the script before the operator starts. The fake finds it by the name in its preamble, `You are operator NAME (ID).`, and reads `artifacts/scripts/NAME.sN.json` for session N, or else `NAME.json`. N counts the fake's launches under NAME. A restart after a stop is the next session, as is the launch after a handoff, and a rename starts the count again at 1. Each step is one JSON object.
+Write the script before the operator starts. The fake finds it by the name in its preamble, `You are operator NAME (ID).`, and reads `artifacts/scripts/NAME.sN.json` for session N, or else `NAME.json`. N counts the fake's launches under NAME. A restart after a stop is the next session, as is the launch after a handoff, and a rename starts the count again at 1. A `NAME.json` that hands off needs a `NAME.s2.json`, or every session runs it again and hands off forever. Each step is one JSON object.
 
 | Step | Effect |
 | --- | --- |
