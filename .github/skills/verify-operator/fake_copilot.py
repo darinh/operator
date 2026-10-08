@@ -17,8 +17,8 @@ At startup it:
 3. Reads its operator name from the preamble's `You are operator NAME (ID).`
 4. Runs the steps in `<run>/artifacts/scripts/NAME.sN.json` for session N, or
    else `NAME.json`. `control_operator.py agent` writes those files.
-5. Reads stdin until it is killed. It appends each line to `stdin.log` and runs
-   every `on` step whose text the line contains.
+5. Reads stdin until it is killed or a line is `/exit`. It appends each line
+   to `stdin.log` and runs every `on` step whose text the line contains.
 
 It writes everything under `<run>/artifacts/agents/NAME/`: `starts.log`,
 `prompt-N.txt`, `commands.log` and `stdin.log`. Those survive `down`.
@@ -154,12 +154,14 @@ class Agent:
         if exe is None:
             self.log("commands.log", f"[{_now()}] $ operator {args!r}\noperator not on PATH")
             return
+        started, clock = _now(), time.monotonic()
         proc = subprocess.run([exe, *args], capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=180,
                               stdin=subprocess.DEVNULL)
+        took = time.monotonic() - clock
         out = (proc.stdout + proc.stderr).rstrip()
-        self.log("commands.log", f"[{_now()}] cwd={os.getcwd()}\n$ operator "
-                 f"{' '.join(args)}\nexit {proc.returncode}\n{out}\n")
+        self.log("commands.log", f"[{started}] cwd={os.getcwd()}\n$ operator "
+                 f"{' '.join(args)}\nexit {proc.returncode} after {took:.1f}s\n{out}\n")
         self.say(f"{out}\nexit {proc.returncode}" if out else f"exit {proc.returncode}")
 
     def listen(self) -> None:
@@ -172,6 +174,9 @@ class Agent:
             line = line.rstrip("\r\n")
             self.log("stdin.log", f"[{_now()}] {line}")
             self.say(f"<< {line}")
+            if line.strip() == "/exit":
+                # What the kernel types to end a session, and Copilot obeys it.
+                sys.exit(0)
             for text, steps in list(self.handlers):
                 if text in line:
                     self.run(steps)

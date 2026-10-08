@@ -185,7 +185,21 @@ def test_a_session_runs_its_script_as_operator_and_logs_it(run, monkeypatch):
     assert [argv for argv, _ in calls] == [["/venv/operator", "list"]]
     assert calls[0][1]["stdin"] is fake.subprocess.DEVNULL
     log = (run / "artifacts" / "agents" / "scout" / "commands.log").read_text("utf-8")
-    assert "$ operator list" in log and "exit 0" in log and "1. scout" in log
+    assert "$ operator list" in log and "1. scout" in log
+    assert "exit 0 after " in log, "a slow verb is invisible without its duration"
+
+
+def test_a_typed_exit_ends_the_session_as_copilot_does(run, monkeypatch):
+    """Stop and handoff type `/exit`. A fake that ignores it makes every stop
+    wait out the kernel's grace period and take the kill path instead."""
+    _script(run, "scout", [{"on": "ping", "do": [{"exit": 3}]}])
+    monkeypatch.setattr(sys, "stdin", io.StringIO("/exit\nping\n"))
+    monkeypatch.setattr(fake.time, "sleep", _never_idle)
+    with pytest.raises(SystemExit) as ended:
+        fake.main(["-i", PREAMBLE])
+    assert ended.value.code == 0
+    lines = (run / "artifacts" / "agents" / "scout" / "stdin.log").read_text("utf-8")
+    assert lines.rstrip().endswith("/exit")
 
 
 def test_each_launch_is_a_new_session_with_its_own_script(run, monkeypatch):
