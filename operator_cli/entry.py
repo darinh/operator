@@ -9,6 +9,7 @@ verb: the menu is for a person at the keyboard.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -65,6 +66,14 @@ def _ask(prompt: str) -> "str | None":
         return None
 
 
+def _me() -> str:
+    """The operator whose agent runs this, or HUMAN, as `operator inbox` decides."""
+    from custody import Agent, caller
+    from operators import HUMAN
+    who = caller(os.getpid())
+    return who.record.id if isinstance(who, Agent) else HUMAN
+
+
 class _Actions:
     """The verbs the menu calls. Screens stay free of this wiring."""
 
@@ -90,30 +99,28 @@ class _Actions:
             return None
         return f"{record.name} already works in {record.cwd}. Choose another name."
 
-    def sections(self, base=False):
-        """Operators as (running, offline, problems). ``base`` keeps only the
-        ones a person started, which are the ones a person may message."""
+    def sections(self, to_message=False):
+        """Operators as (running, offline, problems). ``to_message`` keeps only
+        the ones the caller may message: its parent and its children."""
         import lineage
-        from operators import HUMAN
 
         from .listing import load, sections
         from .menu import Op
         records, problems = load()
-        up = lineage.parents(records or [])
-        kept = [op for op in records or [] if not base or up[op.id] == HUMAN]
+        me = _me() if to_message else None
+        kept = [op for op in records or []
+                if me is None or lineage.may_message(me, op.id, records)]
         running, offline = sections(kept)
         return ([Op(op.name, op.cwd, label, True) for op, label in running],
                 [Op(op.name, op.cwd, label, False) for op, label in offline],
                 problems)
 
-    def base_operators(self):
-        running, offline, _ = self.sections(base=True)
-        return running, offline
+    def recipients(self):
+        return self.sections(to_message=True)
 
     def waiting_count(self) -> int:
         import mail
-        from operators import HUMAN
-        return mail.waiting(HUMAN)
+        return mail.waiting(_me())
 
     start = staticmethod(_start)
     attach = staticmethod(_attach)

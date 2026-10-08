@@ -47,8 +47,8 @@ class Actions:
     def waiting_count(self):
         return len(self.mail)
 
-    def base_operators(self):
-        return list(self.running), list(self.offline)
+    def recipients(self):
+        return list(self.running), list(self.offline), list(self.unreadable)
 
     def send(self, argv):
         self.sent.append(list(argv))
@@ -179,6 +179,17 @@ def test_select_leaves_room_for_the_status_and_the_title(monkeypatch):
            status="note")
     # status, a blank line, two title lines, and the line the cursor rests on
     assert len(board.frames[0]["rows"]) == 10 - 4 - 1
+
+
+def test_multi_select_scrolls_a_list_longer_than_the_terminal(monkeypatch):
+    _terminal(monkeypatch, 80, 8)
+    board = Board()
+    names = [f"op{n}" for n in range(20)]
+    keys = iter(["down"] * 12 + ["space", "up", "enter"])
+    assert multi_select("pick", names, keys, board) == ["op12"]
+    assert max(len(frame["rows"]) for frame in board.frames) == 6
+    toggled = board.frames[-2]
+    assert toggled["rows"][toggled["highlight"]] == "[x] 13. op12"
 
 
 def test_page_wraps_to_the_terminal_and_scrolls_no_further_than_the_end(monkeypatch):
@@ -471,7 +482,7 @@ def test_esc_backs_out_of_every_screen():
     assert actions.recovered == []
     assert titles(["down", "down", "enter", "esc", "esc"]) == [
         "operator", "operator", "operator", "Messaging", "operator"]
-    for item, title in (("Inbox", "Inbox."), ("Send a message", "Send a message to"),
+    for item, title in (("Inbox", "Inbox."), ("Send a message", "Send a message."),
                         ("Message Log", "Message Log,")):
         screen = ["down"] * ["Inbox", "Send a message", "Message Log"].index(item)
         shown = titles(["down", "down", "enter", *screen, "enter", "esc", "esc", "esc"])
