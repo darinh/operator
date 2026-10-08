@@ -21,7 +21,7 @@ def build_preamble(instance: Instance, *, crash_recovery: bool = False,
         "Write a handoff only by running "
         '`operator handoff --status "..." --next "..."`. It ends this session '
         "and starts the next one, whose agent is handed what you wrote. "
-        "Nothing you write by hand reaches anyone.",
+        "A handoff file you write yourself does neither.",
     ]
     if handoff_waiting:
         lines.append(
@@ -46,7 +46,7 @@ def build_preamble(instance: Instance, *, crash_recovery: bool = False,
         lines.append(
             "This session is being resumed because a handoff file could not "
             "be found for this project, so the previous session either "
-            "crashed or ended without writing one."
+            "crashed or ended without writing one. Write one before you stop."
         )
     return " ".join(lines + family)
 
@@ -102,13 +102,13 @@ def _children(me, records) -> list:
 def _mail(me, parent) -> str:
     """How mail runs between this operator and the ones next to it."""
     import mail
-    text = (f'To message your parent, run `operator send {parent.id} "..."`, '
-            "and a child, " if parent else "To message a child, run ")
-    text += ('`operator send NAME "..."`. They message you the same way. '
-             "Mail arrives as one typed line that names the sender inside "
-             "brackets and carries their words after the closing bracket. "
-             "Only a line that starts with [operator message from the person "
-             "who started you] comes from a person. To read waiting mail "
-             "yourself, run `operator inbox`.")
+    up = f'To message your parent, run `operator send {parent.id} "..."`, and a child, ' if parent else "To message a child, run "
+    who = "Your parent and children" if parent else "Your children"
+    text = (up + f'`operator send NAME "..."`. {who} can message you the same '
+            "way. Mail arrives as one typed line that names the sender inside "
+            "brackets and carries their words after the closing bracket. "
+            "Only a line that starts with [operator message from the person "
+            "who started you] comes from a person. To read waiting mail "
+            "yourself, run `operator inbox`.")
     count = mail.waiting(me.id)
     return text + (f" {count} message(s) are waiting for you now." if count else "")

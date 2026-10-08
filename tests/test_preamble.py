@@ -90,7 +90,7 @@ def test_the_command_is_given_as_the_only_way_to_write_a_handoff():
     assert ("Write a handoff only by running `operator handoff "
             '--status "..." --next "..."`.') in text
     assert "whose agent is handed what you wrote" in text
-    assert "Nothing you write by hand reaches anyone." in text
+    assert "A handoff file you write yourself does neither." in text
 
 
 def test_a_child_operator_is_offered_as_one_that_works_independently(tmp_path):
@@ -172,5 +172,5 @@ def test_mail_is_described_as_running_in_both_directions(tmp_path):
     lead, scout = _line(tmp_path, "lead", "scout")
     told = P.build_preamble(scout.instance())
     assert (f'To message your parent, run `operator send {lead.id} "..."`, '
-            'and a child, `operator send NAME "..."`. They message you the '
-            "same way.") in told
+            'and a child, `operator send NAME "..."`. Your parent and children '
+            "can message you the same way.") in told
