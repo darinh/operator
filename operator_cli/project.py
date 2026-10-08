@@ -57,18 +57,21 @@ def _write_rows(catalog: Path, rows: "list[tuple[str, str]]") -> bool:
         return False
 
 
-@contextmanager
-def _catalog_lock():
-    import paths
+class Locked(OSError):
+    """Another operator command held a lock for longer than this one waits."""
 
-    lock = paths.projects_root() / "catalog.lock"
+
+@contextmanager
+def file_lock(lock: Path, what: str, wait: float = 30.0):
+    """Hold ``lock`` against every other operator command. The system lets go
+    when a holder dies, so a crash never leaves it held."""
     lock.parent.mkdir(parents=True, exist_ok=True)
     fh = open(lock, "a+b")
     try:
         if fh.seek(0, os.SEEK_END) == 0:
             fh.write(b"\0")
             fh.flush()
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + wait
         while True:
             try:
                 fh.seek(0)
@@ -81,8 +84,8 @@ def _catalog_lock():
                 break
             except OSError:
                 if time.monotonic() >= deadline:
-                    print("could not lock the project catalog", file=sys.stderr)
-                    raise
+                    print(f"could not lock {what}", file=sys.stderr)
+                    raise Locked(f"could not lock {what}") from None
                 time.sleep(0.05)
         yield
     finally:
@@ -97,6 +100,11 @@ def _catalog_lock():
         except OSError:
             pass
         fh.close()
+
+
+def _catalog_lock():
+    import paths
+    return file_lock(paths.projects_root() / "catalog.lock", "the project catalog")
 
 
 def _resolve(given: "str | None", *, must_exist: bool = True) -> "Path | None":

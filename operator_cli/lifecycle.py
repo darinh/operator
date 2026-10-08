@@ -107,9 +107,6 @@ def start(rest: list[str]) -> int:
         name, words = words[0], words[1:]
     if words or literal[1:]:
         copilot += ["--", *words, *literal[1:]]
-    import operators
-    from supervisor import _spawn_background_loop
-    from supervisor_control import active_instances, launch_status
     who = family.caller("start")
     if who is None:
         return 1
@@ -125,6 +122,14 @@ def start(rest: list[str]) -> int:
             print("pass a name: operator start NAME", file=sys.stderr)
             return 2
         name = default_name(place)
+    return family.in_slot(who, lambda: _launch(
+        who, name, explicit, place, where, attach_now=attach_now, fresh=fresh, copilot=copilot))
+
+
+def _launch(who, name, explicit, place, where, *, attach_now, fresh, copilot) -> int:
+    import operators
+    from supervisor import _spawn_background_loop
+    from supervisor_control import active_instances, launch_status
     record = operators.find(name) if name.strip() else None
     if record is not None and (explicit or _same_cwd(record.cwd, place)):
         if where is not None and not _same_cwd(record.cwd, place):
@@ -178,9 +183,7 @@ def start(rest: list[str]) -> int:
               file=sys.stderr)
         return 1
     print(f"started {record.name} (pid {shown})")
-    if attach_now:
-        return _attach_when_up(record)
-    return 0
+    return _attach_when_up(record) if attach_now else 0
 
 
 def _attach_when_up(record) -> int:

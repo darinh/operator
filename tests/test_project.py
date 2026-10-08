@@ -116,3 +116,17 @@ def test_two_processes_registering_keep_both_rows(tmp_path, monkeypatch):
 def test_project_bootstraps_from_the_shared_home_helper():
     from operator_cli import home, project
     assert project._bootstrap is home._bootstrap
+
+
+def test_a_lock_held_elsewhere_ends_the_wait_saying_what_it_could_not_lock(
+        tmp_path, capsys):
+    import pytest
+    from operator_cli import project
+    lock = tmp_path / "x.lock"
+    with project.file_lock(lock, "the thing"):
+        with pytest.raises(project.Locked):
+            with project.file_lock(lock, "the thing", wait=0.1):
+                pass
+    assert capsys.readouterr().err == "could not lock the thing\n"
+    with project.file_lock(lock, "the thing", wait=0.1):
+        pass

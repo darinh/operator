@@ -112,3 +112,18 @@ def test_list_says_mail_waits_even_when_its_sender_was_deleted(capsys):
         "No operators yet. Start one with: operator start\n"
         "1 message(s) waiting. Read them with: operator inbox\n"
     )
+
+
+def test_an_operator_listing_is_not_told_about_the_persons_mail(
+        tmp_path, monkeypatch, capsys):
+    """An operator's `inbox` reads its own box, so the person's count would
+    send it looking for mail it cannot read."""
+    import mail
+    from test_handoff import _seat
+    alpha = operators.create("alpha", tmp_path)
+    mail.post(operators.HUMAN, {"from": alpha.id, "from_name": "alpha",
+                                "to": operators.HUMAN, "relation": "an operator you started",
+                                "text": "done", "sent": "x"})
+    _seat(monkeypatch, alpha)
+    assert listing.list_instances() == 0
+    assert "waiting" not in capsys.readouterr().out

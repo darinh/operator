@@ -166,7 +166,12 @@ MAX_MODULE_LINES = 603
 #: Python as a child, so the nearest parent ends with the command.
 #: `process_tree.shell` reads image names to step past it. 2815 is the
 #: measured size.
-MAX_KERNEL_CODE_LINES = 2815
+#:
+#: Raised from 2815 to 2825 so a person's `inbox` leaves alone a message another
+#: inbox is reading. `mail.take` stamps the claim when it takes it, and
+#: `requeue_stale` returns only claims older than the caller says. 2825 is the
+#: measured size.
+MAX_KERNEL_CODE_LINES = 2825
 
 #: Per-module code ceiling, the same split applied one file down.
 #: Raised from 325 when the runner records custody beside the pid file.

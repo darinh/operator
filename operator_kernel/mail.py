@@ -17,7 +17,7 @@ import os
 import secrets
 import shutil
 from pathlib import Path
-from time import time_ns
+from time import time, time_ns
 
 from operators import HUMAN
 from probes import log
@@ -61,6 +61,11 @@ def take(recipient: str) -> "tuple[Path, dict] | None":
             os.rename(path, held / path.name)
         except OSError:
             continue
+        try:
+            # A rename keeps the time it was posted. requeue_stale needs the claim's.
+            os.utime(held / path.name)
+        except OSError:
+            pass
         message = _read(held / path.name)
         if message is not None:
             return held / path.name, message
@@ -78,13 +83,22 @@ def requeue(path: Path) -> None:
     _move(path, PENDING)
 
 
-def requeue_stale(recipient: str) -> None:
-    """Put back what a reader claimed and never filed, because it died."""
+def requeue_stale(recipient: str, older_than: float = 0.0) -> None:
+    """Put back what a reader claimed and never filed, because it died. A claim
+    younger than ``older_than`` seconds may still have a live reader."""
     try:
         for path in _messages(box(recipient) / DELIVERING):
-            requeue(path)
+            if _claimed_for(path) >= older_than:
+                requeue(path)
     except OSError as exc:
         log(f"  Could not requeue mail for {recipient}: {exc}")
+
+
+def _claimed_for(path: Path) -> float:
+    try:
+        return time() - path.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def waiting(recipient: str) -> int:

@@ -76,8 +76,9 @@ def inbox(rest: list[str]) -> int:
         return 1
     me = who.record.id if isinstance(who, Agent) else HUMAN
     if me == HUMAN:
-        # No supervisor puts back what a person's interrupted inbox claimed.
-        mail.requeue_stale(me)
+        # No supervisor puts back what a person's interrupted inbox claimed. A
+        # claim under a minute old may be another inbox, still printing it.
+        mail.requeue_stale(me, older_than=60)
     read = 0
     while (claimed := mail.take(me)) is not None:
         path, message = claimed

@@ -85,6 +85,21 @@ def test_requeue_stale_returns_what_was_claimed_and_leaves_what_was_filed():
     assert mail.take(BOX)[1]["text"] == "a"
 
 
+def test_a_claim_is_as_old_as_its_taking_not_its_posting():
+    """A message that waited an hour and was taken a moment ago may still be
+    in its reader's hands, so a threshold on its age must not take it back."""
+    import time
+    mail.post(BOX, _message("old"))
+    posted, = (mail.box(BOX) / mail.PENDING).iterdir()
+    then = time.time() - 3600
+    os.utime(posted, (then, then))
+    mail.take(BOX)
+    mail.requeue_stale(BOX, older_than=60)
+    assert mail.waiting(BOX) == 0 and len(_names(mail.DELIVERING)) == 1
+    mail.requeue_stale(BOX)
+    assert mail.waiting(BOX) == 1
+
+
 def test_delivery_types_each_message_as_one_line_and_files_it():
     op.MUX.sessions[BOX] = {"cwd": "", "argv": [], "remain_on_exit": False, "dead": False}
     mail.post(BOX, _message("first\nsecond"))

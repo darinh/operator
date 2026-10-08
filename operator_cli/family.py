@@ -79,6 +79,23 @@ def cap_problem(who, new: bool) -> "str | None":
     return None
 
 
+def in_slot(who, launch) -> int:
+    """Run launch holding the operators' children lock from counting until the
+    new one is up, so two starts at once cannot both take the last place. A
+    person has no cap and takes no lock."""
+    import config
+    from custody import Agent
+
+    from .project import Locked, file_lock
+    if not isinstance(who, Agent):
+        return launch()
+    try:
+        with file_lock(config.OPERATOR_HOME / "children.lock", "the operators' children"):
+            return launch()
+    except Locked:
+        return 1
+
+
 def place(who, name, attach_now: bool, where) -> "Path | int":
     """Where ``who`` starts an operator, or the exit code after saying why not.
 
