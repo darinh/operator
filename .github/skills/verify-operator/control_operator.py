@@ -180,11 +180,12 @@ def _note(run: Path, text: str) -> None:
 
 
 def _invoke(run: Path, label: str, argv: list, cwd: Path) -> int:
-    # No stdin: a verb that would ask a question takes the no-terminal path
-    # instead of waiting on the caller's console.
+    # An empty pipe, so a verb that would ask a question takes its no-terminal
+    # path. Not DEVNULL: on Windows NUL is a character device, isatty() says
+    # True, and `delete` without --yes prompted and read EOF as No.
     proc = subprocess.run([str(a) for a in argv], cwd=str(cwd), env=_env(run),
                           capture_output=True, encoding="utf-8", errors="replace",
-                          timeout=300, stdin=subprocess.DEVNULL)
+                          timeout=300, input="")
     _record(run, label, argv, proc)
     sys.stdout.write(proc.stdout or "")
     sys.stderr.write(proc.stderr or "")

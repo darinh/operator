@@ -1,72 +1,68 @@
 # operator verification map
 
-This directory is the maintained source for verifying the user-facing behaviour of
-`operator`. Read this index before driving, then use the matching feature file as
-the recipe.
+The map of what a person and an agent can do with `operator`, and how to drive each feature against a disposable run. Read this index first. Then use the matching feature file as the recipe.
 
 ## Baseline preconditions
 
-- Create a disposable instance with `python .github/skills/verify-operator/control_operator.py up`.
-- Keep the printed `run` path. Every later command takes it as `--run <run>`.
-- Run `doctor --run <run>` and require `doctor: healthy` with exit `0`.
-- Never drive the real `~/.operator`. `doctor` asserts the home is elsewhere; if
-  that check ever fails, stop rather than continue.
-- Never drive an instance this run did not create with `up`.
+- Make a run with `control_operator.py up --run-id <id>`. Every later verb takes `--run .verify-operator\<id>`.
+- Drive only after `doctor --run <run>` prints `doctor: healthy` and exits 0.
+- Never drive `~/.operator`, or a run this session did not create.
+- End every run with `down --run <run>`, including a failed one. It must print `down: clean`.
 
 ## Driving conventions
 
-- Start every recipe from a fresh `up` unless its preconditions say otherwise.
-- Pass console-script flags after `--`; they reach the command untouched.
-- Treat every command as literal. Keep quoted text and flags unchanged.
-- Front-door actions go through `control_operator.py operator --run <run> -- <args>`.
-- Give every call a `--label`, because the label names its transcript entry.
-- Do not remove proof artifacts during cleanup. `down` already leaves them.
+- **A person's command** goes through `operator --run <run> -- <verb> ...`, in the scratch project with stdin closed.
+- **An agent's command** is a step in the fake's script, written with `agent` before that operator starts. Only commands run there are agent callers. The harness itself is always a person.
+- **Agent reactions come from handlers.** An agent that should act on a message gets an `{"on": TEXT, "do": [...]}` step. A person's `send` to it is the trigger.
+- **Wait on files, never on sleeps.** Use `wait --file artifacts/agents/NAME/<log> --contains TEXT`. Pick TEXT that appears only in the thing you are waiting for, not in a label.
+- Treat every command in a recipe as literal. Keep quoted text and flags unchanged.
 
-## Proof and skip reporting
+## Proof rules
 
-- Exercise the installed console script, never the Python function behind it.
-- Capture the user action and the resulting on-disk state, not just stdout.
-- Snapshot with `evidence --label <name>` on **both sides** of a mutation; the
-  difference between the two labels is the proof.
-- CLI proof includes the command, stdout, stderr and exit code. `transcript.md`
-  records all four automatically.
-- Report an unreachable path with the attempted command and the unmet
-  precondition. Do not report a skipped entry point as verified via another path.
+- Drive the installed console script, never the Python function behind it.
+- Proof is a command, its exit code, and the state it left. That state lives in `artifacts/transcript.md`, `artifacts/agents/`, `evidence` snapshots and `screen` captures.
+- Snapshot with `evidence --label` on both sides of a change. The difference between the two is the proof.
+- Report a path you could not reach with the command you tried and the precondition that was missing. Never report it as verified through a different path.
 
 ## Feature entry contract
 
-Each feature file starts with an H1 and one paragraph of user-visible behaviour,
-then exactly four H2 sections in this order:
+Each feature file starts with an H1 and one paragraph of user-visible behaviour. Then come exactly four H2 sections, in this order:
 
 1. `Sub-features`. Short IDs, one line each.
-2. `How to get to it (user POV)`. Every user entry point.
-3. `Driving it with control_operator`. Starts with `Preconditions:`, then
-   labelled bullets pairing a user action with an exact command and an observable
-   result.
+2. `How to get to it (user POV)`. Every way a person or an agent reaches it.
+3. `Driving it with control_operator`. Starts with `Preconditions:`, then labelled bullets. Each bullet pairs an action with an exact command and the result to expect.
 4. `Gotchas`. Traps that waste or invalidate a run.
 
-Keep implementation detail out of the map. Name user paths, required state,
-commands and observable proof.
+Name user paths, commands and observable proof. Leave implementation detail to the code.
 
 ## Harness commands
 
-`control_operator.py` has five subcommands and no others.
+| Verb | Use |
+| --- | --- |
+| `up` | Make a run: venv, fake copilot, home, scratch project |
+| `doctor` | Read-only health check |
+| `operator` | Run any `operator` verb as a person |
+| `agent` | Script what an operator's agent runs |
+| `menu` | Open the menu TUI in a session the run owns |
+| `keys` | Press keys in the menu or an operator's pane |
+| `screen` | Save a pane as text |
+| `wait` | Wait for a file, text in a file, or text on a screen |
+| `evidence` | Snapshot the home |
+| `down` | Stop everything, remove the instance, keep the artifacts |
 
-- `up` creates an isolated home and registers the repo.
-- `doctor` is a read-only health check of one run.
-- `operator` runs the `operator` front door. `--cwd` overrides the working directory.
-- `evidence` snapshots home state into artifacts.
-- `down` removes the instance and keeps the artifacts.
+[SKILL.md](../SKILL.md) gives each verb's flags and the script step format.
 
 ## Core features
 
-- [Session handoff](./session-handoff.md). `operator handoff`, the file the next
-  launch announces, the restart marker, and the operator-id key both share.
+- [Lifecycle](./lifecycle.md). Start, list, stop, restart, rename and delete as a person.
+- [Child operators](./child-operators.md). An agent starts children, and the rules on what it may touch: caps, `--dir`, cascade stop, re-homing on delete.
+- [Mail](./mail.md). `send` and `inbox` between a parent and its child, with a person as the parent of each top-level operator.
+- [Menu](./menu.md). The keyboard TUI: start and attach, the operator tree, row actions.
+- [Session handoff](./session-handoff.md). An agent ends its session, and the next one is told what it left.
 
 ## Coverage gaps
 
-None outstanding. The feature this map names is driven against real code.
-
-The one thing this skill still does not drive is the supervisor loop itself
-(`run_loop_mode` and its relaunch behaviour). That needs a multiplexer and a
-stub agent, which is a harness of a different kind rather than a missing recipe.
+- **Real Copilot.** Every recipe uses the fake. What a model does with a preamble, a typed message or a handoff file is out of reach here. One manual run with the real `copilot` is the check for that.
+- **Nested attach.** The harness strips the multiplexer's pane variables, so it cannot see #49: attaching from inside a tmux or psmux pane fails while `operator` exits 0.
+- **Crash recovery.** Nothing here kills a supervisor mid-session, so `operator recover` and the `delivering` requeue are not driven. Only the refusal of `recover` to an agent is.
+- **Linux.** Runs were proven on Windows with psmux. Each Windows-specific step in the harness has a POSIX branch, but no Linux tmux run has been recorded.

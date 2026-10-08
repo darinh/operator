@@ -182,17 +182,12 @@ def test_flags_after_the_separator_reach_the_console_script(monkeypatch, run):
     assert "--" not in seen["argv"]
 
 
-def test_a_verb_never_waits_on_the_callers_console(monkeypatch, run):
-    """`operator delete` asks a question when it has a terminal."""
-    seen = {}
-
-    def spy(argv, **kwargs):
-        seen.update(kwargs)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(control.subprocess, "run", spy)
-    control._invoke(run, "x", ["operator", "list"], run)
-    assert seen["stdin"] is control.subprocess.DEVNULL
+def test_a_verb_sees_no_terminal_and_never_waits_on_the_callers_console(run, capsys):
+    """`operator delete` asks a question when stdin is a terminal. Measured on
+    Windows with DEVNULL: isatty() was True, and delete prompted and exited 1."""
+    probe = [sys.executable, "-c", "import sys; print(sys.stdin.isatty(), sys.stdin.read() == '')"]
+    assert control._invoke(run, "probe", probe, run) == 0
+    assert capsys.readouterr().out.split() == ["False", "True"]
 
 
 def test_the_menu_pane_runs_operator_through_the_runs_environment(monkeypatch, run):

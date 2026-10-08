@@ -65,11 +65,11 @@ Every verb takes `--run <run>`.
 | Wait for something | `wait --run <run> (--file GLOB \| --screen menu\|NAME --contains T) [--contains T] [--timeout S]` |
 | Snapshot the home | `evidence --run <run> --label L` |
 
-`operator` runs the venv's console script in `repo/` with stdin closed, so a verb that would ask a question takes its no-terminal path. Everything after `--` reaches `operator` untouched. Each call lands in `artifacts/transcript.md` with its exit code and both streams.
+`operator` runs the venv's console script in `repo/` with an empty stdin pipe. A verb that would ask a question therefore takes its no-terminal path, as it would in a script. Not `DEVNULL`: on Windows that reads as a terminal. Everything after `--` reaches `operator` untouched. Each call lands in `artifacts/transcript.md` with its exit code and both streams.
 
 ### Scripting an agent
 
-Write the script before the operator starts. The fake finds it by the name in its preamble, `You are operator NAME (ID).`, and reads `artifacts/scripts/NAME.sN.json` for session N, or else `NAME.json`. Each step is one JSON object.
+Write the script before the operator starts. The fake finds it by the name in its preamble, `You are operator NAME (ID).`, and reads `artifacts/scripts/NAME.sN.json` for session N, or else `NAME.json`. N counts the fake's launches under NAME. A restart after a stop is the next session, as is the launch after a handoff, and a rename starts the count again at 1. Each step is one JSON object.
 
 | Step | Effect |
 | --- | --- |
