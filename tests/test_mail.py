@@ -79,6 +79,16 @@ def test_a_post_after_two_overlapping_ones_comes_after_both(monkeypatch):
     assert [message["text"] for _, _, message in mail.history()] == ["a", "b", "c"]
 
 
+def test_a_message_put_back_keeps_its_place_ahead_of_mail_posted_while_it_was_out(monkeypatch):
+    monkeypatch.setattr(mail, "time_ns", lambda: 200)
+    mail.post(BOX, _message("old"))
+    held, _ = mail.take(BOX)
+    monkeypatch.setattr(mail, "time_ns", lambda: 100)
+    mail.post(BOX, _message("new"))
+    mail.requeue(held)
+    assert [mail.take(BOX)[1]["text"] for _ in range(2)] == ["old", "new"]
+
+
 def test_history_with_no_mail_is_empty():
     assert mail.history() == []
 
