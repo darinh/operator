@@ -171,7 +171,11 @@ MAX_MODULE_LINES = 603
 #: inbox is reading. `mail.take` stamps a message as it claims it, and
 #: `requeue_stale` puts back only claims at least as old as its caller says.
 #: 2822 is the measured size.
-MAX_KERNEL_CODE_LINES = 2822
+#:
+#: Raised from 2822 to 2833 so the menu's Message Log can list every message in
+#: the home. `mail.history` reads each box's pending, delivering and delivered
+#: files, oldest first, skipping one it cannot read. 2833 is the measured size.
+MAX_KERNEL_CODE_LINES = 2833
 
 #: Per-module code ceiling, the same split applied one file down.
 #: Raised from 325 when the runner records custody beside the pid file.
