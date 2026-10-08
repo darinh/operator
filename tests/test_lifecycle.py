@@ -284,6 +284,23 @@ def test_delete_keeps_the_project_while_another_checkout_of_it_has_an_operator(
     assert not paths.catalog_guid(primary).guid
 
 
+def test_delete_keeps_the_project_while_an_operator_in_a_removed_checkout_remains(
+        tmp_path, monkeypatch):
+    import subprocess
+    import paths
+    from operator_cli import project
+    primary, linked = _repo_with_worktree(tmp_path)
+    monkeypatch.chdir(primary)
+    assert project.ensure_registered()[0] == 0
+    guid = paths.catalog_guid(primary).guid
+    operators.create("main-seat", primary)
+    operators.create("tree-seat", linked)
+    subprocess.run(["git", "worktree", "remove", str(linked)], cwd=primary, check=True)
+    assert lifecycle.delete(["main-seat", "--yes"]) == 0
+    assert paths.catalog_guid(primary).guid == guid
+    assert paths.project_dir(guid).is_dir()
+
+
 def test_delete_keeps_the_record_when_a_file_cannot_be_removed(
         tmp_path, monkeypatch, capsys):
     import instance as instance_mod

@@ -292,12 +292,16 @@ def delete(rest: list[str]) -> int:
 def _must_keep_project(cwd: str) -> bool:
     import operators
     import paths
+    from presence import dir_present
     others = operators.all_operators()
     failed = operators.unreadable()
     if others is None or failed is None or failed:
         return True
     root = paths.primary_repo_root(Path(cwd))
     for other in others:
+        # A checkout that is gone no longer says which project it was part of.
+        if dir_present(Path(other.cwd)) is not True:
+            return True
         same = _cwd_match(str(paths.primary_repo_root(Path(other.cwd))), root)
         if same is None or same:
             return True
