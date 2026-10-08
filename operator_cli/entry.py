@@ -66,12 +66,16 @@ def _ask(prompt: str) -> "str | None":
         return None
 
 
-def _me() -> str:
-    """The operator whose agent runs this, or HUMAN, as `operator inbox` decides."""
+def _me() -> tuple:
+    """(box, None) for whoever runs this, as `operator inbox` decides: the
+    operator whose agent it is, or HUMAN. (None, why) when that is unknown,
+    where `operator inbox` and `operator send` refuse."""
     from custody import Agent, caller
     from operators import HUMAN
     who = caller(os.getpid())
-    return who.record.id if isinstance(who, Agent) else HUMAN
+    if isinstance(who, str):
+        return None, who
+    return (who.record.id if isinstance(who, Agent) else HUMAN), None
 
 
 class _Actions:
@@ -107,9 +111,13 @@ class _Actions:
         from .listing import load, sections
         from .menu import Op
         records, problems = load()
-        me = _me() if to_message else None
-        kept = [op for op in records or []
-                if me is None or lineage.may_message(me, op.id, records)]
+        kept = records or []
+        if to_message:
+            me, unknown = _me()
+            kept = [op for op in kept
+                    if me is not None and lineage.may_message(me, op.id, records)]
+            if unknown and unknown not in problems:
+                problems.append(unknown)
         running, offline = sections(kept)
         return ([Op(op.name, op.cwd, label, True) for op, label in running],
                 [Op(op.name, op.cwd, label, False) for op, label in offline],
@@ -118,9 +126,11 @@ class _Actions:
     def recipients(self):
         return self.sections(to_message=True)
 
-    def waiting_count(self) -> int:
+    def waiting_count(self) -> "int | str":
+        """New mail for whoever runs the menu, or "?" when that is unknown."""
         import mail
-        return mail.waiting(_me())
+        me, _ = _me()
+        return "?" if me is None else mail.waiting(me)
 
     start = staticmethod(_start)
     attach = staticmethod(_attach)
