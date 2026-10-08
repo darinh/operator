@@ -184,7 +184,10 @@ MAX_MODULE_LINES = 603
 #: Raised from 2834 to 2839 so the log keeps a message a reader moved on while
 #: `history` was listing: it looks for the file in the later states before
 #: dropping it. 2839 is the measured size.
-MAX_KERNEL_CODE_LINES = 2839
+#:
+#: Raised from 2839 to 2840 so `history` lists a message caught in two states
+#: once, from the later. 2840 is the measured size.
+MAX_KERNEL_CODE_LINES = 2840
 
 #: Per-module code ceiling, the same split applied one file down.
 #: Raised from 325 when the runner records custody beside the pid file.

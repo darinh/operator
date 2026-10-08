@@ -76,8 +76,12 @@ CLI = REPO / "operator_cli"
 # as `operator inbox` and `operator send` decide the caller, shows Send's
 # unreadable operators, and scrolls the recover list too. Both are the
 # measured sizes.
-MAX_CLI_CODE_LINES = 1635
-MAX_CLI_TOTAL_LINES = 2104
+#
+# Raised to 1642/2114 so the menu shows (?) for its count and lists no one to
+# message when it cannot tell who runs it, where `operator inbox` and
+# `operator send` refuse. Both are the measured sizes.
+MAX_CLI_CODE_LINES = 1642
+MAX_CLI_TOTAL_LINES = 2114
 
 
 def cli_modules() -> list[Path]:
