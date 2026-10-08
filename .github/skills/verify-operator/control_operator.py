@@ -43,7 +43,7 @@ import tempfile
 import time
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePath
 
 SKILL_DIR = Path(__file__).resolve().parent
 FAKE_SOURCE = SKILL_DIR / "fake_copilot.py"
@@ -584,7 +584,8 @@ def cmd_screen(args) -> int:
 def cmd_wait(args) -> int:
     """Wait for a file under the run, or for text on a screen."""
     run = Path(args.run).expanduser().resolve()
-    if args.file is not None and (not args.file or Path(args.file).is_absolute()):
+    pattern = PurePath(args.file or "")
+    if args.file is not None and (not args.file or pattern.anchor or ".." in pattern.parts):
         raise SystemExit(f"wait: --file takes a pattern under the run, like "
                          f"artifacts/agents/NAME/starts.log, not {args.file!r}")
     deadline = time.monotonic() + args.timeout

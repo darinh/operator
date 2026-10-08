@@ -330,9 +330,17 @@ def _wait(run: Path, **given) -> int:
     return control.cmd_wait(SimpleNamespace(**{**args, **given}))
 
 
-@pytest.mark.parametrize("pattern", ["", "absolute"])
-def test_wait_refuses_a_file_pattern_it_cannot_glob(run, pattern):
-    pattern = str(run / "artifacts" / "x") if pattern else pattern
+ESCAPES = ["", "absolute", "../outside.txt", "artifacts/../../outside.txt"]
+if os.name == "nt":
+    ESCAPES += ["C:outside.txt", "/outside.txt", "\\outside.txt"]
+
+
+@pytest.mark.parametrize("pattern", ESCAPES)
+def test_wait_refuses_a_file_pattern_that_leaves_the_run(run, pattern):
+    """A green wait must mean a file the run made. glob follows `..`, and on
+    Windows a drive or a leading slash makes glob raise instead."""
+    (run.parent / "outside.txt").write_text("SECRET-OUTSIDE", encoding="utf-8")
+    pattern = str(run / "artifacts" / "x") if pattern == "absolute" else pattern
     with pytest.raises(SystemExit, match="--file"):
         _wait(run, file=pattern)
 
