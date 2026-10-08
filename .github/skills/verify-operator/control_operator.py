@@ -677,10 +677,11 @@ def cmd_down(args) -> int:
     art = _artifacts(run)
     art.mkdir(parents=True, exist_ok=True)
     report.append(f"artifacts kept at {art}")
-    (art / "down.txt").write_text(f"{_utcnow()}\n" + "\n".join(report) + "\n",
-                                  encoding="utf-8")
+    verdict = f"down: {'FAILED' if failed else 'clean'}"
+    with (art / "down.txt").open("a", encoding="utf-8") as out:
+        out.write(f"{_utcnow()}\n" + "\n".join(report) + f"\n{verdict}\n\n")
     print("\n".join(report))
-    print("down:", "FAILED" if failed else "clean")
+    print(verdict)
     return 1 if failed else 0
 
 

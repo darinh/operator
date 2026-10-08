@@ -439,6 +439,19 @@ def test_teardown_fails_when_anything_but_the_fake_was_launched(run):
     assert real in report
 
 
+def test_a_second_down_keeps_the_first_reports_failure(run):
+    """down is idempotent, so it gets run twice. The first report is the proof."""
+    restart = run / "home" / "restart"
+    restart.mkdir(parents=True)
+    (restart / "op-a.runner.log").write_text(
+        "2026-01-01 launching: C:\\real\\copilot.exe -i hello\n", encoding="utf-8")
+    assert control.cmd_down(SimpleNamespace(run=str(run))) == 1
+    assert control.cmd_down(SimpleNamespace(run=str(run))) == 0
+    report = (run / "artifacts" / "down.txt").read_text("utf-8")
+    assert "FAIL a copilot other than the fake was launched" in report
+    assert report.index("down: FAILED") < report.index("down: clean")
+
+
 def test_teardown_accepts_launches_of_the_fake(run):
     restart = run / "home" / "restart"
     restart.mkdir(parents=True)
