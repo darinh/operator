@@ -111,7 +111,7 @@ def test_operator_never_learns_it_runs_inside_a_pane(run, monkeypatch):
     assert not {k.upper() for k in env} & set(control.PANE_VARIABLES)
 
 
-def test_no_session_server_keeps_a_warm_server_in_the_run(run):
+def test_the_child_environment_turns_the_warm_server_off(run):
     """A warm server holds its start directory open, and `down` then cannot
     remove the run. Measured: without the variable the directory stayed locked."""
     assert control._env(run)["PSMUX_NO_WARM"] == "1"
@@ -148,10 +148,17 @@ def test_a_directory_outside_a_checkout_is_refused(tmp_path):
 # ── what the harness drives ──────────────────────────────────────────────
 
 
-def test_doctor_checks_both_scripts_a_run_installs():
+def test_doctor_fails_a_run_whose_copilot_is_not_the_venvs(run, monkeypatch, capsys):
     """A run that resolves `operator` but not `copilot` launches a real one."""
-    assert set(control.DRIVEN_SCRIPTS) == {"operator", "copilot"}
-    assert 'copilot = "fake_copilot:main"' in control.FAKE_PYPROJECT
+    exe = control._venv_exe(run, "operator")
+    exe.parent.mkdir(parents=True, exist_ok=True)
+    exe.write_bytes(b"")
+    os.chmod(exe, 0o755)
+    monkeypatch.setenv("PATH", "")
+    assert control.main(["doctor", "--no-mux", "--run", str(run)]) == 1
+    out = capsys.readouterr().out
+    assert "PASS  operator resolves to the run's venv" in out
+    assert "FAIL  copilot resolves to the run's venv" in out
 
 
 def test_the_front_door_runs_the_venvs_operator_in_the_scratch_project(monkeypatch, run):
@@ -208,7 +215,7 @@ def test_the_menu_pane_runs_operator_through_the_runs_environment(monkeypatch, r
     assert env["PATH"].split(os.pathsep)[0] == str(control._scripts_dir(run))
 
 
-def test_the_menu_pane_outlives_operator_so_its_last_screen_can_be_read(
+def test_exec_hold_stays_open_after_operator_exits_and_says_its_code(
         monkeypatch, run, capsys):
     """Without the hold, a menu that quits or attaches takes its session with it."""
     class Held(Exception):
@@ -231,6 +238,25 @@ def test_exec_without_hold_returns_operators_exit_code(monkeypatch, run):
     assert control.main(["exec", "--run", str(run)]) == 3
 
 
+def test_menu_again_replaces_the_held_pane(monkeypatch, run):
+    """Every attach leaves the old pane open. The next `menu` must not need a
+    multiplexer command typed by hand, which a tmux host spells differently."""
+    live, calls = {"vo-test"}, []
+
+    def mux(args, env=None, cwd=None):
+        calls.append(args[0])
+        if args[0] == "kill-session":
+            live.discard(args[-1])
+        if args[0] == "new-session":
+            live.add("vo-test")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(control, "_has_session", lambda s: s in live)
+    monkeypatch.setattr(control, "_mux_run", mux)
+    assert control.main(["menu", "--run", str(run)]) == 0
+    assert calls == ["kill-session", "new-session"]
+
+
 def test_a_target_is_the_menu_or_an_operator_by_name_or_id(run):
     _record_operator(run, "op-11111111", "lead")
     assert control._session(run, "menu") == "vo-test"
@@ -238,6 +264,45 @@ def test_a_target_is_the_menu_or_an_operator_by_name_or_id(run):
     assert control._session(run, "op-11111111") == "op-11111111"
     with pytest.raises(SystemExit):
         control._session(run, "nobody")
+
+
+def _wait(run: Path, **given) -> int:
+    args = dict(run=str(run), file=None, screen=None, contains=None, timeout=0)
+    return control.cmd_wait(SimpleNamespace(**{**args, **given}))
+
+
+@pytest.mark.parametrize("pattern", ["", "absolute"])
+def test_wait_refuses_a_file_pattern_it_cannot_glob(run, pattern):
+    pattern = str(run / "artifacts" / "x") if pattern else pattern
+    with pytest.raises(SystemExit, match="--file"):
+        _wait(run, file=pattern)
+
+
+def test_a_file_that_cannot_be_read_yet_is_not_found_yet(run, monkeypatch):
+    """The supervisor deletes restart markers as it consumes them, and Windows
+    refuses to read a file that is pending delete."""
+    (run / "artifacts" / "gone.txt").write_text("x", encoding="utf-8")
+
+    def vanished(self, *args, **kwargs):
+        raise FileNotFoundError(self)
+
+    monkeypatch.setattr(control.Path, "read_text", vanished)
+    assert _wait(run, file="artifacts/gone.txt") == 1
+
+
+def test_waiting_on_an_operator_outlasts_its_record_appearing(run, monkeypatch):
+    """A fake's start step records the child after the wait began."""
+    polls = []
+
+    def capture(session):
+        polls.append(session)
+        return "steps done, listening"
+
+    monkeypatch.setattr(control, "_capture", capture)
+    monkeypatch.setattr(control.time, "sleep",
+                        lambda seconds: _record_operator(run, "op-44444444", "scout"))
+    assert _wait(run, screen="scout", contains="steps done", timeout=30) == 0
+    assert polls == ["op-44444444"]
 
 
 # ── agent scripts ────────────────────────────────────────────────────────
@@ -391,6 +456,34 @@ def test_teardown_spares_the_caller_and_its_ancestors(run):
     assert [p["pid"] for p in control._ours(processes, run, 11)] == [20]
 
 
+def test_teardown_claims_only_its_own_run_directory(run):
+    """Run ids share prefixes. This skill's own proof used demo and demo-menu2.
+    A person reading the kept proof in an editor is not the run's either."""
+    sibling = run.parent / (run.name + "-menu2")
+    processes = [
+        {"pid": 20, "ppid": 5, "text": f"{run / 'venv' / 'python.exe'} -m runner"},
+        {"pid": 21, "ppid": 5, "text": f'python control_operator.py exec --run "{run}"'},
+        {"pid": 22, "ppid": 5, "text": f"python control_operator.py exec --run {run}"},
+        {"pid": 30, "ppid": 5, "text": f"{sibling / 'venv' / 'python.exe'} -m runner"},
+        {"pid": 31, "ppid": 5, "text": f"python x.py {run}2"},
+        {"pid": 40, "ppid": 5, "text": f"code {run / 'artifacts' / 'transcript.md'}"},
+    ]
+    assert [p["pid"] for p in control._ours(processes, run, 99)] == [20, 21, 22]
+
+
+def test_down_refuses_a_directory_up_did_not_make(tmp_path, monkeypatch):
+    """`down --run .` from the checkout would otherwise kill whatever names it
+    and remove its venv."""
+    (tmp_path / "venv").mkdir()
+    killed = []
+    monkeypatch.setattr(control, "_processes",
+                        lambda: [{"pid": 20, "ppid": 5, "text": f"python {tmp_path}"}])
+    monkeypatch.setattr(control.os, "kill", lambda pid, sig: killed.append(pid))
+    with pytest.raises(SystemExit, match="no run at"):
+        control.cmd_down(SimpleNamespace(run=str(tmp_path)))
+    assert killed == [] and (tmp_path / "venv").is_dir()
+
+
 def test_teardown_kills_what_outlived_stop_and_fails(run, monkeypatch):
     leftover = {"pid": 20, "ppid": 5, "text": f"python runner.py {run}"}
     killed = []
@@ -420,9 +513,13 @@ def test_addressing_a_run_that_was_never_created_is_refused(tmp_path):
         control._meta(tmp_path / "nope")
 
 
-@pytest.mark.parametrize("verb", ["cmd_operator", "cmd_exec"])
+@pytest.mark.parametrize("verb", ["cmd_operator", "cmd_exec", "cmd_keys", "cmd_screen",
+                                  "cmd_wait"])
 def test_driving_a_run_after_down_is_refused_not_a_traceback(run, verb):
+    _record_operator(run, "op-11111111", "lead")
     control.cmd_down(SimpleNamespace(run=str(run)))
     with pytest.raises(SystemExit, match="is down"):
-        getattr(control, verb)(SimpleNamespace(run=str(run), cwd=None, rest=["list"],
-                                               label=None, hold=False))
+        getattr(control, verb)(SimpleNamespace(
+            run=str(run), cwd=None, rest=["list"], label="x", hold=False,
+            target="lead", text=None, keys=["Enter"], file=None, screen="lead",
+            contains="x", timeout=0))

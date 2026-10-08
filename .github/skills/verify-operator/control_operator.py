@@ -33,6 +33,7 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 import shutil
 import signal
 import stat
@@ -237,17 +238,33 @@ def _records(run: Path) -> list[dict]:
 
 def _session(run: Path, target: str) -> str:
     """`menu`, or an operator's name or id, as a multiplexer session name."""
+    session = _find_session(run, target)
+    if session is None:
+        raise SystemExit(f"no operator named {target!r} in this run, and it is not `menu`")
+    return session
+
+
+def _find_session(run: Path, target: str) -> str | None:
+    meta = _meta(run)
     if target == "menu":
-        return _meta(run)["menu_session"]
+        return meta["menu_session"]
     for record in _records(run):
         if target in (record.get("id"), record.get("name")):
             return record["id"]
-    raise SystemExit(f"no operator named {target!r} in this run, and it is not `menu`")
+    return None
 
 
 def _capture(session: str) -> str | None:
     proc = _mux_run(["capture-pane", "-p", "-t", session])
     return proc.stdout if proc.returncode == 0 else None
+
+
+def _read_if_there(path: Path) -> str | None:
+    """A file's text, or None while it is a directory, gone, or still locked."""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
 
 
 # ── processes the run started ────────────────────────────────────────────
@@ -280,17 +297,19 @@ def _processes() -> list[dict]:
 def _ours(processes: list[dict], run: Path, me: int) -> list[dict]:
     """Processes that name the run directory, less this one and its ancestors.
 
-    The run id is unique, so nothing the run did not start names its directory,
-    except the shell that ran this command, which is an ancestor.
+    A name counts only as a whole path, so run `demo` never claims `demo2`, and
+    only outside `artifacts`, which a person may have open to read the proof.
+    The shell that ran this command names the run too, and is an ancestor.
     """
     parent = {p["pid"]: p["ppid"] for p in processes}
     spared, pid = set(), me
     while pid and pid not in spared:
         spared.add(pid)
         pid = parent.get(pid)
-    needle = os.path.normcase(str(run))
+    names = re.compile(re.escape(os.path.normcase(str(run)))
+                       + r"(?![^\\/\"'\s])(?![\\/]artifacts(?:[\\/\"'\s]|$))")
     return [p for p in processes
-            if p["pid"] not in spared and needle in os.path.normcase(p["text"])]
+            if p["pid"] not in spared and names.search(os.path.normcase(p["text"]))]
 
 
 def _launches_outside(run: Path) -> list[str]:
@@ -500,8 +519,8 @@ def cmd_menu(args) -> int:
     meta = _meta(run)
     session = meta["menu_session"]
     if _has_session(session):
-        print(f"menu: session {session} is already open", file=sys.stderr)
-        return 2
+        _mux_run(["kill-session", "-t", session])
+        print(f"menu: closed the old {session} first")
     pane = [sys.executable, str(Path(__file__).resolve()), "exec", "--hold",
             "--run", str(run)]
     proc = _mux_run(["new-session", "-d", "-s", session, "-x", "160", "-y", "50",
@@ -550,18 +569,21 @@ def cmd_screen(args) -> int:
 def cmd_wait(args) -> int:
     """Wait for a file under the run, or for text on a screen."""
     run = Path(args.run).expanduser().resolve()
+    if args.file is not None and (not args.file or Path(args.file).is_absolute()):
+        raise SystemExit(f"wait: --file takes a pattern under the run, like "
+                         f"artifacts/agents/NAME/starts.log, not {args.file!r}")
     deadline = time.monotonic() + args.timeout
     last = ""
     while True:
         if args.file:
             matches = sorted(run.glob(args.file))
-            texts = [m.read_text(encoding="utf-8", errors="replace")
-                     for m in matches if m.is_file()]
+            texts = [text for text in map(_read_if_there, matches) if text is not None]
             last = f"{len(matches)} match(es) for {args.file}"
             hit = bool(texts) and (not args.contains
                                    or any(args.contains in t for t in texts))
         else:
-            last = _capture(_session(run, args.screen)) or ""
+            session = _find_session(run, args.screen)
+            last = (_capture(session) if session else None) or ""
             hit = args.contains in last
         if hit:
             print(f"wait: found after {args.timeout - (deadline - time.monotonic()):.1f}s")
@@ -599,9 +621,11 @@ def cmd_evidence(args) -> int:
 def cmd_down(args) -> int:
     """Stop and remove what the run started. Idempotent. Keeps the artifacts."""
     run = Path(args.run).expanduser().resolve()
+    if not (run / "run.json").exists():
+        raise SystemExit(f"no run at {run}, so down has nothing to remove. "
+                         "--run takes one run directory that `up` made.")
     report, failed = [], False
-    meta = json.loads((run / "run.json").read_text(encoding="utf-8")) \
-        if (run / "run.json").exists() else {}
+    meta = json.loads((run / "run.json").read_text(encoding="utf-8"))
     records = _records(run)
 
     operator = _venv_exe(run, "operator")
