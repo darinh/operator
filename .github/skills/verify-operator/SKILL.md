@@ -126,7 +126,7 @@ Proof is a command, its exit code and the on-disk state it left. Stdout alone is
 python .github/skills/verify-operator/control_operator.py down --run <run>
 ```
 
-Run it after every run, and after every failed one. It stops every recorded operator, kills the run's psmux sessions and the menu's, takes an `at-down` snapshot, and removes everything but `artifacts/` and `run.json`. It is idempotent.
+Run it after every run, and after every failed one. It stops every recorded operator, kills the run's psmux sessions and the menu's, takes an `at-down` snapshot, and removes everything but `artifacts/` and `run.json`. It is idempotent. Every verb that drives the run then refuses with `is down`, while `wait --file`, `evidence` and `doctor` still read what is left. Start the next with a new `--run-id`.
 
 It prints `down: clean` and exits 0, or prints `FAILED` and exits 1 when any of these happened:
 

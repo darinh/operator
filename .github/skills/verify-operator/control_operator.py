@@ -466,6 +466,7 @@ def cmd_exec(args) -> int:
     exit code, so the last screen of a menu that quit or attached can be read.
     """
     run = Path(args.run).expanduser().resolve()
+    _meta(run)
     code = subprocess.call([str(_venv_exe(run, "operator")), *args.rest], env=_env(run))
     if not args.hold:
         return code

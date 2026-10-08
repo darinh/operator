@@ -420,8 +420,9 @@ def test_addressing_a_run_that_was_never_created_is_refused(tmp_path):
         control._meta(tmp_path / "nope")
 
 
-def test_driving_a_run_after_down_is_refused_not_a_traceback(run):
+@pytest.mark.parametrize("verb", ["cmd_operator", "cmd_exec"])
+def test_driving_a_run_after_down_is_refused_not_a_traceback(run, verb):
     control.cmd_down(SimpleNamespace(run=str(run)))
     with pytest.raises(SystemExit, match="is down"):
-        control.cmd_operator(SimpleNamespace(run=str(run), cwd=None, rest=["list"],
-                                             label=None))
+        getattr(control, verb)(SimpleNamespace(run=str(run), cwd=None, rest=["list"],
+                                               label=None, hold=False))
