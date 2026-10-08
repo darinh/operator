@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 
 IS_WINDOWS = os.name == "nt"
@@ -203,7 +203,7 @@ def shell(chain: "list[int]") -> int:
     if not chain:
         return 0
     table = (_win_table() or {}) if IS_WINDOWS else {}
-    launcher = Path(sys.argv[0]).stem.lower() + ".exe"
+    launcher = PureWindowsPath(sys.argv[0]).stem.lower() + ".exe"
     for at, pid in enumerate(chain[:-1]):
         name = table.get(pid, (0, ""))[1].lower()
         if name == launcher:
