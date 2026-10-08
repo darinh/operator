@@ -362,6 +362,31 @@ def test_wait_does_not_follow_a_link_out_of_the_run(run):
     assert _wait(run, file="artifacts/**/proof.txt") == 1
 
 
+def _named(run: Path, verb: str, text: str):
+    calls = {
+        "agent": lambda: control.cmd_agent(SimpleNamespace(
+            run=str(run), name=text, session=None, steps=[])),
+        "screen": lambda: control.cmd_screen(SimpleNamespace(
+            run=str(run), target="menu", label=text)),
+        "evidence": lambda: control.cmd_evidence(SimpleNamespace(run=str(run), label=text)),
+        "up": lambda: control.cmd_up(SimpleNamespace(root=str(run.parent), run_id=text)),
+    }
+    return calls[verb]()
+
+
+@pytest.mark.parametrize("verb", ["agent", "screen", "evidence", "up"])
+@pytest.mark.parametrize("text", ESCAPES)
+def test_a_name_that_would_leave_its_directory_is_refused(run, verb, text):
+    """A script name, a label and a run id each become a path under the run,
+    or under --root for a run id, so each is held to wait --file's rule."""
+    if verb == "up" and text == "":
+        pytest.skip("an empty --run-id asks up to make one")
+    text = str(run.parent / "sib") if text == "absolute" else text
+    with pytest.raises(SystemExit, match=f"^{verb}: "):
+        _named(run, verb, text)
+    assert sorted(p.name for p in run.parent.iterdir()) == ["run"]
+
+
 def test_a_file_that_cannot_be_read_yet_is_not_found_yet(run, monkeypatch):
     """The supervisor deletes restart markers as it consumes them, and Windows
     refuses to read a file that is pending delete."""
