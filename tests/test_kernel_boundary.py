@@ -148,7 +148,13 @@ MAX_MODULE_LINES = 603
 #: tells an agent from a person, `operators` stores the parent, and the new
 #: `lineage.py` reads the tree from records with no I/O. 2621 is the measured
 #: size.
-MAX_KERNEL_CODE_LINES = 2621
+#:
+#: Raised from 2621 to 2670 when operators started children. `config` reads the
+#: two caps, `paths` lists a repository's worktrees for `--dir`, stop marks a
+#: whole subtree before it waits on any of it, and the preamble tells an
+#: operator its parent, its children and how to start and stop them. 2670 is
+#: the measured size.
+MAX_KERNEL_CODE_LINES = 2670
 
 #: Per-module code ceiling, the same split applied one file down.
 #: Raised from 325 when the runner records custody beside the pid file.

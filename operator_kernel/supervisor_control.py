@@ -80,6 +80,20 @@ def _request_supervisor_stop(instance: Instance,
         remove_file(instance.stop_marker)
 
 
+def stop_all(instances: list) -> None:
+    """Stop several supervisors together: every marker first, then every wait.
+
+    Waiting on one before marking the next would leave the rest running for
+    up to a whole stop budget each, and a parent's agent could start another
+    child in that time.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    for inst in instances:
+        inst.stop_marker.touch()
+    with ThreadPoolExecutor(max_workers=max(1, len(instances))) as pool:
+        list(pool.map(_request_supervisor_stop, instances))
+
+
 def _records() -> list:
     found = operators.all_operators()
     return [] if found is None else found

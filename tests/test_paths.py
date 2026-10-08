@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 import paths
@@ -114,3 +115,28 @@ def test_a_usable_operator_name_still_resolves_under_handoff(tmp_path, monkeypat
     found = paths.project_handoff_file(stored, "a-b-69f664")
     assert found.name == "a-b-69f664.md"
     assert found.parent.name == "handoff"
+
+
+def test_worktree_roots_lists_every_checkout_with_the_primary_first(tmp_path):
+    from test_lifecycle import _repo_with_worktree
+    primary, linked = _repo_with_worktree(tmp_path)
+    (linked / "deeper").mkdir()
+    want = [primary.resolve(), linked.resolve()]
+    for start in (primary, linked, linked / "deeper"):
+        assert [root.resolve() for root in paths.worktree_roots(start)] == want
+        assert paths.primary_repo_root(start).resolve() == primary.resolve()
+
+
+def test_outside_a_repository_there_are_no_worktree_roots(tmp_path):
+    assert paths.worktree_roots(tmp_path) is None
+    assert paths.worktree_roots(tmp_path / "missing") is None
+    assert paths.primary_repo_root(tmp_path) == tmp_path
+
+
+def test_a_worktree_path_with_spaces_comes_back_whole(tmp_path):
+    from test_lifecycle import _repo_with_worktree
+    primary, _ = _repo_with_worktree(tmp_path)
+    spaced = tmp_path / "two  words"
+    subprocess.run(["git", "-C", str(primary), "worktree", "add", "-q", "--detach", str(spaced)],
+                   check=True, capture_output=True)
+    assert spaced.resolve() in [root.resolve() for root in paths.worktree_roots(primary)]

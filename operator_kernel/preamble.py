@@ -48,4 +48,39 @@ def build_preamble(instance: Instance, *, crash_recovery: bool = False,
             "ended without the handoff being written. If you intended to end the "
             "session, please make sure you write a handoff first next time."
         )
-    return " ".join(lines)
+    return " ".join(lines + _family(instance))
+
+
+def _shown(record) -> str:
+    # A backtick in a name would open a span that reads as a command.
+    return f"{record.name.replace('`', chr(39))} ({record.id})"
+
+
+def _family(instance: Instance) -> list:
+    """Who started this operator, whom it started, and how to start more."""
+    import config
+    import lineage
+    import operators
+    records = operators.all_operators() or []
+    me = next((op for op in records if op.id == instance.id), None)
+    if me is None:
+        return []
+    up = lineage.parents(records)[me.id]
+    parent = next((op for op in records if op.id == up), None)
+    kids = lineage.children(me.id, records)
+    lines = [f"You are operator {_shown(me)}. "
+             + (f"Operator {_shown(parent)} started you and is your parent."
+                if parent else "A person started you.")
+             + (f" Your children are {', '.join(map(_shown, kids))}." if kids else "")]
+    if lineage.depth(me.id, records) < config.max_depth():
+        lines.append(
+            "To start a child operator that works in your checkout, run "
+            '`operator start NAME "..."`. To give it a git worktree of this '
+            "project instead, create the worktree with git, then run "
+            '`operator start NAME --dir PATH "..."`. Starting a stopped child '
+            "by name restarts it.")
+    else:
+        lines.append("You are as deep as operators may go, so you cannot start children.")
+    lines.append("To stop a child and every operator under it, run "
+                 "`operator stop NAME`. To see them all, run `operator list`.")
+    return lines

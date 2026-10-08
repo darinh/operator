@@ -191,3 +191,17 @@ def test_recover_bootstraps_from_the_shared_home_helper():
     from operator_cli import home, recover
     assert recover._bootstrap is home._bootstrap
     assert recover._settle_home is home._settle_home
+
+
+def test_an_operator_may_list_but_not_bring_anyone_back(cli, capsys, monkeypatch, tmp_path):
+    import operators
+    from test_handoff import _seat
+    cli["listed"].append(_operator("alpha"))
+    _seat(monkeypatch, operators.create("lead", tmp_path))
+    assert recover.main([]) == 0
+    assert "alpha" in capsys.readouterr().out
+    assert recover.main(["--all"]) == 2
+    assert recover.main(["alpha"]) == 2
+    assert cli["recovered"] == []
+    assert capsys.readouterr().err.splitlines() == [
+        "operator recover: only a person can do this, not an operator"] * 2

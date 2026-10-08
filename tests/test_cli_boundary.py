@@ -55,8 +55,11 @@ CLI = REPO / "operator_cli"
 # which project it was. Both are the measured sizes.
 # Raised to 1320/1694 when start records who asked for an operator and list
 # draws each child under its parent. Both are the measured sizes.
-MAX_CLI_CODE_LINES = 1320
-MAX_CLI_TOTAL_LINES = 1694
+# Raised to 1427/1828 when an operator may act only on its own children, within
+# two caps, and start learned --dir. The rules live in the new family.py so
+# lifecycle.py stays under the per-module ceiling. Both are the measured sizes.
+MAX_CLI_CODE_LINES = 1427
+MAX_CLI_TOTAL_LINES = 1828
 
 
 def cli_modules() -> list[Path]:

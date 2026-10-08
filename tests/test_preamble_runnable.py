@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import shlex
+from pathlib import Path
 
 import op
 
@@ -275,3 +276,47 @@ def test_a_quoted_executable_is_still_a_command():
     for span in ('"handoff.exe"', "'handoff.exe'", '".\\handoff.exe"',
                  "handoff.EXE"):
         assert _commands(f"run `{span}` now"), span
+
+
+def test_every_command_for_children_the_preamble_advertises_runs(monkeypatch, tmp_path):
+    """Seated as alpha, start a child here, one in a worktree, list, stop."""
+    import json
+    import subprocess
+    import operators
+    import process_identity
+    import process_tree
+    import supervisor
+    import supervisor_control
+    work, linked = tmp_path / "work", tmp_path / "linked"
+    work.mkdir()
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    for args in (["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "x"],
+                 ["worktree", "add", "-q", str(linked)]):
+        subprocess.run(git + args, cwd=work, check=True)
+    found = [c for c in _commands(_launch_preamble(monkeypatch, tmp_path))
+             if re.match(r"operator (start|stop|list)\b", c)]
+    starts = [c for c in found if c.startswith("operator start")]
+    rest = [c for c in found if c not in starts]
+    assert len(starts) == 2 and len(rest) == 2, found
+    alpha = operators.find(OPERATOR)
+    pid, token = 424242, "win:100"
+    op.Instance(alpha.id).custody_file.write_text(
+        json.dumps({"pid": pid, "start": token, "session": 1}), encoding="utf-8")
+    monkeypatch.setattr(process_tree, "ancestry", lambda _pid: [pid])
+    monkeypatch.setattr(process_identity, "process_start_token",
+                        lambda asked: token if asked == pid else None)
+    monkeypatch.setattr(supervisor, "_spawn_background_loop", lambda *a, **k: 41)
+    monkeypatch.setattr(supervisor_control, "launch_status",
+                        lambda inst, pid, **k: ("ready", pid))
+    monkeypatch.chdir(tmp_path)
+    for template in starts:
+        child = "ranger" if "--dir" in template else "scout"
+        filled = template.replace("NAME", child).replace("PATH", linked.as_posix())
+        assert _run(filled) == 0, f"the preamble advertises `{template}`"
+    for name, where in (("scout", work), ("ranger", linked)):
+        record = operators.find(name)
+        assert record.parent == alpha.id, name
+        assert Path(record.cwd).resolve() == where.resolve(), name
+    for template in rest:
+        assert _run(template.replace("NAME", "scout")) == 0, (
+            f"the preamble advertises `{template}`")

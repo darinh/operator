@@ -427,6 +427,10 @@ def _no_real_operator_home():
     saved = {name: getattr(op, name) for name in names}
     had_env = "COPILOT_OPERATOR_HOME" in os.environ
     saved_env = os.environ.get("COPILOT_OPERATOR_HOME")
+    # A developer who raised the caps for their own operators must not move
+    # what the tests see.
+    caps = {name: os.environ.pop(name, None)
+            for name in ("OPERATOR_MAX_CHILDREN", "OPERATOR_MAX_DEPTH")}
 
     sandbox = Path(tempfile.mkdtemp(prefix="op-test-home-"))
     op.OPERATOR_HOME = sandbox
@@ -442,6 +446,11 @@ def _no_real_operator_home():
             os.environ["COPILOT_OPERATOR_HOME"] = saved_env
         else:
             os.environ.pop("COPILOT_OPERATOR_HOME", None)
+        for name, value in caps.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
         for name, value in saved.items():
             setattr(op, name, value)
         shutil.rmtree(sandbox, ignore_errors=True)
