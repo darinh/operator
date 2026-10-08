@@ -92,7 +92,7 @@ def test_the_delete_step_is_stated(operator):
     """
     text = _preamble(operator, handoff_waiting="/tmp/h.md",
                      handoff_written="2026-08-15T21:06:21Z")
-    assert "deletes a handoff" in text
+    assert "then delete it" in text
 
 
 def test_an_unreadable_timestamp_still_announces_the_handoff(operator):
@@ -319,7 +319,7 @@ def test_the_loop_tells_a_session_about_its_waiting_handoff(
     # is how `handoff_unknown` was found missing.
     written = op._written_at(handoff)
     assert written and written in preamble
-    assert "deletes a handoff" in preamble
+    assert "then delete it" in preamble
 
 
 def test_the_loop_tells_a_session_when_nobody_could_look(monkeypatch, tmp_path):

@@ -10,7 +10,7 @@ import pytest
 import operators
 from operator_cli import lifecycle
 
-PREAMBLE_HEAD = "You are running unattended under the operator supervisor"
+PREAMBLE_HEAD = "This is an unattended operator-managed session, created by a person."
 
 
 @pytest.fixture

@@ -187,7 +187,14 @@ MAX_MODULE_LINES = 603
 #:
 #: Raised from 2839 to 2840 so `history` lists a message caught in two states
 #: once, from the later. 2840 is the measured size.
-MAX_KERNEL_CODE_LINES = 2840
+#:
+#: Raised from 2840 to 2841 when the preamble started saying whether a person
+#: or an agent created the session, that `operator handoff` is the only thing
+#: that writes a handoff, and that a child works independently. The prose it
+#: replaced was longer, so the rendered text shrank; the extra line is the
+#: tuple `_family` now returns, which makes one lookup feed both the opening
+#: sentence and the child commands. 2841 is the measured size.
+MAX_KERNEL_CODE_LINES = 2841
 
 #: Per-module code ceiling, the same split applied one file down.
 #: Raised from 325 when the runner records custody beside the pid file.
