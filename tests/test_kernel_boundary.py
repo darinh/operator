@@ -180,7 +180,11 @@ MAX_MODULE_LINES = 603
 #: stamps past the newest message in any box, not just the recipient's pending
 #: folder, which let two messages sent in one coarse Windows tick to different
 #: boxes swap places. `history` shares the walk. 2834 is the measured size.
-MAX_KERNEL_CODE_LINES = 2834
+#:
+#: Raised from 2834 to 2839 so the log keeps a message a reader moved on while
+#: `history` was listing: it looks for the file in the later states before
+#: dropping it. 2839 is the measured size.
+MAX_KERNEL_CODE_LINES = 2839
 
 #: Per-module code ceiling, the same split applied one file down.
 #: Raised from 325 when the runner records custody beside the pid file.
