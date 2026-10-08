@@ -63,6 +63,22 @@ def test_history_keeps_the_order_of_mail_sent_within_one_clock_tick(monkeypatch)
     assert [message["text"] for _, _, message in mail.history()] == ["one", "two", "three"]
 
 
+def test_a_post_after_two_overlapping_ones_comes_after_both(monkeypatch):
+    stamps = iter([100, 200, 50])
+
+    def clock():
+        # Post "b" lands whole while "a" is between reading and filing.
+        stamp = next(stamps)
+        if stamp == 100:
+            mail.post(HUMAN, _message("b", to=HUMAN))
+        return stamp
+
+    monkeypatch.setattr(mail, "time_ns", clock)
+    mail.post(BOX, _message("a"))
+    mail.post(BOX, _message("c"))
+    assert [message["text"] for _, _, message in mail.history()] == ["a", "b", "c"]
+
+
 def test_history_with_no_mail_is_empty():
     assert mail.history() == []
 

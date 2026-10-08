@@ -37,27 +37,16 @@ def box(recipient: str) -> Path:
 
 def post(recipient: str, message: dict) -> None:
     """File ``message`` for ``recipient``, whole or not at all, after every
-    message posted before it in this home, even within one tick of a coarse
-    clock."""
+    message filed before it in this home, even within one tick of a coarse
+    clock. Posts that overlap can tie, and either order is true of them."""
     folder = box(recipient) / PENDING
     folder.mkdir(parents=True, exist_ok=True)
-    name = f"{_stamp():020d}-{secrets.token_hex(4)}.json"
+    newest = max((int(path.name[:20]) for path in _every_message()
+                  if path.name[:20].isdigit()), default=0)
+    name = f"{max(time_ns(), newest + 1):020d}-{secrets.token_hex(4)}.json"
     tmp = folder.parent / f"{name}.tmp"
     tmp.write_text(json.dumps(message), encoding="utf-8")
     os.replace(tmp, folder / name)
-
-
-def _stamp() -> int:
-    """Later than the last stamp this home handed out. Posts that overlap can
-    tie, and either order is true of them."""
-    clock = box(HUMAN).parent / "clock"
-    try:
-        last = int(clock.read_text(encoding="ascii"))
-    except (OSError, ValueError):
-        last = 0
-    stamp = max(time_ns(), last + 1)
-    clock.write_text(str(stamp), encoding="ascii")
-    return stamp
 
 
 def take(recipient: str) -> "tuple[Path, dict] | None":
@@ -118,16 +107,19 @@ def waiting(recipient: str) -> int:
 def history() -> list:
     """Every readable message in every box as (recipient, state, message),
     oldest first."""
+    return [(path.parent.parent.name, path.parent.name, message)
+            for path in sorted(_every_message(), key=lambda path: path.name)
+            if (message := _read(path)) is not None]
+
+
+def _every_message() -> list:
     import config
     try:
         boxes = sorted((config.OPERATOR_HOME / "mail").iterdir())
     except OSError:
         return []
-    found = sorted((path.name, folder.name, state, path) for folder in boxes
-                   for state in (PENDING, DELIVERING, DELIVERED)
-                   for path in _messages(folder / state))
-    return [(recipient, state, message) for _, recipient, state, path in found
-            if (message := _read(path)) is not None]
+    return [path for folder in boxes for state in (PENDING, DELIVERING, DELIVERED)
+            for path in _messages(folder / state)]
 
 
 def forget(recipient: str) -> bool:

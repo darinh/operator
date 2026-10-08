@@ -176,11 +176,11 @@ MAX_MODULE_LINES = 603
 #: the home. `mail.history` reads each box's pending, delivering and delivered
 #: files, oldest first, skipping one it cannot read. 2833 is the measured size.
 #:
-#: Raised from 2833 to 2840 so that order holds across boxes. `mail._stamp`
-#: keeps one last stamp for the home; the per-box scan it replaced let two
-#: messages sent in one coarse Windows tick to different boxes swap places.
-#: 2840 is the measured size.
-MAX_KERNEL_CODE_LINES = 2840
+#: Raised from 2833 to 2834 so that order holds across boxes. `mail.post`
+#: stamps past the newest message in any box, not just the recipient's pending
+#: folder, which let two messages sent in one coarse Windows tick to different
+#: boxes swap places. `history` shares the walk. 2834 is the measured size.
+MAX_KERNEL_CODE_LINES = 2834
 
 #: Per-module code ceiling, the same split applied one file down.
 #: Raised from 325 when the runner records custody beside the pid file.
