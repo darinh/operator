@@ -592,7 +592,7 @@ def cmd_wait(args) -> int:
     last = ""
     while True:
         if args.file:
-            matches = sorted(run.glob(args.file))
+            matches = [m for m in sorted(run.glob(args.file)) if m.resolve().is_relative_to(run)]
             texts = [text for text in map(_read_if_there, matches) if text is not None]
             last = f"{len(matches)} match(es) for {args.file}"
             hit = bool(texts) and (not args.contains

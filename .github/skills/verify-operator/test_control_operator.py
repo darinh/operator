@@ -345,6 +345,23 @@ def test_wait_refuses_a_file_pattern_that_leaves_the_run(run, pattern):
         _wait(run, file=pattern)
 
 
+def test_wait_does_not_follow_a_link_out_of_the_run(run):
+    """A pattern can stay inside the run while a junction or symlink it
+    matches through points outside it."""
+    outside = run.parent / "elsewhere"
+    outside.mkdir()
+    (outside / "proof.txt").write_text("SECRET-OUTSIDE", encoding="utf-8")
+    link = run / "artifacts" / "out"
+    if os.name == "nt":
+        import _winapi
+        _winapi.CreateJunction(str(outside), str(link))
+    else:
+        os.symlink(outside, link, target_is_directory=True)
+    assert (link / "proof.txt").read_text(encoding="utf-8") == "SECRET-OUTSIDE"
+    assert _wait(run, file="artifacts/out/proof.txt") == 1
+    assert _wait(run, file="artifacts/**/proof.txt") == 1
+
+
 def test_a_file_that_cannot_be_read_yet_is_not_found_yet(run, monkeypatch):
     """The supervisor deletes restart markers as it consumes them, and Windows
     refuses to read a file that is pending delete."""
