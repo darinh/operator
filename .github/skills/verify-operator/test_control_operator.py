@@ -418,3 +418,10 @@ def test_teardown_stops_every_operator_the_run_recorded(run, monkeypatch):
 def test_addressing_a_run_that_was_never_created_is_refused(tmp_path):
     with pytest.raises(SystemExit):
         control._meta(tmp_path / "nope")
+
+
+def test_driving_a_run_after_down_is_refused_not_a_traceback(run):
+    control.cmd_down(SimpleNamespace(run=str(run)))
+    with pytest.raises(SystemExit, match="is down"):
+        control.cmd_operator(SimpleNamespace(run=str(run), cwd=None, rest=["list"],
+                                             label=None))

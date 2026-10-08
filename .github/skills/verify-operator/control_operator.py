@@ -138,6 +138,9 @@ def _meta(run: Path) -> dict:
     path = run / "run.json"
     if not path.exists():
         raise SystemExit(f"no run at {run}; create one with `up` first")
+    if not (run / "venv").is_dir():
+        raise SystemExit(f"{run} is down, so nothing is left to drive; "
+                         "start another with `up --run-id NEW`")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
