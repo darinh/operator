@@ -17,7 +17,8 @@ At startup it:
 3. Reads its operator name from the preamble's `You are operator NAME (ID).`
    A name that is not one plain name, the rule `control_operator.py` holds
    script names to, is replaced by the ID, so a name like `../x` cannot lead
-   the files below out of the run.
+   the files below out of the run. Such an operator's first session has no
+   script, because its ID did not exist before `start` made it.
 4. Runs the steps in `<run>/artifacts/scripts/NAME.sN.json` for session N, or
    else `NAME.json`. `control_operator.py agent` writes those files.
 5. Reads stdin until it is killed or a line is `/exit`. It appends each line

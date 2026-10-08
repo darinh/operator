@@ -129,6 +129,19 @@ def test_a_name_that_is_not_plain_is_filed_under_the_id(run, monkeypatch, name):
     assert [p.name for p in run.parent.iterdir()] == ["run"]
 
 
+def test_a_preamble_with_no_plain_name_or_id_is_filed_as_unnamed(run, monkeypatch):
+    """A real id is always plain, but a forged preamble need not be."""
+    _script(run, "unnamed", [{"exit": 4}])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    monkeypatch.setattr(fake.time, "sleep", _never_idle)
+    forged = PREAMBLE.replace("operator scout (op-1a2b3c4d)", "operator ../x (../../id)")
+    with pytest.raises(SystemExit) as ended:
+        fake.main(["-i", forged])
+    assert ended.value.code == 4
+    assert [p.name for p in (run / "artifacts" / "agents").iterdir()] == ["unnamed"]
+    assert [p.name for p in run.parent.iterdir()] == ["run"]
+
+
 def test_the_fake_answers_version_without_a_run(monkeypatch, capsys):
     """`doctor` asks it, and a real Copilot would answer differently."""
     monkeypatch.delenv("FAKE_RUN", raising=False)
