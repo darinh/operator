@@ -12,8 +12,8 @@
 - `list-count` a person's `list` ends with the waiting count. An agent's `list` never shows it.
 - `edges-only` every other pair refuses, and nothing is written.
 - `length` 4000 characters arrive intact. 4001 refuse.
-- `flatten` control characters, newlines and tabs included, become spaces. Everything else arrives as typed.
-- `queued` mail to a stopped operator stays pending and is typed into its next session, once.
+- `flatten` anything Python does not count as printable becomes a space: control characters, newlines, tabs, and separators such as a non-breaking space. Leading and trailing spaces are dropped. Everything else arrives as typed.
+- `queued` mail to a stopped operator stays pending and is typed into its next session. It arrived once in every run measured. The kernel promises at least once, so a supervisor that dies between typing and filing a message types it again.
 
 ## How to get to it (user POV)
 

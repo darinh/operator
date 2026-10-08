@@ -15,6 +15,7 @@ The map of what a person and an agent can do with `operator`, and how to drive e
 - **An agent's command** is a step in the fake's script, written with `agent` before that operator starts. Only commands run there are agent callers. The harness itself is always a person.
 - **Agent reactions come from handlers.** An agent that should act on a message gets an `{"on": TEXT, "do": [...]}` step. A person's `send` to it is the trigger.
 - **Wait on files, never on sleeps.** Use `wait --file artifacts/agents/NAME/<log> --contains TEXT`. Pick TEXT that appears only in the thing you are waiting for, not in a label.
+- **Paths are shown as Windows prints them.** Recipes were measured on Windows, so screens and outputs show `<run>\repo`. On Linux or macOS expect `/`. `--file` patterns use `/` everywhere.
 - Treat every command in a recipe as literal. Keep quoted text and flags unchanged.
 
 ## Proof rules
@@ -49,6 +50,7 @@ Name user paths, commands and observable proof. Leave implementation detail to t
 | `wait` | Wait for a file, text in a file, or text on a screen |
 | `evidence` | Snapshot the home |
 | `down` | Stop everything, remove the instance, keep the artifacts |
+| `exec` | Hidden. Run `operator` in this console with the run's environment. `menu` runs it in the pane. |
 
 [SKILL.md](../SKILL.md) gives each verb's flags and the script step format.
 
@@ -66,3 +68,5 @@ Name user paths, commands and observable proof. Leave implementation detail to t
 - **Nested attach.** The harness strips the multiplexer's pane variables, so it cannot see #49: attaching from inside a tmux or psmux pane fails while `operator` exits 0.
 - **Crash recovery.** Nothing here kills a supervisor mid-session, so `operator recover` and the `delivering` requeue are not driven. Only the refusal of `recover` to an agent is.
 - **Linux.** Runs were proven on Windows with psmux. Each Windows-specific step in the harness has a POSIX branch, but no Linux tmux run has been recorded.
+- **The product's `operator doctor`.** The harness's `doctor` checks the run. No recipe drives the product's own `operator doctor`.
+- **Start options.** `start --fresh`, `--agent` and other flags `start` hands to Copilot are not driven. The fake reads only the prompt, so it cannot show which flags reached it.

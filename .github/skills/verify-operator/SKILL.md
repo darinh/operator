@@ -67,6 +67,8 @@ Every verb takes `--run <run>`.
 
 `operator` runs the venv's console script in `repo/` with an empty stdin pipe. A verb that would ask a question therefore takes its no-terminal path, as it would in a script. Not `DEVNULL`: on Windows that reads as a terminal. Everything after `--` reaches `operator` untouched. Each call lands in `artifacts/transcript.md` with its exit code and both streams.
 
+`wait --file` takes a glob relative to the run, like `artifacts/agents/lead/stdin.log`. `wait --screen NAME` keeps polling until NAME's record exists, so it can be started before the operator is.
+
 ### Scripting an agent
 
 Write the script before the operator starts. The fake finds it by the name in its preamble, `You are operator NAME (ID).`, and reads `artifacts/scripts/NAME.sN.json` for session N, or else `NAME.json`. N counts the fake's launches under NAME. A restart after a stop is the next session, as is the launch after a handoff, and a rename starts the count again at 1. A `NAME.json` that hands off needs a `NAME.s2.json`, or every session runs it again and hands off forever. Each step is one JSON object.
@@ -126,7 +128,7 @@ Proof is a command, its exit code and the on-disk state it left. Stdout alone is
 python .github/skills/verify-operator/control_operator.py down --run <run>
 ```
 
-Run it after every run, and after every failed one. It stops every recorded operator, kills the run's psmux sessions and the menu's, takes an `at-down` snapshot, and removes everything but `artifacts/` and `run.json`. It is idempotent. Every verb that drives the run then refuses with `is down`, while `wait --file`, `evidence` and `doctor` still read what is left. Start the next with a new `--run-id`.
+Run it after every run, and after every failed one. It stops every recorded operator, kills the run's psmux sessions and the menu's, takes an `at-down` snapshot, and removes everything but `artifacts/` and `run.json`. It is idempotent, and it refuses a directory `up` did not make. Every verb that drives the run then refuses with `is down`, while `wait --file`, `evidence` and `doctor` still read what is left. Start the next with a new `--run-id`.
 
 It prints `down: clean` and exits 0, or prints `FAILED` and exits 1 when any of these happened:
 
@@ -134,14 +136,14 @@ It prints `down: clean` and exits 0, or prints `FAILED` and exits 1 when any of 
 - A runner launched anything but the fake.
 - A directory could not be removed.
 
-`artifacts/down.txt` keeps the report.
+`artifacts/down.txt` keeps every report, each ending with its verdict, so a second `down` cannot hide a failed first one.
 
 ## Gotchas
 
 - **Mail takes about 10 seconds a hop.** A supervisor types waiting mail on its poll, and only once its session has a session id. Use `wait --file artifacts/agents/NAME/stdin.log --contains TEXT --timeout 30`, never a fixed sleep.
 - **Stopping waits for the session to end.** `operator stop` returns once the supervisor has gone. With the fake that is a few seconds.
 - **A pane does not inherit `PATH`.** psmux gives it the registry `PATH`. The fake puts the venv back in front, and `menu` runs the TUI through the hidden `exec` verb for the same reason. Never start the TUI in a pane with a bare `operator`.
-- **The menu's pane outlives the menu.** When `operator` quits or finishes an attach, the pane prints `[operator exited N]` and stays until `down`, so the last screen can still be saved. Reopening the menu needs `psmux kill-session -t vo-<run-id>` first.
+- **The menu's pane outlives the menu.** When `operator` quits or finishes an attach, the pane prints `[operator exited N]` and stays until `down`, so the last screen can still be saved. `menu` again closes it and opens a fresh one.
 - **Attach from the menu nests inside its pane.** Start an operator, Attach and Start and attach all show the operator's session in the menu's pane. `keys C-b d` detaches. In a real tmux or psmux pane, psmux refuses that nesting and `operator` still exits 0. That is #49, and this harness cannot see it, because it strips the pane variables.
 - **psmux pre-spawns a warm server** that holds its start directory open. The harness sets `PSMUX_NO_WARM=1` everywhere. A psmux started by hand without it can keep a run directory from being removed.
 - **Handoff works only from inside a session.** It walks process ancestry to the recorded copilot, so `operator --run R -- handoff ...` is refused. Script it as an `op` step instead.
