@@ -155,3 +155,22 @@ def test_a_send_that_cannot_be_written_says_so(monkeypatch, capsys, family):
     assert cli.main(["send", "scout", "hello"]) == 1
     assert capsys.readouterr().err.startswith("could not send: ")
     assert os.path.isfile(mail.box(family["scout"].id))
+
+
+def test_the_message_log_names_each_end_and_shows_a_deleted_one_as_its_id(family):
+    from operator_cli.messaging import log_rows
+    alpha, scout = family["alpha"], family["scout"]
+    mail.post(scout.id, {"from": alpha.id, "from_name": "alpha", "to": scout.id,
+                         "relation": "your parent", "text": "look\naround",
+                         "sent": "2026-01-02T03:04:05Z"})
+    mail.post(HUMAN, {"from": "op-deleted", "from_name": "ghost", "to": HUMAN,
+                      "relation": "an operator you started", "text": "bye",
+                      "sent": "2026-01-02T03:04:06Z"})
+    mail.filed(mail.take(scout.id)[0])
+    flat = mail.flat("look\naround")
+    assert log_rows() == [
+        (f"2026-01-02T03:04:05Z  alpha -> scout  delivered  {flat}",
+         "From: alpha\nTo: scout\nSent: 2026-01-02T03:04:05Z\nStatus: delivered\n\n"
+         "look\naround"),
+        ("2026-01-02T03:04:06Z  op-deleted -> human  waiting  bye",
+         "From: op-deleted\nTo: human\nSent: 2026-01-02T03:04:06Z\nStatus: waiting\n\nbye")]
