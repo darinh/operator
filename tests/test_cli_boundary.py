@@ -80,8 +80,11 @@ CLI = REPO / "operator_cli"
 # Raised to 1642/2114 so the menu shows (?) for its count and lists no one to
 # message when it cannot tell who runs it, where `operator inbox` and
 # `operator send` refuse. Both are the measured sizes.
-MAX_CLI_CODE_LINES = 1642
-MAX_CLI_TOTAL_LINES = 2114
+# Lowered to 1632/2096 when the menu stopped working out who runs it. It
+# serves a person, and an operator's agent uses the typed commands. Both are
+# the measured sizes.
+MAX_CLI_CODE_LINES = 1632
+MAX_CLI_TOTAL_LINES = 2096
 
 
 def cli_modules() -> list[Path]:
