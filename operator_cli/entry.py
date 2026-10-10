@@ -9,7 +9,6 @@ verb: the menu is for a person at the keyboard.
 """
 from __future__ import annotations
 
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -66,18 +65,6 @@ def _ask(prompt: str) -> "str | None":
         return None
 
 
-def _me() -> tuple:
-    """(box, None) for whoever runs this, as `operator inbox` decides: the
-    operator whose agent it is, or HUMAN. (None, why) when that is unknown,
-    where `operator inbox` and `operator send` refuse."""
-    from custody import Agent, caller
-    from operators import HUMAN
-    who = caller(os.getpid())
-    if isinstance(who, str):
-        return None, who
-    return (who.record.id if isinstance(who, Agent) else HUMAN), None
-
-
 class _Actions:
     """The verbs the menu calls. Screens stay free of this wiring."""
 
@@ -104,8 +91,6 @@ class _Actions:
         return f"{record.name} already works in {record.cwd}. Choose another name."
 
     def sections(self, to_message=False):
-        """Operators as (running, offline, problems). ``to_message`` keeps only
-        the ones the caller may message: its parent and its children."""
         import lineage
 
         from .listing import load, sections
@@ -113,11 +98,9 @@ class _Actions:
         records, problems = load()
         kept = records or []
         if to_message:
-            me, unknown = _me()
+            from operators import HUMAN
             kept = [op for op in kept
-                    if me is not None and lineage.may_message(me, op.id, records)]
-            if unknown and unknown not in problems:
-                problems.append(unknown)
+                    if lineage.may_message(HUMAN, op.id, records)]
         running, offline = sections(kept)
         return ([Op(op.name, op.cwd, label, True) for op, label in running],
                 [Op(op.name, op.cwd, label, False) for op, label in offline],
@@ -126,11 +109,10 @@ class _Actions:
     def recipients(self):
         return self.sections(to_message=True)
 
-    def waiting_count(self) -> "int | str":
-        """New mail for whoever runs the menu, or "?" when that is unknown."""
+    def waiting_count(self) -> int:
         import mail
-        me, _ = _me()
-        return "?" if me is None else mail.waiting(me)
+        from operators import HUMAN
+        return mail.waiting(HUMAN)
 
     start = staticmethod(_start)
     attach = staticmethod(_attach)

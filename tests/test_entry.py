@@ -672,28 +672,32 @@ def test_start_problem_refuses_only_a_name_it_cannot_start_here(tmp_path, monkey
     assert actions.start_problem("") == "a name is needed"
 
 
-def test_the_menu_does_not_count_or_pick_for_a_caller_it_cannot_tell(monkeypatch, tmp_path):
+@pytest.mark.parametrize("who", ["person", "agent", "unreadable"])
+def test_the_menu_counts_and_lists_for_the_person_whoever_runs_it(who, monkeypatch, tmp_path):
     import custody
     import mail
     import operators
     from operator_cli.entry import _Actions
-    operators.create("alpha", tmp_path)
-    mail.post(operators.HUMAN, {"from": "x", "from_name": "alpha", "to": operators.HUMAN,
+    alpha = operators.create("alpha", tmp_path)
+    operators.create("scout", tmp_path, parent=alpha.id)
+    mail.post(operators.HUMAN, {"from": alpha.id, "from_name": "alpha", "to": operators.HUMAN,
                                 "relation": "an operator you started", "text": "done",
                                 "sent": "2026-01-02T03:04:05Z"})
-    monkeypatch.setattr(custody, "caller", lambda pid: "could not read the process table")
+    answer = {"person": custody.Human(None), "agent": custody.Agent(alpha, 1, 1),
+              "unreadable": "could not read the process table"}[who]
+    monkeypatch.setattr(custody, "caller", lambda pid: answer)
     actions = _Actions()
-    assert actions.waiting_count() == "?"
-    assert actions.recipients() == ([], [], ["could not read the process table"])
+    assert actions.waiting_count() == 1
+    running, offline, problems = actions.recipients()
+    assert [op.name for op in running + offline] == ["alpha"]
+    assert problems == []
 
 
-def test_a_person_may_pick_an_operator_whose_parent_is_deleted(monkeypatch, tmp_path):
-    import custody
+def test_a_person_may_pick_an_operator_whose_parent_is_deleted(tmp_path):
     import operators
     from operator_cli.entry import _Actions
     operators.create("alpha", tmp_path)
     operators.create("scout", tmp_path, parent="op-deleted")
-    monkeypatch.setattr(custody, "caller", lambda pid: custody.Human(None))
     running, offline, problems = _Actions().recipients()
     assert sorted(op.name for op in running + offline) == ["alpha", "scout"]
     assert problems == []
