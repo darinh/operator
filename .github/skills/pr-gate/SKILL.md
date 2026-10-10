@@ -101,6 +101,12 @@ is the point.
     Enter meant No, and a test asserted exactly that, so the first person to press Enter got
     nothing. `tests/test_surfaces.py` now holds the menu and the command line to the same
     outcomes. It still runs in-process with a fake multiplexer, so it cannot see a real attach.
+13. Does a branch depend on whether stdin is a terminal? Give it the stdin its real caller gets.
+    On Windows `subprocess.DEVNULL` is NUL, which `isatty()` calls a terminal and which reads
+    empty. That is what Copilot's shell hands an agent's command, and it is not what a person's
+    script gets. The verify-operator harness once gave a person's command DEVNULL, so delete
+    prompted where a script's would not. The fake agent uses it on purpose, and that is how #50
+    was found: an agent's `operator delete` asks `Delete? [y/N]` it cannot answer.
 
 ## Merging
 
